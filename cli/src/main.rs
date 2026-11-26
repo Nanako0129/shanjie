@@ -1255,6 +1255,37 @@ fn abbr_syllable(syl: &str, style: Abbr) -> String {
     }
 }
 
+/// The column of a Zhuyin symbol: 0 initial, 1 medial (ㄧㄨㄩ), 2 final. No style types a tone, so there is no fourth column here.
+fn abbr_column(c: char) -> usize {
+    match c {
+        'ㄅ'..='ㄙ' => 0,
+        'ㄧ' | 'ㄨ' | 'ㄩ' => 1,
+        _ => 2,
+    }
+}
+
+/// How the abbreviation composer joins `units` (one per syllable, in typing order), simulated with its rule: a symbol goes into the last
+/// unit's column when that column is empty, otherwise it opens a new unit (docs/spec/prediction.md §6). A merge is the first symbol of a
+/// syllable landing in the unit before it. `None`: no merge; `Some(true)`: every merge is backward (the symbol's column comes before the
+/// last filled column of that unit, as ㄍ after ㄧ in 一個 typed A); `Some(false)`: at least one merge is forward (ㄢ after ㄒㄧ in 西安
+/// typed C). `run_abbr` checks that this predicts exactly the words the engine's composer merges.
+fn abbr_merge_kind(units: &[String]) -> Option<bool> {
+    let (mut filled, mut any, mut forward) = ([false; 3], false, false);
+    for u in units {
+        for (k, c) in u.chars().enumerate() {
+            let col = abbr_column(c);
+            if filled[col] || !filled.iter().any(|&f| f) {
+                filled = [false; 3];
+            } else if k == 0 {
+                any = true;
+                forward |= filled[col + 1..].iter().all(|&f| !f);
+            }
+            filled[col] = true;
+        }
+    }
+    any.then_some(!forward)
+}
+
 /// Greedy longest match, left to right: (start, length, found). `has(start, length)` says whether the lexicon has the characters with the
 /// syllables of that span as one entry. A position where not even the single character is an entry is one piece of length 1, not found.
 fn abbr_segment(n: usize, has: impl Fn(usize, usize) -> bool) -> Vec<(usize, usize, bool)> {
@@ -1344,6 +1375,8 @@ struct AbbrItem {
     keys_abbr: usize,
     /// Style B's offline rank; the outer `None`: not looked up (another style, a stray character, a Zhuyin-letter word, over 10 units).
     b_rank: Option<Option<usize>>,
+    /// For a composer merge (`excl_merged`): `true` when every merge in the word is backward (`abbr_merge_kind`).
+    merge_backward: Option<bool>,
 }
 
 /// Exclusion reasons in the order they are tested (the first that holds counts).
@@ -1387,6 +1420,15 @@ fn abbr_b_summary(items: &[&AbbrItem]) -> String {
     format!("{{'words': {}, 'missing': {}, 'top1': {}, 'top9': {}, 'mrr': {mrr:.4}, 'rank1': {}, 'rank2_9': {}, 'rank10plus': {}}}", ranks.len(), b[3], b[0], b[0] + b[1], b[0], b[1], b[2])
 }
 
+/// `--abbr` cuts a row character by character against its reading, so the two must have the same length. The error names the file and
+/// line and gives both counts, never the row's text.
+fn abbr_row_lengths_match(chars: usize, syllables: usize, file: &str, line: usize) -> Result<(), String> {
+    if chars == syllables {
+        return Ok(());
+    }
+    Err(format!("{file}:{line}: the sentence has {chars} characters but the reading has {syllables} syllables"))
+}
+
 /// `--abbr A|B|C --rows FILE [--rows FILE …] --lm FILE [--abbr-dump FILE]`: how the prediction row ranks each word of the rows when it is
 /// typed abbreviated (A: initials only; B: without the initial; C: without the tone key). Measures only; nothing here changes the engine.
 ///
@@ -1404,6 +1446,9 @@ fn abbr_b_summary(items: &[&AbbrItem]) -> String {
 ///
 /// Output: one line per subset (`all`, the word lengths 1, 2, 3-4, 5-10, and for B the words whose B keys equal their C keys and the others,
 /// each by length too); for B also the offline lines (`abbr_b_sets`, every word with at most 10 syllables and no Zhuyin symbol, merged or not).
+/// A row whose sentence length and syllable count differ stops the run with its file and line (`abbr_row_lengths_match`); so does a
+/// word the composer simulation (`abbr_merge_kind`) and the engine disagree on. The last line, `## merges`, splits the composer merges
+/// into backward-only and has-forward.
 /// `--abbr-dump` writes each measurable word's query and row in the format of `--predict` without the score columns, so
 /// `--predict DUMP --lm … --profile chat --packs acg,it,meme,beauty` must print the same words.
 fn run_abbr(args: &[String]) -> Result<(), String> {
@@ -1430,13 +1475,17 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     if files.is_empty() {
         return Err("--abbr needs --rows".into());
     }
-    let (mut seen, mut rows, mut read) = (std::collections::HashSet::new(), Vec::new(), 0usize);
+    // `origin[k]` is the file and 1-based line of `rows[k]`, so a bad row can be named without printing its text.
+    let (mut seen, mut rows, mut origin, mut read) = (std::collections::HashSet::new(), Vec::new(), Vec::new(), 0usize);
     for f in &files {
         let text = fs::read_to_string(f).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
-        for line in text.lines().filter(|l| l.split('|').count() == 3) {
+        for (n, line) in text.lines().enumerate().filter(|(_, l)| l.split('|').count() == 3) {
             read += 1;
             if seen.insert(line.to_string()) {
-                rows.extend(three_field_rows(line));
+                for r in three_field_rows(line) {
+                    rows.push(r);
+                    origin.push((f.as_str(), n + 1));
+                }
             }
         }
     }
@@ -1451,11 +1500,9 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     let sets = if style == Abbr::B { abbr_b_sets(capped.readings(&lm)) } else { HashMap::new() };
     let mut e = abbr_engine(&lm_path)?;
     let (mut items, mut out, mut bad_rows, mut absent) = (Vec::new(), String::new(), Vec::new(), Vec::new());
-    for (sent, syls, ctx) in &rows {
+    for ((sent, syls, ctx), &(file, line)) in rows.iter().zip(&origin) {
         let chars: Vec<char> = sent.chars().collect();
-        if chars.len() != syls.len() {
-            return Err("a row's sentence and reading differ in length".into());
-        }
+        abbr_row_lengths_match(chars.len(), syls.len(), file, line)?;
         let text = |i: usize, l: usize| chars[i..i + l].iter().collect::<String>();
         for (i, l, found) in abbr_segment(chars.len(), |i, l| capped.entries(&syls[i..i + l]).iter().any(|(w, _)| *w == text(i, l))) {
             let (word, reading) = (text(i, l), &syls[i..i + l]);
@@ -1470,6 +1517,7 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
                 keys_full: reading.iter().map(|s| abbr_syllable(s, Abbr::C).chars().count() + 1).sum(),
                 keys_abbr: units.iter().map(|u| u.chars().count()).sum(),
                 b_rank: None,
+                merge_backward: None,
             };
             item.excluded = if found && word.chars().any(is_zhuyin) {
                 Some(0)
@@ -1486,8 +1534,14 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
                 }
                 let left = format!("{ctx}{}", text(0, i));
                 let (got, row) = abbr_type(&mut e, &left, &units)?;
+                let kind = abbr_merge_kind(&units);
+                // The simulated rule must name exactly the words the engine merges (a word is not printed, only counted).
+                if (got != units) != kind.is_some() {
+                    return Err(format!("{file}:{line}: the composer simulation and the engine disagree on a merge"));
+                }
                 if got != units {
                     item.excluded = Some(3);
+                    item.merge_backward = kind;
                 } else {
                     let u: Vec<Unit> = units.iter().map(|u| Unit { chars: u.chars().collect(), done: false, tone: None }).collect();
                     let mode = if u.len() > 1 { Mode::PA } else { Mode::P };
@@ -1545,6 +1599,10 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
             }
         }
     }
+    // docs/spec/prediction.md §6.1: the composer merges split by kind (the line above stay as they were; this one is added last).
+    let merged: Vec<&AbbrItem> = items.iter().filter(|i| i.excluded == Some(3)).collect();
+    let backward = merged.iter().filter(|i| i.merge_backward == Some(true)).count();
+    println!("## merges  {tag}  {{'merged': {}, 'backward_only': {backward}, 'has_forward': {}}}", merged.len(), merged.len() - backward);
     Ok(())
 }
 
@@ -1822,6 +1880,28 @@ mod tests {
         assert_eq!(without, None);
     }
 
+    /// `--abbr`, ABBR-1: the composer simulation splits merges by kind. 一個 typed A (ㄍ after ㄧ) and 一起 typed C (ㄑ after ㄧ) are backward;
+    /// 西安 typed C (ㄢ after ㄒㄧ) is forward; 答案 typed C does not merge (ㄢ's column is taken by ㄚ); a single syllable never merges.
+    #[test]
+    fn abbr_merge_kind_splits_backward_and_forward_merges() {
+        let u = |s: &str| s.split(' ').map(String::from).collect::<Vec<_>>();
+        assert_eq!(abbr_merge_kind(&u("ㄧ ㄍ")), Some(true));
+        assert_eq!(abbr_merge_kind(&u("ㄧ ㄑㄧ")), Some(true));
+        assert_eq!(abbr_merge_kind(&u("ㄒㄧ ㄢ")), Some(false));
+        assert_eq!(abbr_merge_kind(&u("ㄉㄚ ㄢ")), None);
+        assert_eq!(abbr_merge_kind(&u("ㄍㄨㄛ")), None);
+        // A backward merge then a forward one in the same word counts as forward.
+        assert_eq!(abbr_merge_kind(&u("ㄨ ㄉ ㄢ")), Some(false));
+    }
+
+    /// `--abbr`: a row whose sentence and reading differ in length stops the run with the file and line named and both counts, no text.
+    #[test]
+    fn abbr_names_the_file_and_line_of_a_row_whose_lengths_differ() {
+        assert_eq!(abbr_row_lengths_match(3, 3, "eval/dev/x.txt", 7), Ok(()));
+        let e = abbr_row_lengths_match(4, 3, "eval/dev/x.txt", 7).unwrap_err();
+        assert_eq!(e, "eval/dev/x.txt:7: the sentence has 4 characters but the reading has 3 syllables");
+    }
+
     /// `--abbr`: the rewriting table. The six example words, the neutral tone (dropped wherever it is written) and a word written with
     /// Zhuyin letters (rewritten like any reading; `run_abbr` excludes it by its text).
     #[test]
@@ -1866,6 +1946,7 @@ mod tests {
             let (got, _) = abbr_type(&mut e, "", &units).unwrap();
             assert_eq!(got, want, "{reading} {style:?}");
             assert_eq!(got != units, merged, "{reading} {style:?}: what run_abbr tests");
+            assert_eq!(abbr_merge_kind(&units).is_some(), merged, "{reading} {style:?}: the simulation agrees with the engine");
         }
         let units = vec!["ㄐ".to_string(), "ㄊ".to_string()];
         assert!(abbr_type(&mut e, "", &units).unwrap().1.contains(&"今天".to_string()));
@@ -1906,7 +1987,7 @@ mod tests {
     /// `--abbr`: the four rank buckets add up to the measurable words; top1, top9 and MRR read the row; the reasons add up to the excluded.
     #[test]
     fn abbr_summary_counts() {
-        let item = |excluded, row_rank, full_rank| AbbrItem { len: 2, excluded, b_eq_c: false, row_rank, full_rank, keys_full: 7, keys_abbr: 2, b_rank: Some(full_rank) };
+        let item = |excluded, row_rank, full_rank| AbbrItem { len: 2, excluded, b_eq_c: false, row_rank, full_rank, keys_full: 7, keys_abbr: 2, b_rank: Some(full_rank), merge_backward: None };
         let items = [item(None, Some(1), Some(1)), item(None, Some(4), Some(4)), item(None, None, Some(12)), item(None, None, None), item(Some(1), None, None), item(Some(3), None, None)];
         let refs: Vec<&AbbrItem> = items.iter().collect();
         assert_eq!(
