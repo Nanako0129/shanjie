@@ -47,19 +47,16 @@ R8_LI = [("这位埃里克先生", "這位埃里克先生"), ("他们走了十�
 # docs/spec/models.md §9.10: (a)-(e) of Revision10, Traditional sentences with an S character; (f), (g) are in TwClean
 R10 = {"a": ("他說韋斯咸在这裡", "他說韋斯咸在這裡"), "b": ("人群涌入了廣場，他们說", "人群湧入了廣場，他們說"), "c": ("他住在東涌站附近，他们說", "他住在東涌站附近，他們說"),
        "d": ("他们在這個國家的河邊看見水涌", "他們在這個國家的河邊看見水涌"), "e": ("咸丰年間他们說", "咸豐年間他們說")}
-# docs/spec/models.md §9.3(4): Simplified sentences covering the 7 Step-1 mirrors for shadowed term keys, 12 substring mis-conversion overrides, and 5 re-vetted OpenCC entries (+1 paired guard)
+# docs/spec/models.md §9.3(4): Simplified sentences covering all 33 net new term entries (+1 extra coverage row):
+# 4 Step-1 mirrors, 11 substring overrides, 16 re-vetted/narrowed compounds, and 2 overlap guards
 TERM_FIX_ROWS = [
     ("这个分布式系统很好用", "這個分散式系統很好用"),
     ("分布式计算需要很多电脑", "分散式計算需要很多電腦"),
-    ("这台台式机运行很快", "這台桌上型電腦運行很快"),
     ("所罗门群岛在太平洋", "索羅門群島在太平洋"),
     ("美属维尔京群岛在加勒比海", "美屬維京群島在加勒比海"),
-    ("这组服务器集群很稳定", "這組伺服器叢集很穩定"),
-    ("首批方便面在日本问世", "首批泡麵在日本問世"),
     ("导演亚历杭德罗·冈萨雷斯·伊纳里图获奖了", "導演阿利安卓·崗札雷·伊納利圖獲獎了"),
     ("这家公司设计集成电路", "這家公司設計積體電路"),
     ("他们用视频电话联系", "他們用視訊電話聯繫"),
-    ("这个软件支持音视频录制", "這個軟體支持影音錄製"),
     ("处理器配备高速缓存", "處理器配備快取記憶體"),
     ("通过串行端口连接设备", "通過序列埠連接設備"),
     ("这个错误发生在内核栈", "這個錯誤發生在核心堆疊"),
@@ -69,12 +66,49 @@ TERM_FIX_ROWS = [
     ("系统崩溃时生成内核转储", "系統崩潰時生成記憶體傾印"),
     ("我们可以用二分查找法寻找资料", "我們可以用二分搜尋法尋找資料"),
     ("这个程序加载动态链接库", "這個程序加載動態連結函式庫"),
-    ("电脑突然死机了", "電腦突然當機了"),
     ("这台手机采用触摸屏设计", "這台手機採用觸控螢幕設計"),
+    ("这块触摸屏幕很灵敏", "這塊觸控螢幕很靈敏"),
     ("这家企业提供云计算服务", "這家企業提供雲端運算服務"),
-    ("单向链表是最基础的结构", "單向鏈結串列是最基礎的結構"),
     ("这个课程介绍函数式编程", "這個課程介紹函數式程式設計"),
     ("这是一门函数式编程语言", "這是一門函數式程式語言"),
+    ("系统更新后突然出现蓝屏死机", "系統更新後突然出現藍白當機"),
+    ("这款游戏有时会导致黑屏死机", "這款遊戲有時會導致黑屏當機"),
+    ("刚才操作时电脑死机了", "剛才操作時電腦當機了"),
+    ("更新驱动后系统死机了", "更新驅動後系統當機了"),
+    ("过热会导致手机死机", "過熱會導致手機當機"),
+    ("这个漏洞会让主机死机", "這個漏洞會讓主機當機"),
+    ("单向链表是最基础的结构", "單向鏈結串列是最基礎的結構"),
+    ("双向链表可以前后遍历", "雙向鏈結串列可以前後遍歷"),
+    ("循环链表没有尾节点", "循環鏈結串列沒有尾節點"),
+    ("环形链表适合实现缓冲", "環形鏈結串列適合實現緩衝"),
+    ("块状链表结合了数组优点", "塊狀鏈結串列結合了數組優點"),
+    ("线性链表常用于教学示例", "線性鏈結串列常用於教學示例"),
+    ("静态链表使用数组模拟指针", "靜態鏈結串列使用數組模擬指針"),
+]
+FORBIDDEN_SHORT_TERMS = ("集群", "鏈表", "方便面", "死機", "音視頻", "台式機")
+COUNTEREXAMPLE_ROWS = [
+    ("召集群众", "召集群眾"),
+    ("聚集群众", "聚集群眾"),
+    ("收集群组", "收集群組"),
+    ("密集群落", "密集群落"),
+    ("汇集群书", "彙集群書"),
+    ("产业链表现", "產業鏈表現"),
+    ("供应链表现", "供應鏈表現"),
+    ("区块链表示", "區塊鏈表示"),
+    ("食物链表明", "食物鏈表明"),
+    ("方便面对面", "方便面對面"),
+    ("方便面试官", "方便面試官"),
+    ("方便面向用户", "方便面向用戶"),
+    ("致死机制", "致死機制"),
+    ("致死机率", "致死機率"),
+    ("生死机关", "生死機關"),
+    ("锁死机轮", "鎖死機輪"),
+    ("支持语音视频通话", "支持語音視訊通話"),
+    ("声音视频", "聲音影片"),
+    ("噪音视频", "噪音影片"),
+    ("录音视频", "錄音影片"),
+    ("实时音视频通话", "即時音視訊通話"),
+    ("后台式机制", "後台式機制"),
 ]
 R10_F = "他在韋斯咸，并說他们來了"   # an uncovered 咸 and an uncovered 并 (並 in the old output)
 R10_G = "韋斯咸在咸水湖旁，他们說汹涌的河邊很美"   # an uncovered 咸 and the phrases 咸水湖, 汹涌
@@ -253,6 +287,9 @@ class TermTable(Base):
     # `麪`/`噁`/`戰`/`開` appear under multiple keys (including rare Ext-B simplified variants), so unique-reverse skips them;
     # `像` is itself the Simplified character (`录像`), while STCharacters only lists it under `象`.
     EXTRA_SIMP = {"麪": "面", "像": "像", "噁": "恶", "戰": "战", "開": "开"}
+    # Shadowed base keys whose Step-1 forms (`集群`, `方便面`, `台式机`) have open-ended cross-boundary collisions under
+    # left-to-right longest-match (`集+群眾`, `方便+面對面`, `後+台式+機制`), so they are intentionally kept unmirrored.
+    INTENTIONALLY_UNMIRRORED = {"集羣", "方便麪", "臺式機"}
 
     def test_term_keys_match_mainland_terms_and_are_sorted(self):
         tsv_keys = [l.rstrip("\n").split("\t")[1] for l in open(bc.TW_CONV, encoding="utf-8") if l.startswith("term\t")]
@@ -261,7 +298,7 @@ class TermTable(Base):
         self.assertEqual(ml_keys, tsv_keys, "mainland-terms.txt does not match tw-conv.tsv `term` keys 1:1")
 
     def test_every_term_row_fires_on_simplified_input(self):
-        """Every `term` entry must produce its folded target value when its Simplified form appears in a Simplified sentence."""
+        """Every `term` entry (except INTENTIONALLY_UNMIRRORED) must produce its folded target value on Simplified input."""
         bad = []
         for k, v in sorted(bc.TW_PHRASE.items()):
             simp = "".join(self.EXTRA_SIMP.get(c, self.ck.reverse.get(c, c)) for c in k)
@@ -269,13 +306,26 @@ class TermTable(Base):
             want = v.translate(bc.FOLD_TRANS)
             if got != want:
                 bad.append((k, simp, got, want))
-        self.assertEqual(bad, [], f"{len(bad)} term rows fail to fire on Simplified input: {bad}")
+        self.assertEqual(
+            {k for k, *_ in bad},
+            self.INTENTIONALLY_UNMIRRORED,
+            f"unexpected shadowed/unshadowed term rows: {bad}",
+        )
 
     def test_term_fixes_are_in_simp_table_and_have_simp_kind(self):
         have = dict(simp_rows())
         for s, want in TERM_FIX_ROWS:
             self.assertEqual(have.get(s), want, s)
             self.assertEqual(bc.sentence_kind(s), "simp", s)
+            self.assertEqual(self.ck.convert(s), want, s)
+
+    def test_short_key_counterexamples_stay_intact(self):
+        for k in FORBIDDEN_SHORT_TERMS:
+            self.assertNotIn(k, bc.TW_PHRASE, k)
+        have = dict(simp_rows())
+        for s, want in COUNTEREXAMPLE_ROWS:
+            self.assertEqual(have.get(s), want, s)
+            self.assertIn(bc.sentence_kind(s), ("simp", "marker"), s)
             self.assertEqual(self.ck.convert(s), want, s)
 
 

@@ -1,5 +1,5 @@
 # Mainland terms applied on the Simplified and marker-only paths (docs/spec/models.md §9.3(4)), matching the `term` section of data/lexicon/tw-conv.tsv 1:1.
-# Base set (331 keys): OpenCC TWPhrases keys (2+ characters) whose article count in a public Taiwanese forum snapshot is below 10% of their Taiwan form (source sha256 ff2f54990937e5787e108c13e133e0fa7ad8c0af8d0fae6f94749b55986dccaf), plus 25 curated fixes (7 Step-1 mirrors for shadowed keys, 12 substring mis-conversion overrides, 5 re-vetted OpenCC entries and 1 paired longest-match guard).
+# Base set (331 keys): OpenCC TWPhrases keys (2+ characters) whose article count in a public Taiwanese forum snapshot is below 10% of their Taiwan form (source sha256 ff2f54990937e5787e108c13e133e0fa7ad8c0af8d0fae6f94749b55986dccaf), plus 33 curated fixes (4 Step-1 mirrors for shadowed keys, 11 substring mis-conversion overrides, and 18 re-vetted/narrowed entries including 觸摸屏幕 and 函數式編程語言 overlap guards; 364 total).
 SQL注入攻擊
 U盤
 丁丁當當
@@ -10,6 +10,7 @@ U盤
 串行
 串行端口
 主引導記錄
+主機死機
 乍得
 乙型肝炎
 乙肝
@@ -81,7 +82,6 @@ U盤
 危地馬拉
 原代碼
 可執行文件
-台式機
 吉列爾莫·德爾托羅
 吉布堤
 呼叫轉移
@@ -89,6 +89,7 @@ U盤
 哥斯達黎加
 唐氏綜合徵
 唐氏綜合症
+單向鏈表
 固件
 圖雷特綜合徵
 坦桑尼亞
@@ -97,6 +98,7 @@ U盤
 城域網
 堆棧
 場效應管
+塊狀鏈表
 塑料
 塔吉克斯坦
 塞拉利昂
@@ -146,6 +148,7 @@ U盤
 弗吉尼亞州
 彙編器
 彙編語言
+循環鏈表
 德彪西
 心肌梗死
 快閃存儲器
@@ -155,6 +158,7 @@ U盤
 截屏
 所羅門羣島
 所羅門群島
+手機死機
 打印機
 抑鬱症
 抽動穢語綜合徵
@@ -179,7 +183,6 @@ U盤
 斯洛文尼亞
 斯蒂芬·斯皮爾伯格
 新西蘭
-方便面
 方便麪
 時分複用
 時鐘頻率
@@ -200,7 +203,6 @@ U盤
 模擬電路
 歐萊雅
 歐萊雅集團
-死機
 殺毒
 比特率
 毛里塔尼亞
@@ -223,6 +225,7 @@ U盤
 特立尼達和多巴哥
 獲得性免疫缺陷綜合徵
 瑙魯
+環形鏈表
 甲型肝炎
 甲硫氨酸
 界面
@@ -250,6 +253,7 @@ U盤
 空氣淨化器
 筆記本電腦
 粘貼
+系統死機
 紅心大戰
 紅細胞
 納米
@@ -258,6 +262,7 @@ U盤
 網絡
 網絡棧
 網絡適配器
+線性鏈表
 編程語言
 緩存
 縮略圖
@@ -293,6 +298,7 @@ U盤
 莫桑比克
 萊索托
 萬維網
+藍屏死機
 虛內存
 血紅蛋白
 複選框
@@ -304,6 +310,7 @@ U盤
 視頻通話
 視頻電話
 觸摸屏
+觸摸屏幕
 計算機斷層
 調色板
 調製解調器
@@ -322,7 +329,6 @@ U盤
 錄像
 鏈接
 鏈接庫
-鏈表
 門德爾松
 開市客
 關係數據庫
@@ -333,13 +339,14 @@ U盤
 集成
 集成電路
 集羣
-集群
+雙向鏈表
 雲存儲
 雲計算
+電腦死機
+靜態鏈表
 面向對象
 面向過程
 韋伯恩
-音視頻
 頁眉
 首席信息官
 首席執行官
@@ -354,5 +361,6 @@ U盤
 高速緩存
 黃體酮
 黑客
+黑屏死機
 默認值
 鼠標
