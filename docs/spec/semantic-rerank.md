@@ -66,7 +66,7 @@
 
 模型是 `tools/lib/tinylm.py` 的 `NumpyLM`：pre-LN 解碼器、輸入與輸出共用嵌入、學得的位置嵌入、GELU（tanh 形式，常數 0.7978845608028654 與 0.044715）、因果遮罩、LayerNorm eps 1e-5，f32 計算。
 
-- macOS 的矩陣乘法走 Accelerate（`cblas_sgemm`；tanh、exp 用 vForce），其他平台走可攜路徑（`Backend::Plain`，純 Rust）；兩者的 LL 差小於 1e-5（核心單元測試用隨機權重斷言）。核心除了 Windows 上的 `windows-sys` 沒有外部 crate 相依。`macos/Package.swift` 的 `ShanjieKit` 因此連結 Accelerate framework（Rust 的 `#[link(kind = "framework")]` 不會帶進靜態庫）。
+- Apple 平台（macOS；iOS 只有交叉編譯與模擬器測試）的矩陣乘法走 Accelerate（`cblas_sgemm`；tanh、exp 用 vForce；條件是 `target_vendor = "apple"`，核心單元測試斷言這些平台的預設後端是 Accelerate），其他平台走可攜路徑（`Backend::Plain`，純 Rust）；兩者的 LL 差小於 1e-5（核心單元測試用隨機權重斷言）。核心除了 Windows 上的 `windows-sys` 沒有外部 crate 相依。`macos/Package.swift` 的 `ShanjieKit` 因此連結 Accelerate framework（Rust 的 `#[link(kind = "framework")]` 不會帶進靜態庫）。
 - **可攜路徑的矩陣乘法**（`tinylm.rs` 的 `gemm_kernel`）在每一種 CPU、每一個平台算出逐位元相同的結果：
   - 不轉置的乘法（各層的線性層）：`c[i][j]` 依 `p = 0, 1, …` 的順序各加一次 `a[i][p] * b[p][j]`，乘與加分開做。
   - 轉置的乘法（logits：每個位置對整張嵌入表做內積；向量化之前是單一累加，所以可攜路徑的 LL 和那之前的版本差在 10⁻⁵ 以內、不逐位元相同，同一份 200 列上三種機器量到最大 8.0～9.7×10⁻⁶，選字相同）：內積用 16 個部分和（第 `q` 個元素加進第 `q mod 16` 個），整塊 16 個之後依 16 → 8 → 4 → 2 → 1 合併（第 `l + 一半` 個加進第 `l` 個），不滿 16 個的尾段依序另外加總、最後加上去。

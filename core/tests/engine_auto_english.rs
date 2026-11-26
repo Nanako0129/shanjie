@@ -322,10 +322,10 @@ fn the_data_folder_decides_what_ships() {
 }
 
 /// Python is the baseline (reference/proto/english_score.py --golden): lpE on the fixture table and the lpZ arithmetic, bit for bit. The golden was made on
-/// macOS; Linux's libm differs in the last place, so this runs on the macOS CI only.
+/// macOS; Linux's libm differs in the last place, so this runs on Apple platforms only (the macOS CI, and the iOS simulator run).
 #[test]
 fn scores_match_the_python_golden_bit_for_bit() {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(target_vendor = "apple") {
         return;
     }
     let table = AutoTable::parse(&std::fs::read_to_string(fixture()).unwrap()).unwrap();

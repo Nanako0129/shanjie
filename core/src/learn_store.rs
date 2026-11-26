@@ -49,17 +49,18 @@ pub const MAX_BYTES: u64 = 16 * 1024 * 1024;
 pub const JOURNAL_MAX: usize = 1024;
 
 // <fcntl.h> values (Unix only). std has no names for them and the crate has no libc dependency; the shipping
-// target is macOS only (CI builds and tests core on macOS). The symlink and FIFO tests in
-// core/tests/learn_store.rs fail if a value is wrong.
-#[cfg(target_os = "macos")]
+// target is macOS only (CI builds and tests core on macOS). iOS shares the block (`target_vendor = "apple"`) so the
+// core cross-compiles and its tests run in the iOS simulator; the iOS SDK's sys/fcntl.h and sys/errno.h have the same
+// values. The symlink and FIFO tests in core/tests/learn_store.rs fail if a value is wrong.
+#[cfg(target_vendor = "apple")]
 const O_NOFOLLOW: i32 = 0x0100;
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 const O_NONBLOCK: i32 = 0x0004;
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 const ELOOP: i32 = 62;
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 const F_FULLFSYNC: i32 = 51;
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 const F_BARRIERFSYNC: i32 = 85;
 // Linux values, only so the test suite and the evaluation tools run off the Mac (the Windows box's WSL, x86_64 and Graviton cloud
 // machines); nothing ships for Linux. The same symlink and FIFO tests check them there. O_NOFOLLOW is per architecture: x86_64 takes
@@ -85,7 +86,7 @@ extern "C" {
 /// F_BARRIERFSYNC, else F_FULLFSYNC (docs/spec/learning.md §10.5): orders the data before the rename without waiting for the
 /// drive's cache flush on the key path (Rust's `sync_all` is F_FULLFSYNC on macOS, p99 35 ms in
 /// docs/spec/learning.md §10.5). False when both fail.
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 fn barrier(f: &File) -> bool {
     // SAFETY: a valid open descriptor; neither command takes an argument.
     unsafe { fcntl(f.as_raw_fd(), F_BARRIERFSYNC) != -1 || fcntl(f.as_raw_fd(), F_FULLFSYNC) != -1 }

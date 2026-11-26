@@ -140,22 +140,23 @@ fn valid_params((alpha, tau, delta): (f64, f64, f64)) -> bool {
     alpha.is_finite() && !tau.is_nan() && (0.0..=MAX_DELTA).contains(&delta)
 }
 
-/// How the matrix products and the tanh / exp vectors are computed. `Plain` is the portable path; `Accelerate` is the one used on macOS.
+/// How the matrix products and the tanh / exp vectors are computed. `Plain` is the portable path; `Accelerate` is the one used on Apple
+/// platforms (macOS ships; iOS is cross-compiled and tested in the simulator; Accelerate has the same calls there).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Backend {
     Plain,
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     Accelerate,
 }
 
 impl Backend {
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     pub const DEFAULT: Backend = Backend::Accelerate;
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(target_vendor = "apple"))]
     pub const DEFAULT: Backend = Backend::Plain;
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 #[link(name = "Accelerate", kind = "framework")]
 extern "C" {
     fn cblas_sgemm(
@@ -206,7 +207,7 @@ fn check_gemm(a: &[f32], b: &[f32], c: &[f32], (m, k, n): (usize, usize, usize))
 fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
     check_gemm(a, b, c, (m, k, n));
     match be {
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         Backend::Accelerate => {
             assert!(m.max(k).max(n) < i32::MAX as usize, "gemm: dimension too large");
             // CblasRowMajor 101, CblasNoTrans 111, CblasTrans 112
@@ -513,7 +514,7 @@ mod x86 {
 fn tanh_into(be: Backend, x: &[f32], y: &mut [f32]) {
     assert!(x.len() == y.len() && x.len() < i32::MAX as usize, "tanh: lengths do not match");
     match be {
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         Backend::Accelerate => unsafe { vvtanhf(y.as_mut_ptr(), x.as_ptr(), &(x.len() as i32)) },
         Backend::Plain => y.iter_mut().zip(x).for_each(|(o, v)| *o = v.tanh()),
     }
@@ -523,7 +524,7 @@ fn tanh_into(be: Backend, x: &[f32], y: &mut [f32]) {
 fn exp_into(be: Backend, x: &[f32], y: &mut [f32]) {
     assert!(x.len() == y.len() && x.len() < i32::MAX as usize, "exp: lengths do not match");
     match be {
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         Backend::Accelerate => unsafe { vvexpf(y.as_mut_ptr(), x.as_ptr(), &(x.len() as i32)) },
         Backend::Plain => y.iter_mut().zip(x).for_each(|(o, v)| *o = v.exp()),
     }
@@ -1700,5 +1701,14 @@ mod tests {
                 assert!((x - y).abs() < 1e-5, "int8={int8}: {x} vs {y}");
             }
         }
+    }
+
+    /// Apple platforms (macOS, and iOS for the simulator run) multiply through Accelerate, never the portable path.
+    #[test]
+    fn the_default_backend_is_accelerate_on_apple_platforms() {
+        #[cfg(target_vendor = "apple")]
+        assert_eq!(Backend::DEFAULT, Backend::Accelerate);
+        #[cfg(not(target_vendor = "apple"))]
+        assert_eq!(Backend::DEFAULT, Backend::Plain);
     }
 }

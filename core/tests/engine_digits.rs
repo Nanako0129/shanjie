@@ -134,11 +134,11 @@ fn golden_key(k: &str) -> Key {
 }
 
 /// #49: every scoring call of the engine (the splits, their scores as f64 bits, the pick, the buffer, the flushes, the context) is the
-/// Python baseline's, key by key, on the 31 rows of eval/golden/digits-score.txt. macOS only (Linux's libm differs in the last bit of
-/// log10, as for the other f64 goldens): the Windows machine's WSL skips it, CI's macOS runs it.
+/// Python baseline's, key by key, on the 31 rows of eval/golden/digits-score.txt. Apple platforms only (Linux's libm differs in the last bit of
+/// log10, as for the other f64 goldens): the Windows machine's WSL skips it, CI's macOS and the iOS simulator run it.
 #[test]
 fn row49_scores_match_the_python_golden_bit_for_bit() {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(target_vendor = "apple") {
         return;
     }
     let rows = golden_score();
@@ -592,10 +592,10 @@ fn pred_script(digits: &str, syms: &str) -> String {
     v.join(" ")
 }
 
-/// The core function equals the Python `digit_row` on the 12 situations: words and score bits. macOS only (as #49).
+/// The core function equals the Python `digit_row` on the 12 situations: words and score bits. Apple platforms only (as #49).
 #[test]
 fn predict_digits_matches_the_python_golden_bit_for_bit() {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(target_vendor = "apple") {
         return;
     }
     let s = shared();
@@ -1372,10 +1372,10 @@ fn bits(a: Option<f64>) -> Option<u64> {
 }
 
 /// The `decide` rows of the new golden (the reversal guard on: the column-order split) and the `late_decision` rows, both against Python's bits.
-/// macOS only, like the other f64 goldens.
+/// Apple platforms only, like the other f64 goldens.
 #[test]
 fn reorder_scores_match_the_python_golden_bit_for_bit() {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(target_vendor = "apple") {
         return;
     }
     let rows = golden_rows("digits-reorder.txt");
@@ -1417,7 +1417,7 @@ fn late_inputs_in_the_engine_are_the_golden_rows() {
         assert_eq!((ev.ctx.as_str(), ev.before.as_str(), ev.keys.as_str(), ev.pend.as_str(), ev.closing), (r.ctx.as_str(), r.before.as_str(), r.keys.as_str(), r.pend.as_str(), r.closing), "{at}: inputs");
         assert_eq!((ev.rho, ev.rho_sym), (r.rho, r.rho_sym), "{at}: penalties");
         assert_eq!((ev.result.0, ev.result.1), (r.take, r.merge), "{at}: take, merge");
-        if cfg!(target_os = "macos") {
+        if cfg!(target_vendor = "apple") {
             assert_eq!((bits(ev.result.2), bits(ev.result.3)), (bits(r.s_z), bits(r.s_d)), "{at}: scores");
         }
         seen += 1;
