@@ -51,6 +51,7 @@ import readings  # noqa: E402  萌典路徑
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OUT = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
 DROP = os.path.join(ROOT, "data", "lexicon", "overlay-drop.tsv")   # docs/spec/lexicon-and-packs.md §2.3：審過的錯字寫法（詞、基底的正確寫法、備註），產生的列裡不寫
+TWIN_KEEP = os.path.join(ROOT, "data", "lexicon", "overlay-twin-keep.tsv")   # docs/spec/lexicon-and-packs.md §2.3：台灣正常寫法例外清單（詞、讀音、理由），在簡繁詞組表裡也不拿掉
 MANUAL = os.path.join(ROOT, "data", "lexicon", "overlay-manual.tsv")   # 手動加的詞，接在產生的列後面（來源 manual）
 SANDHI_ADD = os.path.join(ROOT, "data", "lexicon", "sandhi-add.tsv")   # 手動詞補基底詞的讀音時，產生的（讀音, 詞）不能和它的任何一列相同
 SLANG = os.path.join(ROOT, "data", "lexicon", "slang-add.tsv")   # 網路用語（docs/spec/lexicon-and-packs.md §2.10），接在手動詞後面（來源 slang）；沒有這個檔時輸出和以前相同
@@ -303,7 +304,8 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1, 
         rows += lexgap_rows(lexgap, words | {r.split("\t")[1] for r in rows} | other_layers(), length_scores(base), syllables, base.by_reading, fold_w,
                             [r.split("\t")[:2] for r in rows])
     phrase = conv[0] if conv else {}
-    rows, gone = prune(rows, lambda w: phrase_twin(w, phrase, words, moe))   # 整詞的簡體寫法（每個字台灣也用，S2n 的句子判斷看不到）
+    keep = twin_keep_list(words, syllables)
+    rows, gone = prune(rows, lambda w: phrase_twin(w, phrase, words, moe, keep))   # 整詞的簡體寫法（每個字台灣也用，S2n 的句子判斷看不到）
     removed += gone
     rows, gone = prune(rows, drop_list(words).get)   # 審過的錯字寫法
     variant_removed += gone
@@ -326,12 +328,37 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1, 
 
 
 
-def phrase_twin(w, phrase, words, headwords):
-    """docs/spec/lexicon-and-packs.md §2.3：w 整個詞是簡繁詞組表（STPhrases 加 tw-conv.tsv 選定的值）的鍵、值是另一個寫法、那個寫法在基底，而且 w 不是
-    萌典詞目 → 回那個寫法，否則 None。is_simplified 只看字（S 與標記字），「松散」「取舍」「船只」每個字台灣也用，句子判成繁體，表裡的 松散→鬆散 就沒人查。
+def phrase_twin(w, phrase, words, headwords, keep=frozenset()):
+    """docs/spec/lexicon-and-packs.md §2.3：w 整個詞是簡繁詞組表（STPhrases 加 tw-conv.tsv 選定的值）的鍵、值是另一個寫法、那個寫法在基底、
+    w 不是萌典詞目，也不在台灣正常寫法例外清單 keep（overlay-twin-keep.tsv）裡 → 回那個寫法，否則 None。
+    is_simplified 只看字（S 與標記字），「松散」「取舍」「船只」每個字台灣也用，句子判成繁體，表裡的 松散→鬆散 就沒人查；
+    這類詞常因單字猜音而與基底目標不同調，所以不以讀音過濾，改由例外清單保住與目標寫法不同義的台灣正常寫法（如 系上、挨到）。
     只查整詞的鍵：最長比對會把 花卷市 改成 花捲市。目標要在基底（人工整理過的詞庫），目標只在疊加層的不動。"""
     w2 = phrase.get(w)
-    return w2 if w2 and w2 != w and w2 in words and w not in headwords else None
+    return w2 if w2 and w2 != w and w2 in words and w not in headwords and w not in keep else None
+
+
+def twin_keep_list(words, syllables, path=TWIN_KEEP):
+    """overlay-twin-keep.tsv → {台灣正常寫法: 讀音 tuple}。每列三欄（詞、讀音（音節以空白分隔）、理由；# 與空行略過）；
+    詞是純漢字（至少 2 字）且不在基底、同一個詞只能一列、讀音音節數等於字數且每個音節基底都有、理由非空，不符就中止並指出行號。
+    沒有這個檔是空表。清單裡的詞即使在簡繁詞組表裡（如 系上→繫上、挨到→捱到），phrase_twin 也不拿掉。"""
+    out = {}
+    if not os.path.exists(path):
+        return out
+    with open(path, encoding="utf-8-sig") as f:
+        for n, line in enumerate(f.read().splitlines(), 1):
+            if line.startswith("#") or not line.strip():
+                continue
+            p = line.split("\t")
+            if len(p) != 3:
+                raise SystemExit(f"{path}:{n}: bad twin-keep row")
+            w, reading, reason = p
+            syls = reading.split(" ")
+            if not (MANUAL_WORD.match(w) and len(w) >= 2 and w not in words and w not in out
+                    and len(syls) == len(w) and all(s in syllables for s in syls) and reason.strip()):
+                raise SystemExit(f"{path}:{n}: bad twin-keep row")
+            out[w] = tuple(syls)
+    return out
 
 
 def drop_list(words, path=DROP):
@@ -365,17 +392,20 @@ def prune(rows, twin):
 
 
 def rebuild_tails(out=OUT, refilter=False):
-    """overlay-add.tsv 產生的列（標籤不是 manual、slang）照舊，檔尾照 tail_rows 重算；給只改了手動詞或網路用語的時候用，不必有 dump。"""
+    """保留 overlay-add.tsv 產生的列（標籤不是 manual、slang、colloq），套用 overlay-drop.tsv（drop_list），再重算 colloq 列與檔尾（manual、slang）；
+    給只改了手動詞、網路用語或 overlay-drop.tsv 時用，不必有 dump。
+    refilter=True（--tails-only --refilter）另把完整建置才有的整詞簡體規則（phrase_twin，例外清單 overlay-twin-keep.tsv 裡的詞保留）套到留著的列：
+    會呼叫 build_counts.load_conv() 與 moe_titles()，需要 OpenCC 表、tw-clean 表（或 SHANJIE_TW_CLEAN=off，見 docs/spec/models.md §9.8）與 SHANJIE_MOEDICT，缺了就中止。"""
     with open(out, encoding="utf-8") as f:
         kept = [l for l in f if l.rstrip("\n").split("\t")[3] not in ("manual", "slang", "colloq")]
     base = ime.Lexicon(BASE)
-    words = set(base.by_word)
+    words, syllables = set(base.by_word), base_syllables(base)
     kept, _ = prune(kept, drop_list(words).get)     # 清單是 repo 裡的檔，不必有 dump：改了清單用 --tails-only 就生效
-    if refilter:                                    # --refilter：完整建置才有的整詞簡體規則也套到留著的列（要 OpenCC 表與萌典，缺了就中止）
-        phrase, moe = bc.load_conv()[0], moe_titles()
-        kept, gone = prune(kept, lambda w: phrase_twin(w, phrase, words, moe))
+    if refilter:                                    # --refilter：完整建置才有的整詞簡體規則也套到留著的列（要 OpenCC 表、tw-clean 表或 SHANJIE_TW_CLEAN=off、萌典，缺了就中止）
+        phrase, moe, keep = bc.load_conv()[0], moe_titles(), twin_keep_list(words, syllables)
+        kept, gone = prune(kept, lambda w: phrase_twin(w, phrase, words, moe, keep))
         print(f"--refilter: {len(gone)} rows of {len({g.split(chr(9))[0] for g in gone})} words are whole-word Simplified forms of a base word")
-    return kept + colloq_rows(kept) + tail_rows(words | {l.split("\t")[1] for l in kept}, length_scores(base), base_syllables(base), fixed=fixed_pairs(base))
+    return kept + colloq_rows(kept) + tail_rows(words | {l.split("\t")[1] for l in kept}, length_scores(base), syllables, fixed=fixed_pairs(base))
 
 
 def colloq_rows(rows, table=None, penalty=None):
@@ -871,8 +901,8 @@ def main():
     ap = argparse.ArgumentParser()
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true")
-    mode.add_argument("--tails-only", action="store_true", help="不讀 dump：保留 overlay-add.tsv 產生的列，只重算檔尾的手動詞與網路用語")
-    ap.add_argument("--refilter", action="store_true", help="（搭配 --tails-only）留著的列也套整詞簡體規則；要 OpenCC 表與 SHANJIE_MOEDICT")
+    mode.add_argument("--tails-only", action="store_true", help="不讀 dump：保留 overlay-add.tsv 產生的列、套 overlay-drop.tsv，並重算 colloq 與檔尾的手動詞與網路用語")
+    ap.add_argument("--refilter", action="store_true", help="（搭配 --tails-only）留著的列也套整詞簡體規則；要 OpenCC 表、tw-clean 表（或 SHANJIE_TW_CLEAN=off）與 SHANJIE_MOEDICT")
     ap.add_argument("--moedict-readings", action="store_true")
     ap.add_argument("--reading-report", metavar="PATH")
     ap.add_argument("--moedict-supplement", nargs="+", metavar="FILE")
