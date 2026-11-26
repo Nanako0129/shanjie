@@ -157,8 +157,8 @@ fn total_score_treats_a_pack_word_as_unknown_in_every_place() {
 #[test]
 fn pack_oov_decode_matches_python_golden() {
     // The golden's f64 bits come from a Mac Python run; Linux's libm differs in the last bit of log10 (as for engine_digits.rs's goldens).
-    // CI's `core` jobs run on macOS, so this is checked there.
-    if !cfg!(target_os = "macos") {
+    // It runs on Apple platforms only: CI's `core` jobs on macOS, and the iOS simulator run.
+    if !cfg!(target_vendor = "apple") {
         return;
     }
     let want = String::from_utf8(std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../eval/golden/pack-oov/decode.tsv")).unwrap()).unwrap();

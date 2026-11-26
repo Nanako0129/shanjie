@@ -94,7 +94,7 @@
 - 必須在 release 與 macOS 上跑的原因：
   - 重播測試的逐鍵 p95 < 16 ms 斷言只有 release 才有意義；
   - 兩個 f64 golden（`core/tests/engine_digits.rs` 的 `row49_scores_match_the_python_golden_bit_for_bit`、`predict_digits_matches_the_python_golden_bit_for_bit`）在 Linux 的 libm 末位不同，只有 macOS 實際比對；
-  - 小模型在 macOS 走 Accelerate，在 Linux 走可攜路徑（純 Rust，x86-64 上依執行期偵測用 AVX2 或 AVX-512F；`docs/spec/semantic-rerank.md` §2.4）。
+  - 小模型在 Apple 平台（macOS；iOS 只有交叉編譯與模擬器測試，CI 不跑）走 Accelerate，在 Linux 走可攜路徑（純 Rust，x86-64 上依執行期偵測用 AVX2 或 AVX-512F；`docs/spec/semantic-rerank.md` §2.4）。
 
 ### 3.2 `debug`（Linux）
 
@@ -184,7 +184,7 @@
 - **不拆最長的測試**：`core/tests/engine_share.rs` 的 `the_shared_engine_equals_the_engine_built_from_the_files` 在 macOS 約 340 秒，一個測試就佔 `core (share)` 的大半；分片只按測試檔分，不改測試。
 - **分片不用新工具**：每一片仍是 `cargo test`，執行檔內的並行方式不變；不用 cargo-nextest、不共用建置產物，每一片各自編譯。
 - **`cli` 的整合測試不在 debug 跑**：Linux 沒有 Accelerate，小模型走可攜路徑，`cli` 的整合測試（重播、golden、常談、英文模擬、執行緒、小模型）在 Linux 上比 macOS 久。它們測的是評測工具（不出貨）與引擎在整份資料上的結果，只在 release 跑；引擎本身的 debug 檢查由 `core` 套件在 Linux 跑（含 dev302 重播）。`core/src` 與 `cli/src` 有三個 `debug_assert!`（`lm.rs` 兩個、`tinylm.rs` 一個）。
-- **debug 看不到的兩塊**：只在 macOS 才編進去的分支（小模型的 Accelerate 呼叫、`learn_store.rs` 的 macOS 常數），以及上述兩個在 Linux 直接 `return` 的 f64 golden（在 Linux 的 debug 裡算通過但什麼都沒檢查）。它們在 macOS 的 release 測試照跑；Accelerate 呼叫前的長度檢查是 `assert!`，release 也檢查。
+- **debug 看不到的兩塊**：只在 Apple 平台才編進去的分支（小模型的 Accelerate 呼叫、`learn_store.rs` 的 Apple 平台常數），以及上述兩個在 Linux 直接 `return` 的 f64 golden（在 Linux 的 debug 裡算通過但什麼都沒檢查）。它們在 macOS 的 release 測試照跑；Accelerate 呼叫前的長度檢查是 `assert!`，release 也檢查。
 - **`--parallel` 的代價**：一個測試殘留給下一個測試的狀態，在同一個程序內才會被看到；並行時每個方法一個程序，抓不到這種問題，只有序列的 `make test-swift` 抓得到。
 - **沒有 Rust 編譯快取**：沒有 `actions/cache` 步驟。編譯只佔各 job 的一小段，其餘是測試本身的執行時間：分片前 macOS 的 `core` job 編譯 105–120 秒、測試 1505–2076 秒（同上六趟）；`core`、`cli` 在 macOS 上沒有第三方相依，編的都是自己的 crate。快取命中時，每次合併幾乎都會改到的自己的 crate 照樣重編，省不到什麼，不值得承擔快取留下錯誤建置的風險。分片之後每一片各編一次，這段編譯時間每片都付。
 - **`cli/tests/replay.rs` 同時最多兩個引擎**：每個引擎約 700 MB。以前一次一個，在當時單一的 `core` job 跑 175–209 秒，是最慢的測試檔。在 Mac 上用 3 個測試執行緒（模仿 3 核的 macOS runner）交錯量四次，加總測試程序與它所有子程序的 RSS：一次一個 108.9、108.9 秒，峰值 1166、1066 MiB；同時兩個 66.0、66.7 秒，峰值 1856、1643 MiB（runner 是 7 GiB）。

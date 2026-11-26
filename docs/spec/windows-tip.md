@@ -47,7 +47,7 @@
 ### 2.3 小模型與其他檔案讀取
 
 - `core/src/tinylm.rs`：`O_NONBLOCK` 與它的使用只在 `cfg(unix)`（Linux 0o4000，其他 Unix 0x0004）。Windows 的 `read_bounded` 用一般的 `File::open`，同樣先開檔、再檢查「是一般檔且不超過上限」、再從同一個 handle 讀到上限為止。
-- Accelerate 只在 macOS；Windows 與 Linux 一樣走 Plain 路徑（x86-64 上依執行期偵測用 AVX2 或 AVX-512F 的核心函式，結果和純量逐位元相同；`docs/spec/semantic-rerank.md` §2.4）。
+- Accelerate 只在 Apple 平台（macOS；iOS 只有交叉編譯與模擬器測試）；Windows 與 Linux 一樣走 Plain 路徑（x86-64 上依執行期偵測用 AVX2 或 AVX-512F 的核心函式，結果和純量逐位元相同；`docs/spec/semantic-rerank.md` §2.4）。
 
 ### 2.4 當地日期
 
@@ -67,7 +67,7 @@
 - 只拿 symlink 組模型資料夾的 fixture（`core/tests/common/toy.rs::lm_path` 等）有 `#[cfg(windows)]` 分支，改用 `fs::copy`；所以 engine_rerank、engine_fuzzy、engine_fuzzy_rerank 在 Windows 上照跑。
 - 會呼叫 `learning_open` 而且預期成功的測試（engine_learn、engine_newword、engine_predict、engine_english、engine_english_next、engine_fuzzy_rerank 裡的那些）在 Windows 一律 `#[cfg(unix)]`；`engine_learn.rs` 自己宣告的 `getrusage` 那段也是。
 - Windows 不能刪除或改寫正在被 mmap 的檔（Unix 可以）。三個測試在還持有 `Lm`／engine 時刪或改寫 trigram 表：`tri_tiny.rs` 的 `load_reads_each_profiles_table_beside_the_model`、`engine_lm.rs` 的 `load_lm_refuses_a_bad_trigram_table`、`ffi.rs` 的 `child_lm_tables`。處置：刪除或改寫之前，用只在 Windows 編譯的 `drop`（`#[cfg(windows)]`）放掉持有映射的物件，之後還要用到它的斷言在 Windows 上改成重新載入（`child_lm_tables` 另備一份沒被動過的複本資料夾載入引擎）。Unix 的行不動。
-- f64 逐位元比對的 golden：`engine_digits.rs`（兩處）與 `pack_oov.rs`（一處）拿 macOS libm 的位元當答案，glibc 與 Windows 的 `log10` 在最後一位不同，所以跳過條件是 `!cfg!(target_os = "macos")`（Linux 照樣跳過）。其他測試在 Windows 上的浮點不同一律視為缺陷，不改容差。
+- f64 逐位元比對的 golden：`engine_digits.rs`、`pack_oov.rs` 與 `engine_auto_english.rs` 拿 macOS libm 的位元當答案，glibc 與 Windows 的 `log10` 在最後一位不同，所以跳過條件是 `!cfg!(target_vendor = "apple")`（Linux 照樣跳過；iOS 模擬器照樣比對）：`engine_digits.rs` 的三支與一個斷言、`pack_oov.rs`、`engine_auto_english.rs` 各一支。其他測試在 Windows 上的浮點不同一律視為缺陷，不改容差。
 
 ### 2.7 換行
 
