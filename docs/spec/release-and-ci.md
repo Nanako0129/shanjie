@@ -47,7 +47,7 @@
 | `windows-msi` | windows-2025 | 正式版身分的測試；建 Windows 安裝程式（MSI）三份並核對；見 §3.7；`needs: changes`，略過條件與 `core` 相同，與 `windows` 並行 | 45 分 |
 | `rowstats` | ubuntu-24.04 | Linux 與 Windows 的六份 rowstats 逐位元組比對（§3.3）；`needs: [changes, debug, windows]` | 5 分 |
 | `python` | ubuntu-24.04 | 下載並核對模型；Python 工具與資料建置腳本的測試 | 20 分 |
-| `swift` | xcode-27 | 下載並核對模型；核心靜態庫；核心對兩個 iOS 目標平台的 `cargo check`；C 標頭冒煙測試；Swift 測試 | 30 分 |
+| `swift` | xcode-27 | 下載並核對模型；核心靜態庫；核心對兩個 iOS 目標平台的 `cargo check`；C 標頭冒煙測試；Swift 測試 | 45 分 |
 | `shell` | xcode-27 | 沙盒組建、容器移轉、selftest、驗收檢查、安裝程式、Homebrew cask（不含 Swift 測試） | 30 分 |
 
 - 每次 run 同時佔 5 個 macOS runner（`core` 的三片、`swift`、`shell`）。GitHub 免費與 Pro 方案整個帳號同時最多 5 個 macOS job，名額由帳號下所有專案共用：一趟 run 就用滿，兩趟重疊（或帳號下別的專案也在跑 macOS job）時，後到的 macOS job 排隊。所以 macOS 的 release 測試只拆三片，不再多拆。
