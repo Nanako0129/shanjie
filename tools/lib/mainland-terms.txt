@@ -1,5 +1,5 @@
-# OpenCC TWPhrases keys (2+ characters) whose article count in a public Taiwanese forum snapshot is below 10% of their Taiwan form; pairs whose form appears in the forum's page template (>= half of all pages) are left out
-# copied 2026-11-06 for docs/spec/models.md §9.3(4); source sha256 ff2f54990937e5787e108c13e133e0fa7ad8c0af8d0fae6f94749b55986dccaf
+# Mainland terms applied on the Simplified and marker-only paths (docs/spec/models.md §9.3(4)), matching the `term` section of data/lexicon/tw-conv.tsv 1:1.
+# Base set (331 keys): OpenCC TWPhrases keys (2+ characters) whose article count in a public Taiwanese forum snapshot is below 10% of their Taiwan form (source sha256 ff2f54990937e5787e108c13e133e0fa7ad8c0af8d0fae6f94749b55986dccaf), plus 33 curated fixes (4 Step-1 mirrors for shadowed keys, 11 substring mis-conversion overrides, and 18 re-vetted/narrowed entries including 觸摸屏幕 and 函數式編程語言 overlap guards; 364 total).
 SQL注入攻擊
 U盤
 丁丁當當
@@ -8,13 +8,17 @@ U盤
 丙氨酸
 丙肝
 串行
+串行端口
 主引導記錄
+主機死機
 乍得
 乙型肝炎
 乙肝
+二分查找
 二噁英
 互聯網絡
 亞歷杭德羅·岡薩雷斯·伊納裏圖
+亞歷杭德羅·岡薩雷斯·伊納里圖
 交互
 交互式
 亨德爾
@@ -53,14 +57,19 @@ U盤
 內存
 內存條
 內核
+內核棧
+內核轉儲
 內置
 冒泡排序
 冰棍
 凱奇
 凱瑟琳·畢格羅
 出租車
+函數式編程
+函數式編程語言
 刀片服務器
 分佈式
+分布式
 分辨率
 利比里亞
 刻錄
@@ -80,6 +89,7 @@ U盤
 哥斯達黎加
 唐氏綜合徵
 唐氏綜合症
+單向鏈表
 固件
 圖雷特綜合徵
 坦桑尼亞
@@ -88,6 +98,7 @@ U盤
 城域網
 堆棧
 場效應管
+塊狀鏈表
 塑料
 塔吉克斯坦
 塞拉利昂
@@ -137,6 +148,7 @@ U盤
 弗吉尼亞州
 彙編器
 彙編語言
+循環鏈表
 德彪西
 心肌梗死
 快閃存儲器
@@ -145,6 +157,8 @@ U盤
 戒斷綜合徵
 截屏
 所羅門羣島
+所羅門群島
+手機死機
 打印機
 抑鬱症
 抽動穢語綜合徵
@@ -211,6 +225,7 @@ U盤
 特立尼達和多巴哥
 獲得性免疫缺陷綜合徵
 瑙魯
+環形鏈表
 甲型肝炎
 甲硫氨酸
 界面
@@ -238,18 +253,23 @@ U盤
 空氣淨化器
 筆記本電腦
 粘貼
+系統死機
 紅心大戰
 紅細胞
 納米
 經前期綜合徵
 網上鄰居
 網絡
+網絡棧
+網絡適配器
+線性鏈表
 編程語言
 緩存
 縮略圖
 缺省
 羅得島
 美屬維爾京羣島
+美屬維爾京群島
 老年性癡呆症
 老撾
 聯繫歷史
@@ -278,6 +298,8 @@ U盤
 莫桑比克
 萊索托
 萬維網
+藍屏死機
+虛內存
 血紅蛋白
 複選框
 西弗吉尼亞
@@ -286,6 +308,9 @@ U盤
 視頻
 視頻會議
 視頻通話
+視頻電話
+觸摸屏
+觸摸屏幕
 計算機斷層
 調色板
 調製解調器
@@ -303,6 +328,7 @@ U盤
 重命名
 錄像
 鏈接
+鏈接庫
 門德爾松
 開市客
 關係數據庫
@@ -311,8 +337,13 @@ U盤
 阿爾茨海默病
 阿爾茨海默症
 集成
+集成電路
 集羣
+雙向鏈表
 雲存儲
+雲計算
+電腦死機
+靜態鏈表
 面向對象
 面向過程
 韋伯恩
@@ -327,7 +358,9 @@ U盤
 馬里共和國
 高性能計算
 高級設置
+高速緩存
 黃體酮
 黑客
+黑屏死機
 默認值
 鼠標
