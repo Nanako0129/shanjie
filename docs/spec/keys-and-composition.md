@@ -356,7 +356,7 @@
 - **自動送出**：第 128 個單位（§5.2）。
 - **`reset`**：模式 0 送出目前顯示的整串（含未完成音節，與 Enter 相同，所以失焦時打的注音不會無聲消失；開著的英文段以它的寫法送出，`docs/spec/english-mixed.md` §4.4，也與 Enter 相同）後清空，不學習；模式 1 丟棄；模式 2 先丟掉未完成音節（可省略韻母的多個單位是全部，也就是規則 12 Esc 清掉的範圍），再照模式 0 送出剩下顯示的整串並清空，只有未完成音節時送出空字串；其他值回 2。三者都清掉組字區、固定詞、前文（含漢字對集合），不清語言模型、設定與 ASCII 狀態。殼在 `commitComposition`、停用（輸入框變成密碼欄時改丟棄）、組字擁有者改變、表外按鍵時呼叫模式 0 或 1；模式 2 只用在單按 Shift 切到英數、而核心的 ASCII 狀態不可用時（倚天排列、可省略韻母，§9.2）。驗證：`core/tests/engine_english.rs` 的 `reset_commit_finished_drops_the_unfinished_syllable`、`core/tests/engine.rs` 的 `reset_modes_equal_fresh_engine`。
 - 送出、Esc 清空、`reset` 時，連同固定詞清掉所有組字狀態。
-- 驗證：`reset_both_modes_equal_fresh_engine`、`auto_commit_at_128th_syllable`（`core/tests/engine.rs`）。
+- 驗證：`reset_modes_equal_fresh_engine`、`auto_commit_at_128th_syllable`（`core/tests/engine.rs`）。
 
 ### 7.3 Enter 等目前的語意校正（殼）
 
