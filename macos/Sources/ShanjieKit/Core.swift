@@ -198,8 +198,8 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_candidate_vertical(handle, on ? 1 : 0, &out), out)
     }
 
-    /// docs/spec/prediction.md §6: whether a symbol typed into an occupied column opens a new unfinished unit (the core's default is
-    /// off); returns the snapshot. Sent to every engine `Shell.build()` makes.
+    /// docs/spec/prediction.md §6: whether a symbol whose column is at or before the last filled column of the unit opens a new
+    /// unfinished unit (the core's default is off); returns the snapshot. Sent to every engine `Shell.build()` makes.
     func setAbbreviation(_ on: Bool) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_abbreviation(handle, on ? 1 : 0, &out), out)

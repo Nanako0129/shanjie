@@ -4,7 +4,10 @@
 use crate::colloquial::{self, Colloquial, ColloquialTable};
 use crate::learn::{context_key, is_single, digit_of, last_chars, english_of, english_or_space, is_han, is_space_unit, fine_key, mid_key, local_day, newword_score, next_key, record_key, Learner, Level, Record, EN_PREFIX, NEXT_PREFIX, SENTINEL, NEWWORD, NEWWORD_BREAK, NEWWORD_DIGITS, NEWWORD_MAX, NEWWORD_MIN, NEWWORD_SHADOW, PUNCT_PREFIX};
 use crate::learn_store::{LearnStore, Opened, StoreError, JOURNAL_MAX};
-use crate::predict::{predict, predict_digits, predict_english, reading_matches_in, unit_of_syllable, DigitWords, Mode, Unit};
+use crate::predict::{
+    abbr_cuts, predict_capped, predict_digits_capped, predict_english_capped, reading_matches_in, unit_of_syllable, DigitWords,
+    Mode, Unit,
+};
 use crate::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
 use crate::lm::{decode_segment_fuzzy, history, pool_order, rerank_pool, fuzzy_path, CappedLexicon, DecodedWord, Demote, End, Learn, Lm, Profile, RecurGrams, Scored, Sinit, SinitLayer};
 use crate::trigram::TriMemo;
@@ -340,7 +343,8 @@ pub const PREDICT_LONG_CAP: usize = 3;
 /// at 4, 5 and 6.
 pub const PREDICT_BACK: usize = 5;
 /// Most unfinished units the abbreviation composer holds (docs/spec/prediction.md §6). The longest names in the ACG pack
-/// are 10 characters and an abbreviation only helps up to the longest word; past this an occupied column replaces (rule 9).
+/// are 10 characters and an abbreviation only helps up to the longest word. At this cap (or completed syllables plus units == 128),
+/// with two or more units a key that would open a new unit is eaten with no change; with one unit the usual rules apply (rule 9).
 pub const ABBR_MAX_UNITS: usize = 10;
 /// Items in the prediction row.
 pub const PREDICT_MAX: usize = PAGE_SIZE;
@@ -916,8 +920,10 @@ pub struct Engine {
     /// docs/spec/keys-and-composition.md §4.1.1 rule 16u: the run of Up presses in a composition under key scheme 1, set by each swap. Every key past rule 1 and
     /// 5q that is not Up clears it, and so does the third press (it opens the window); a call that is not a key is caught by `UpRun`'s check.
     up_run: Option<UpRun>,
-    /// Whether a symbol in an occupied column opens a new unfinished unit (default off; `set_abbreviation`, docs/spec/prediction.md §6).
+    /// Whether a non-advancing symbol opens a new unfinished unit (default off; `set_abbreviation`, docs/spec/prediction.md §6).
     abbr: bool,
+    /// Whether each prediction query skips candidates longer than its queried unit count (default off; `set_candidate_length_cap`, docs/spec/prediction.md §3.3).
+    cand_len_cap: bool,
     /// Test hook: false queries `PREDICT_SCAN` at every start once the learner has records (no gate).
     scan_gate: bool,
     /// Set by the key rules that recompute the row; `key` recomputes after the rule ran.
@@ -1445,6 +1451,7 @@ impl Engine {
             punct_layout: 0,
             up_run: None,
             abbr: false,
+            cand_len_cap: false,
             scan_gate: true,
             pred_dirty: false,
             left: String::new(),
@@ -2329,7 +2336,7 @@ impl Engine {
         self.handled().map(Some)
     }
 
-    /// Whether a symbol typed into an occupied column opens a new unfinished unit (default off, docs/spec/prediction.md §6).
+    /// Whether a non-advancing symbol opens a new unfinished unit (default off, docs/spec/prediction.md §6).
     /// Turning it off with two or more units drops them all (as Esc does); otherwise nothing changes. Returns the snapshot.
     pub fn set_abbreviation(&mut self, on: bool) -> Result<Output, EngineError> {
         self.setting_changed();
@@ -2341,6 +2348,18 @@ impl Engine {
             let flushed = self.digit_flush()?; // docs/spec/english-mixed.md §1.1, §11: the buffered digits become tokens
             self.clear_shadow(); // docs/spec/english-mixed.md §1.2: the two are exclusive
             return self.settle_with(flushed);
+        }
+        self.handled()
+    }
+
+    /// Whether each prediction query skips candidates whose character count exceeds the queried unit count (default off;
+    /// docs/spec/prediction.md §3.3, §7). Recomputes the prediction row when the composition is non-empty and prediction is
+    /// on; otherwise only remembers `on`. Returns the snapshot.
+    pub fn set_candidate_length_cap(&mut self, on: bool) -> Result<Output, EngineError> {
+        self.setting_changed();
+        self.cand_len_cap = on;
+        if !self.composition_empty() && self.predict_on {
+            self.recompute_pred();
         }
         self.handled()
     }
@@ -3239,16 +3258,10 @@ impl Engine {
         }
     }
 
-    /// docs/spec/prediction.md §6: a new unit opens only with the setting on, the row on (it needs a model to show) and the cursor at
-    /// the end, and only below `ABBR_MAX_UNITS`; the completed syllables plus the units stay within `MAX_SYLLABLES`.
-    fn abbr_active(&self) -> bool {
-        let units = self.pend_prev.len() + 1;
-        self.abbr
-            && self.predict_on
-            && self.lm.is_some()
-            && self.cursor == self.syls.len()
-            && units < ABBR_MAX_UNITS
-            && self.syls.len() + units < MAX_SYLLABLES
+    /// docs/spec/prediction.md §6: the abbreviation composer's unit rule runs only with the setting on, the row on (it needs a
+    /// model to show) and the cursor at the end of the composition.
+    fn abbr_composer(&self) -> bool {
+        self.abbr && self.predict_on && self.lm.is_some() && self.cursor == self.syls.len()
     }
 
     fn clear_pend(&mut self) {
@@ -3702,12 +3715,21 @@ impl Engine {
                 && (!self.scan_gate
                     || self.learner.records().iter().any(|r| r.context != NEWWORD && !r.context.starts_with(EN_PREFIX) && reading_matches_in(&units, &r.reading, mode)));
             let limit = if gate { PREDICT_SCAN } else { PREDICT_MAX };
+            let max_chars = self.cand_len_cap.then_some(units.len());
             let hits: Vec<(String, Vec<String>)> = match (&dv, &dcache, &dtable, english) {
                 (Some(dv), Some(c), Some(t), _) if digits_here => {
-                    predict_digits(idx, &st.lm, t, &c.words, cfg, dv, &units, limit).into_iter().map(|(w, _, r)| (w, r)).collect()
+                    predict_digits_capped(idx, &st.lm, t, &c.words, cfg, dv, &units, limit, max_chars)
+                        .into_iter()
+                        .map(|(w, _, r)| (w, r))
+                        .collect()
                 }
-                (_, _, _, Some((f, w))) => predict_english(idx, &st.lm, f, w, cfg, v, &units, mode, limit).into_iter().map(|(w, _, r)| (w, r)).collect(),
-                _ => predict(idx, &st.lm, cfg, v, &units, mode, limit).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
+                (_, _, _, Some((f, w))) => {
+                    predict_english_capped(idx, &st.lm, f, w, cfg, v, &units, mode, limit, max_chars)
+                        .into_iter()
+                        .map(|(w, _, r)| (w, r))
+                        .collect()
+                }
+                _ => predict_capped(idx, &st.lm, cfg, v, &units, mode, limit, max_chars).into_iter().map(|(w, _, _, r)| (w, r)).collect(),
             };
             hits.into_iter()
                 .enumerate()
@@ -3734,7 +3756,60 @@ impl Engine {
         // stable sort below puts the learned ones first, so a partition gives the same row as "learned, then L[0..3]".
         let (head, tail): (Vec<_>, Vec<_>) = long.into_iter().enumerate().partition(|(i, p)| p.weight > 0.0 || *i < PREDICT_LONG_CAP);
         let (head, tail) = (head.into_iter().map(|x| x.1), tail.into_iter().map(|x| x.1));
-        let cursor_items = if pending.is_empty() && dv.is_none() && etable.is_none() { Vec::new() } else { query(n) };
+        let cursor_items = if pending.is_empty() && dv.is_none() && etable.is_none() {
+            Vec::new()
+        } else if self.abbr && !pending.is_empty() {
+            let digits_here = dv.is_some() && dcache.is_some() && dtable.is_some();
+            let english_here = !digits_here
+                && etable.as_deref().zip(ecache.as_deref()).and_then(|(t, _)| self.english_before(n).and_then(|w| t.get(&w))).is_some();
+            if digits_here || english_here {
+                query(n)
+            } else {
+                let symbols: Vec<char> = pending.iter().flatten().copied().collect();
+                let (cuts, _) = abbr_cuts(&symbols, n, ABBR_MAX_UNITS, MAX_SYLLABLES, |s| idx.has_toneless_syllable(s));
+                if cuts.len() <= 1 {
+                    query(n)
+                } else {
+                    let before: String = disp[..off(n)].iter().collect();
+                    let key = context_key(&format!("{}{before}", self.left));
+                    let v = history(if key == crate::learn::SENTINEL { "" } else { &key }, &st.lm);
+                    let mut best: HashMap<String, (Pred, f64, bool)> = HashMap::new();
+                    for cut in &cuts {
+                        let units: Vec<Unit> = cut.iter().map(|c| Unit { chars: c.chars().collect(), done: false, tone: None }).collect();
+                        let mode_c = if units.len() > 1 { Mode::PA } else { Mode::P };
+                        let max_chars = self.cand_len_cap.then_some(units.len());
+                        let gate = learned
+                            && (!self.scan_gate
+                                || self.learner.records().iter().any(|r| {
+                                    r.context != NEWWORD && !r.context.starts_with(EN_PREFIX) && reading_matches_in(&units, &r.reading, mode_c)
+                                }));
+                        let limit = if gate { PREDICT_SCAN } else { PREDICT_MAX };
+                        for (i, (word, score, is_succ, reading)) in
+                            predict_capped(idx, &st.lm, cfg, v, &units, mode_c, limit, max_chars).into_iter().enumerate()
+                        {
+                            let weight = if gate { self.learned_weight(&key, None, &reading, &word, today) } else { 0.0 };
+                            if (i < PREDICT_MAX || weight > 0.0) && !word.is_empty() {
+                                let better = |o: &(Pred, f64, bool)| (is_succ && !o.2) || (is_succ == o.2 && score > o.1);
+                                if best.get(&word).is_none_or(better) {
+                                    best.insert(word.clone(), (Pred { word, reading, start: n, key: key.clone(), weight }, score, is_succ));
+                                }
+                            }
+                        }
+                    }
+                    let mut mixed: Vec<(Pred, f64, bool)> = best.into_values().collect();
+                    mixed.sort_by(|a, b| {
+                        b.2.cmp(&a.2)
+                            .then(b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
+                            .then_with(|| a.0.word.chars().count().cmp(&b.0.word.chars().count()))
+                            .then_with(|| a.0.reading.join("-").cmp(&b.0.reading.join("-")))
+                            .then_with(|| a.0.word.cmp(&b.0.word))
+                    });
+                    mixed.into_iter().map(|(p, _, _)| p).collect()
+                }
+            }
+        } else {
+            query(n)
+        };
         // docs/spec/prediction.md §3.1: the positions inside words come last, far to near.
         let mid_items = mid.into_iter().flat_map(&query);
         let mut all: Vec<Pred> = head.chain(cursor_items).chain(tail).chain(mid_items).collect();
@@ -4473,9 +4548,16 @@ impl Engine {
                         return self.revert_keys(Revert::Order, k.ch);
                     }
                 }
-                // docs/spec/prediction.md §6: an occupied column opens the next unit instead of being replaced.
-                if self.pend[col].is_some() && self.abbr_active() {
-                    self.pend_prev.push(std::mem::replace(&mut self.pend, [None; 3]));
+                // docs/spec/prediction.md §6: a symbol whose column does not strictly advance opens a new unit; at the cap with
+                // two or more units, such a key is eaten without changing the composition or row.
+                if self.abbr_composer() && self.pend[col..].iter().any(Option::is_some) {
+                    let units = self.pend_prev.len() + 1;
+                    if units < ABBR_MAX_UNITS && self.syls.len() + units < MAX_SYLLABLES {
+                        self.pend_prev.push(std::mem::take(&mut self.pend));
+                    } else if !self.pend_prev.is_empty() {
+                        self.nothing(old);
+                        return self.handled();
+                    }
                 }
                 self.late_keep(col);
                 if self.shadow_on() {
@@ -5922,6 +6004,7 @@ mod english_table_tests {
 #[cfg(test)]
 mod measure_hook_tests {
     use super::*;
+    use crate::predict::predict;
 
     fn engine() -> Engine {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
@@ -5936,13 +6019,13 @@ mod measure_hook_tests {
         }
     }
 
-    /// The units the abbreviation composer really makes (docs/spec/prediction.md §6): a symbol goes into the last unit's empty column,
-    /// an occupied column opens the next unit.
+    /// The units the abbreviation composer really makes (docs/spec/prediction.md §6): a symbol whose column advances joins the last
+    /// unit, and a symbol in the same or an earlier column opens the next unit.
     #[test]
     fn pending_units_are_the_composers_units() {
         let mut e = engine();
         assert!(e.pending_units().is_empty(), "nothing unfinished");
-        for (keys, want) in [("ㄧㄍ", vec!["ㄍㄧ"]), ("ㄧㄑㄧ", vec!["ㄑㄧ", "ㄧ"]), ("ㄉㄚㄢ", vec!["ㄉㄚ", "ㄢ"]), ("ㄋㄔ", vec!["ㄋ", "ㄔ"])] {
+        for (keys, want) in [("ㄧㄍ", vec!["ㄧ", "ㄍ"]), ("ㄧㄑㄧ", vec!["ㄧ", "ㄑㄧ"]), ("ㄉㄚㄢ", vec!["ㄉㄚ", "ㄢ"]), ("ㄒㄧㄢ", vec!["ㄒㄧㄢ"]), ("ㄋㄔ", vec!["ㄋ", "ㄔ"])] {
             e.reset(ResetMode::Discard);
             typ(&mut e, keys);
             assert_eq!(e.pending_units(), want, "{keys}");
@@ -5951,12 +6034,12 @@ mod measure_hook_tests {
         assert!(e.pending_units().is_empty(), "after a reset");
     }
 
-    /// After `reset` and `set_left_context` only the cursor start is queried, so the row is one `predict` call of the hook's parts.
+    /// After `reset` and `set_left_context` only the cursor start is queried, so for a single-cut input the row is one `predict` call of the hook's parts.
     #[test]
     fn predict_parts_give_the_engines_own_row() {
         let mut e = engine();
         let left = "我想喝一杯";
-        for (keys, units, mode) in [("ㄋㄔ", vec!["ㄋ", "ㄔ"], Mode::PA), ("ㄋㄞ", vec!["ㄋㄞ"], Mode::P)] {
+        for (keys, units, mode) in [("ㄋㄔ", vec!["ㄋ", "ㄔ"], Mode::PA), ("ㄋ", vec!["ㄋ"], Mode::P)] {
             e.reset(ResetMode::Discard);
             e.set_left_context(left);
             typ(&mut e, keys);
