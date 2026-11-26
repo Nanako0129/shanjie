@@ -50,7 +50,7 @@ import readings  # noqa: E402  萌典路徑
 
 BASE = os.path.join(ROOT, "data", "lexicon", "mcbpmf-data.txt")
 OUT = os.path.join(ROOT, "data", "lexicon", "overlay-add.tsv")
-DROP = os.path.join(ROOT, "data", "lexicon", "overlay-drop.tsv")   # docs/spec/lexicon-and-packs.md §2.3：審過的錯字寫法（詞、基底的正確寫法、備註），產生的列裡不寫
+DROP = os.path.join(ROOT, "data", "lexicon", "overlay-drop.tsv")   # docs/spec/lexicon-and-packs.md §2.3：審過的移除清單（詞、基底的正確寫法或 -、備註），產生的列裡不寫
 TWIN_KEEP = os.path.join(ROOT, "data", "lexicon", "overlay-twin-keep.tsv")   # docs/spec/lexicon-and-packs.md §2.3：台灣正常寫法例外清單（詞、讀音、理由），在簡繁詞組表裡也不拿掉
 MANUAL = os.path.join(ROOT, "data", "lexicon", "overlay-manual.tsv")   # 手動加的詞，接在產生的列後面（來源 manual）
 SANDHI_ADD = os.path.join(ROOT, "data", "lexicon", "sandhi-add.tsv")   # 手動詞補基底詞的讀音時，產生的（讀音, 詞）不能和它的任何一列相同
@@ -307,7 +307,7 @@ def build(moedict_readings=False, reading_report=None, supplement=None, jobs=1, 
     keep = twin_keep_list(words, syllables)
     rows, gone = prune(rows, lambda w: phrase_twin(w, phrase, words, moe, keep))   # 整詞的簡體寫法（每個字台灣也用，S2n 的句子判斷看不到）
     removed += gone
-    rows, gone = prune(rows, drop_list(words).get)   # 審過的錯字寫法
+    rows, gone = prune(rows, drop_list(words).get)   # 審過的移除清單（overlay-drop.tsv）
     variant_removed += gone
     overlay_words = {r.split("\t")[1] for r in rows}
     assert not overlay_words & words                # 疊加層和基底的詞表交集必須是 0（手動詞由 manual_rows 自己檢查）
@@ -361,9 +361,11 @@ def twin_keep_list(words, syllables, path=TWIN_KEEP):
     return out
 
 
-def drop_list(words, path=DROP):
-    """overlay-drop.tsv → {錯字寫法: 基底的正確寫法}。每列三欄（詞、正確寫法、備註；# 與空行略過）；詞不在基底、正確寫法在基底、同一個詞只能一列，不符就中止並指出行號。
-    沒有這個檔是空表。錯字寫法沒有表可查（好高鶩遠 的 鶩 與 騖 不是異體字），所以是審過的清單，不是規則。"""
+def drop_list(words, path=None):
+    """overlay-drop.tsv → {移除詞: 基底的正確寫法或 '-'}。每列三欄（詞、基底的正確寫法或 -、備註；# 與空行略過）；
+    詞非空、無前後空白、不等於 '-' 且不在基底、第 2 欄是 '-' 或在基底、備註非空、同一個詞只能一列，不符就中止並指出行號。
+    沒有這個檔是空表。涵蓋錯字寫法（好高鶩遠 的 鶩 與 騖 不是異體字）與經審查移除的罕用／誤讀／非台詞條（無單一基底正確寫法時第 2 欄填 '-'）。"""
+    path = DROP if path is None else path
     out = {}
     if not os.path.exists(path):
         return out
@@ -372,7 +374,8 @@ def drop_list(words, path=DROP):
             if line.startswith("#") or not line.strip():
                 continue
             p = line.split("\t")
-            if len(p) != 3 or p[0] in words or p[1] not in words or p[0] in out:
+            if (len(p) != 3 or not p[0] or p[0] != p[0].strip() or p[0] == "-" or not p[2].strip()
+                    or p[0] in words or (p[1] != "-" and p[1] not in words) or p[0] in out):
                 raise SystemExit(f"{path}:{n}: bad drop row")
             out[p[0]] = p[1]
     return out
