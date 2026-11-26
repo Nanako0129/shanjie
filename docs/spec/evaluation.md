@@ -551,7 +551,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - `replay --as VERSION`：在**目前的 checkout** 跑（發版時就是要打 tag 的那個 commit）。前置檢查：
   - `--as` 要在 `VERSIONS2` 裡、套件的 `variants.tsv` 雜湊相符；不能是 `LEGACY_SHA` 表上的舊版本（本 repo 的同名 tag 不是那個 commit，也沒有舊版的引擎可重播），要重播舊版就在舊 repo 的 checkout 上跑；
   - 已追蹤的檔有改動就拒絕（未追蹤的結果檔不算）；`VERSION` 的 tag 已存在時它指的 commit 必須就是 HEAD；
-  - `data/lm/` 的模型必須恰好是 `VERSIONS2[VERSION]` 出貨的那一組（`bigram.sjlm`、`classes.sjc`，以及該列要求的 `kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm`）、每個都和 `data/*.sha256` 相符、`data/lm/` 不能多出不在這組裡的模型檔；
+  - `data/lm/` 的模型檔（副檔名 `.sjlm`、`.sjc`、`.sjkn`、`.sjt3`、`.sjtl`，與 `scripts/check-models.sh` 同）必須恰好是 `VERSIONS2[VERSION]` 出貨的那一組（`bigram.sjlm`、`classes.sjc`，以及該列要求的 `kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`tinylm.sjtl`、`colloquial.sjlm`）、每個都和 `data/*.sha256` 相符，不能多出未出貨的模型檔（即使有 `data/*.sha256` 也拒絕）；`data/lm/` 裡由 `data/*.sha256` 列管（目標路徑為該檔）、雜湊相符的非模型檔（例如 `colloquial-attribution.tsv`）放行且不寫進 `models` 欄，雜湊不符或沒列管的雜檔照舊拒絕；
   - 兩份列檔（`eval/bench/suite-v2/user-reported.txt`、`eval/bench/suite-v1/dev302.txt`）的 SHA-256 相符。
   - 然後 `cargo build --release --locked -p cli --bin shanjie-replay --message-format=json`（執行檔路徑取編譯器回報的），跑：錯字回報（聊天、`--correct`，學習關與開各一次）與 dev302（聊天、`--correct`，學習關）。版本不出貨小模型時加 `--no-tinylm`，不出貨口語表時加 `--no-colloquial`。每次跑都核對：stderr 的 `models:` 行等於由 `data/*.sha256` 推出的那一行、摘要行恰好一行、設定標記等於預期（含詞包部分，依該列的 `--packs`；有 `reading` 鍵的版本以 `+rd+rx:<8 碼>+rm` 結尾，另有 `reading_norm` 鍵的以 `+rd+rx:<8 碼>+rm+rn` 結尾，另有 `tone3` 鍵的再接 `+t3`）、列數等於集合列數、rowstats 的 top1 等於摘要行。
   - 寫入同一個 JSON 的 `replay` 欄：`sha`、`models`、`variants_sha256`，以及 `user-reported` 與 `dev302` 各自的 `rows_sha256`、`n`、`off`（學習關的摘要行數字）；`user-reported` 另有 `on` 與 `learn_fixed`／`learn_broken`（學習開對學習關，由兩份 rowstats 算）。
@@ -596,7 +596,7 @@ shanjie-replay (--rows FILE | --dev N) [--profile chat|formal] [--no-tinylm] [--
 - 同一版出現在兩個 `v2-*.json` 時取它當新版的那個檔；error ratio 的算法與「—」；速度在負載高時不填、依機器分欄；速度段規則的每一列（備份中在前或在後、量完時的負載超過門檻、備份狀態未知、缺備份欄位、開始前的負載不判）與「沒有 `speed_load_after` 就照開跑規則」；舊版沒有重播欄位時寫「—」；
 - 換集合時表頭分欄（v2 JSON 的 `sets` 雜湊不同、兩個 `kpi` JSON 的 `rows_sha256` 不同，兩種都測）；保留集兩個半邊從合成 JSON 畫進表、雜湊相同而 n 相同的兩份仍分欄、新聞半邊換檔時口語半邊的欄不動；`table` 兩次輸出逐位元組相同；網站資料（`site/data/kpi.json`）兩次逐位元組相同、沒有私人集合的欄位、數字和表一致；
 - `run`：每個可用核心都解碼（`--threads`）、舊 CLI 不加 `--threads`、記錄欄位、`run_cell2` 的各項檢查、相對路徑轉絕對、`eval/holdout/` 底下的列檔被拒絕、未知版本名被拒絕、寫入保留這次沒設的欄位、表上的舊版本從舊 clone 的 `LEGACY_SHA` commit 匯出（沒給 clone 或 clone 沒有那個 commit 時拒絕）；
-- `replay`：模型雜湊不符、多一個檔、少一個檔或缺雜湊檔時失敗（並說清楚缺哪個）、口語表與聊天 trigram 表只對出貨它們的版本算模型、舊版本名被拒絕、乾淨樹檢查（已追蹤的改動擋下、未追蹤的結果檔不擋、已存在的 tag 必須是 HEAD）、執行檔路徑取自編譯器訊息、各種設定標記（口語表、詞包、讀音項）不符時失敗、舊標記被拒絕、`replay` 欄的內容等於直接執行 `shanjie-replay` 與 `evalstats` 的結果、既有欄位保留、寫入是原子的。
+- `replay`：模型雜湊不符、多一個未出貨的模型檔（即使有 `.sha256` 檔）或未列管的檔、少一個檔或缺雜湊檔時失敗（並說清楚缺哪個）、`data/*.sha256` 列管且雜湊相符的非模型檔（如 `colloquial-attribution.tsv`）放行（不進 `models` 紀錄；雜湊不符仍拒絕）、口語表與聊天 trigram 表只對出貨它們的版本算模型、舊版本名被拒絕、乾淨樹檢查（已追蹤的改動擋下、未追蹤的結果檔不擋、已存在的 tag 必須是 HEAD）、執行檔路徑取自編譯器訊息、各種設定標記（口語表、詞包、讀音項）不符時失敗、舊標記被拒絕、`replay` 欄的內容等於直接執行 `shanjie-replay` 與 `evalstats` 的結果、既有欄位保留、寫入是原子的。
 
 ### 8.4 網站資料 `site/data/kpi.json`
 

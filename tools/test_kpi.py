@@ -429,6 +429,58 @@ class ReplayModels(Tmp):
             kpi.check_models(root, SPEC)
         self.assertIn("kn.sjkn", err.getvalue())
 
+    def test_unshipped_model_extension_fails_even_with_a_sha256_file(self):
+        root = make_root(self.td, ("bigram.sjlm", "classes.sjc", "tinylm.sjtl", "extra.sjtl"))
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            kpi.check_models(root, SPEC)
+        self.assertIn("extra.sjtl", err.getvalue())
+
+    def test_listed_non_model_file_passes_and_stays_out_of_models(self):
+        """data/lm/colloquial-attribution.tsv (tracked by data/colloquial-attribution.tsv.sha256) is allowed and does not enter the returned models dict."""
+        root = make_root(self.td, ("bigram.sjlm", "classes.sjc", "tinylm.sjtl", "colloquial.sjlm"))
+        body = b"source\tcount\n"
+        with open(os.path.join(root, "data/lm/colloquial-attribution.tsv"), "wb") as f:
+            f.write(body)
+        with open(os.path.join(root, "data/colloquial-attribution.tsv.sha256"), "w", encoding="utf-8") as f:
+            f.write(hashlib.sha256(body).hexdigest() + "  data/lm/colloquial-attribution.tsv\n")
+        models = kpi.check_models(root, dict(SPEC, colloquial=True))
+        self.assertEqual(set(models), {"bigram.sjlm", "classes.sjc", "tinylm.sjtl", "colloquial.sjlm"})
+        self.assertNotIn("colloquial-attribution.tsv", models)
+
+    def test_listed_non_model_file_with_wrong_hash_fails(self):
+        root = make_root(self.td)
+        with open(os.path.join(root, "data/lm/colloquial-attribution.tsv"), "wb") as f:
+            f.write(b"changed")
+        with open(os.path.join(root, "data/colloquial-attribution.tsv.sha256"), "w", encoding="utf-8") as f:
+            f.write(hashlib.sha256(b"expected").hexdigest() + "  data/lm/colloquial-attribution.tsv\n")
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            kpi.check_models(root, SPEC)
+        self.assertIn("data/lm/colloquial-attribution.tsv does not match data/colloquial-attribution.tsv.sha256", err.getvalue())
+
+    def test_unlisted_extra_non_model_file_fails(self):
+        root = make_root(self.td)
+        # No data/<name>.sha256 at all: refused.
+        stray = os.path.join(root, "data/lm/notes.tsv")
+        with open(stray, "wb") as f:
+            f.write(b"stray")
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            kpi.check_models(root, SPEC)
+        self.assertIn("notes.tsv", err.getvalue())
+        # A .sha256 file pointing outside data/lm/ does not whitelist data/lm/notes.tsv.
+        with open(os.path.join(root, "data/notes.tsv.sha256"), "w", encoding="utf-8") as f:
+            f.write(hashlib.sha256(b"stray").hexdigest() + "  data/other/notes.tsv\n")
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            kpi.check_models(root, SPEC)
+        self.assertIn("notes.tsv", err.getvalue())
+        os.remove(stray)
+        # A subdirectory in data/lm/ is refused even if a .sha256 file shares its name.
+        os.mkdir(os.path.join(root, "data/lm/notes.tsv"))
+        with open(os.path.join(root, "data/notes.tsv.sha256"), "w", encoding="utf-8") as f:
+            f.write(hashlib.sha256(b"").hexdigest() + "  data/lm/notes.tsv\n")
+        with contextlib.redirect_stderr(io.StringIO()) as err, self.assertRaises(SystemExit):
+            kpi.check_models(root, SPEC)
+        self.assertIn("notes.tsv", err.getvalue())
+
     def test_missing_model_file_fails(self):
         root = make_root(self.td)
         os.remove(os.path.join(root, "data/lm/tinylm.sjtl"))  # its data/tinylm.sjtl.sha256 is there: the model file itself is missing
