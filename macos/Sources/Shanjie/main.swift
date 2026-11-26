@@ -340,10 +340,8 @@ func runServer() -> Never {
         glassTintStore: DefaultsGlassTintStore(), candidateOrientationStore: DefaultsCandidateOrientationStore(),
         rerankStore: DefaultsRerankStore(), rerankRunner: QueueRerankRunner(),
         profileModeStore: DefaultsProfileModeStore(), appProfileStore: DefaultsAppProfileStore(), packBuilder: QueuePackBuilder(), fuzzyStore: DefaultsFuzzyStore(),
-        // 可省略韻母 does not ship in v0.4.0; see Shell.showsAbbreviation. Flip to true to offer it again.
-        // This argument alone hides it (Shell's default true is for the tests) and the app target has no tests: the release
-        // device check confirms the menu has no 可省略韻母.
-        showsAbbreviation: false, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(), beautyPackStore: DefaultsBeautyPackStore(), memePackStore: DefaultsMemePackStore(),
+        // 可省略韻母 is offered (default off); the constant is in ShanjieKit so the tests can read the value the app passes.
+        showsAbbreviation: Shell.shipsAbbreviation, spacingStore: DefaultsSpacingStore(), itPackStore: DefaultsItPackStore(), beautyPackStore: DefaultsBeautyPackStore(), memePackStore: DefaultsMemePackStore(),
         shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter(),
         englishNoticeStore: DefaultsEnglishNoticeStore(), englishNotice: EnglishNoticeAdapter(), diagLogStore: DefaultsDiagLogStore(),
         // docs/spec/macos-shell.md §13.1: the only place the real counter is passed; no permission needed.

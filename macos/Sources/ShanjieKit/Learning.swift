@@ -150,6 +150,15 @@ public struct MenuEntry: Equatable, Sendable {
         public static let spacing = "中英文之間自動加空格"
         public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"
         public static let abbreviation = "可省略韻母"
+        /// The line under the settings toggle (docs/spec/prediction.md §6; English mixing does not act while it is on: no shadow, ASCII
+        /// is not sent to the core).
+        public static let abbreviationNote = "只打聲母、不打聲調也能從預測列選詞，例如下面幾行。開著時中英混打不作用。"
+        /// Fixed example lines under that note: the keys typed and the word the prediction row shows first. Each word ranks first at
+        /// the start of a sentence with the macOS settings (length cap off), as the eval tool's `--abbr-mix-dump` of the public dev
+        /// rows measured it (`--abbr A` for the first two, `--abbr C` for the third; ABBR-P CORE, public PR #126).
+        public static let abbreviationExamples = ["ㄇ ㄊ → 明天", "ㄇ ㄅ ㄈ → 沒辦法", "ㄗㄨㄟ ㄐㄧㄣ → 最近"]
+        /// The placeholder of the try field under the examples (docs/spec/prediction.md §6): a text field of the settings window itself.
+        public static let abbreviationTry = "在這裡試打"
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
         public static let quotePack = "經典台詞"

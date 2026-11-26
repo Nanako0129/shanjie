@@ -206,7 +206,7 @@
 
 ## 6. 可省略韻母（縮寫組字器）
 
-這個功能在核心完整實作，但 App 目前不提供開關：`Shell(showsAbbreviation: false)`（`macos/Sources/Shanjie/main.swift`），選單與設定視窗都不顯示，狀態一律關。
+App 提供開關，預設關：`Shell(showsAbbreviation: Shell.shipsAbbreviation)`（`macos/Sources/Shanjie/main.swift`，常數在 ShanjieKit，測試讀得到）。選單項目與設定頁「選字」區的開關都在；設定頁的開關下方有一行說明（只打聲母、不打聲調也能從預測列選詞；開著時中英混打不作用）、三行固定的示範（ㄇ ㄊ → 明天、ㄇ ㄅ ㄈ → 沒辦法、ㄗㄨㄟ ㄐㄧㄣ → 最近，都是公開開發集裡句首、字數上限關時排第一名的詞），以及一個試打框（設定頁自己的 `TextField`，輸入法照常替它組字）。macOS 的殼不呼叫字數上限的介面（§7），上限一律關。
 
 - 核心設定：`shanjie_engine_set_abbreviation(engine, 0|1, out)`，預設 0；其他值回 2，狀態不變；`engine` 或 `out` 為 NULL 回 1。切法使用固定規則 R3，沒有拆法設定項（候選字數上限 `shanjie_engine_set_candidate_length_cap` 是獨立開關，見 §3.3、§7）。
 - 生效條件（組字器單位規則）：縮寫設定開、預測列開、已載入模型、游標在組字區尾端。其他時候照一般規則「同一欄再按一次是取代」。`ABBR_MAX_UNITS` = 10 是 ACG 詞包最長的名字的字數，縮寫只有在最長的詞以內才有用。
@@ -355,7 +355,7 @@ Google 文件使用 EditContext，回給輸入法的組字範圍是 `{1, n}`（�
 
 ## 11. 已知限制
 
-- 縮寫：每次查詢最多 `ABBR_MAX_CUTS`（64）種切法、最多 `ABBR_MAX_UNITS`（10）個單位，省略聲母（B 打法）的相容規則與超過 10 字的整句縮寫沒有做；App 目前仍未打開這個開關（`showsAbbreviation: false`）。
+- 縮寫：每次查詢最多 `ABBR_MAX_CUTS`（64）種切法、最多 `ABBR_MAX_UNITS`（10）個單位，省略聲母（B 打法）的相容規則與超過 10 字的整句縮寫沒有做。
 - 往回 6 個音節對長名字更好（第五音節以後的第一鍵 85% 對 92%），代價是每個量測狀態多 0.02 至 0.77 次 `predict`；目前維持 5。
 - 詞中間的起點排在游標起點之前會讓第二音節第一鍵多命中 12 個、新詞第一鍵少命中 4 個，目前維持排最後。
 - 預測列原本是空的狀態，會因為詞中間的項目變成不是空的，Tab 的行為跟著改；在 typing76 的 904 個量測狀態裡只有 2 個。

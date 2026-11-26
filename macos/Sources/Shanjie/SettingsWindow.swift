@@ -234,6 +234,8 @@ struct SettingsPageForm: View {
     let page: SettingsPage
     @ObservedObject var model: SettingsModel
     let appLabels: AppLabels
+    /// The 可省略韻母 try field's text; not saved.
+    @State private var tryText = ""
 
     var body: some View {
         Form {
@@ -292,6 +294,14 @@ struct SettingsPageForm: View {
                     if model.showsAbbreviation {
                         Toggle(MenuEntry.Text.abbreviation, isOn: Binding(get: { model.abbreviation }, set: { model.setAbbreviation($0) }))
                             .disabled(!model.prediction)
+                        Text(MenuEntry.Text.abbreviationNote)
+                            .font(.caption).foregroundStyle(.secondary)
+                        // Fixed lines: they do not move, take no clicks and follow no setting (docs/spec/prediction.md §6).
+                        ForEach(MenuEntry.Text.abbreviationExamples, id: \.self) { line in
+                            Text(line).font(.caption).foregroundStyle(.secondary)
+                        }
+                        // A plain system text field the input method composes into: typing here is typing with 善解 itself.
+                        TextField(MenuEntry.Text.abbreviationTry, text: $tryText)
                     }
                     // Same place as in the menu (after 即時預測 and 可省略韻母 when shown); greyed (setting kept) when the layout is Eten, like the menu item (docs/spec/english-mixed.md §1.1, §11).
                     Toggle(MenuEntry.Text.english, isOn: Binding(get: { model.english }, set: { model.setEnglish($0) }))
