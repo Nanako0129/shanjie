@@ -1406,6 +1406,15 @@ fn abbr_b_summary(items: &[&AbbrItem]) -> String {
 /// each by length too); for B also the offline lines (`abbr_b_sets`, every word with at most 10 syllables and no Zhuyin symbol, merged or not).
 /// `--abbr-dump` writes each measurable word's query and row in the format of `--predict` without the score columns, so
 /// `--predict DUMP --lm … --profile chat --packs acg,it,meme,beauty` must print the same words.
+/// `--abbr` cuts a row character by character against its reading, so the two must have the same length. The error names the file and
+/// line and gives both counts, never the row's text.
+fn abbr_row_lengths_match(chars: usize, syllables: usize, file: &str, line: usize) -> Result<(), String> {
+    if chars == syllables {
+        return Ok(());
+    }
+    Err(format!("{file}:{line}: the sentence has {chars} characters but the reading has {syllables} syllables"))
+}
+
 fn run_abbr(args: &[String]) -> Result<(), String> {
     let (mut style, mut files, mut lm_path, mut dump) = (None, Vec::new(), None, None);
     let mut it = args.iter();
@@ -1430,13 +1439,17 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     if files.is_empty() {
         return Err("--abbr needs --rows".into());
     }
-    let (mut seen, mut rows, mut read) = (std::collections::HashSet::new(), Vec::new(), 0usize);
+    // `origin[k]` is the file and 1-based line of `rows[k]`, so a bad row can be named without printing its text.
+    let (mut seen, mut rows, mut origin, mut read) = (std::collections::HashSet::new(), Vec::new(), Vec::new(), 0usize);
     for f in &files {
         let text = fs::read_to_string(f).map_err(|e| format!("cannot read file ({:?})", e.kind()))?;
-        for line in text.lines().filter(|l| l.split('|').count() == 3) {
+        for (n, line) in text.lines().enumerate().filter(|(_, l)| l.split('|').count() == 3) {
             read += 1;
             if seen.insert(line.to_string()) {
-                rows.extend(three_field_rows(line));
+                for r in three_field_rows(line) {
+                    rows.push(r);
+                    origin.push((f.as_str(), n + 1));
+                }
             }
         }
     }
@@ -1451,11 +1464,9 @@ fn run_abbr(args: &[String]) -> Result<(), String> {
     let sets = if style == Abbr::B { abbr_b_sets(capped.readings(&lm)) } else { HashMap::new() };
     let mut e = abbr_engine(&lm_path)?;
     let (mut items, mut out, mut bad_rows, mut absent) = (Vec::new(), String::new(), Vec::new(), Vec::new());
-    for (sent, syls, ctx) in &rows {
+    for ((sent, syls, ctx), &(file, line)) in rows.iter().zip(&origin) {
         let chars: Vec<char> = sent.chars().collect();
-        if chars.len() != syls.len() {
-            return Err("a row's sentence and reading differ in length".into());
-        }
+        abbr_row_lengths_match(chars.len(), syls.len(), file, line)?;
         let text = |i: usize, l: usize| chars[i..i + l].iter().collect::<String>();
         for (i, l, found) in abbr_segment(chars.len(), |i, l| capped.entries(&syls[i..i + l]).iter().any(|(w, _)| *w == text(i, l))) {
             let (word, reading) = (text(i, l), &syls[i..i + l]);
@@ -1820,6 +1831,14 @@ mod tests {
         fs::remove_file(&file).unwrap();
         assert_eq!(with, Some(-8.5));
         assert_eq!(without, None);
+    }
+
+    /// `--abbr`: a row whose sentence and reading differ in length stops the run with the file and line named and both counts, no text.
+    #[test]
+    fn abbr_names_the_file_and_line_of_a_row_whose_lengths_differ() {
+        assert_eq!(abbr_row_lengths_match(3, 3, "eval/dev/x.txt", 7), Ok(()));
+        let e = abbr_row_lengths_match(4, 3, "eval/dev/x.txt", 7).unwrap_err();
+        assert_eq!(e, "eval/dev/x.txt:7: the sentence has 4 characters but the reading has 3 syllables");
     }
 
     /// `--abbr`: the rewriting table. The six example words, the neutral tone (dropped wherever it is written) and a word written with
