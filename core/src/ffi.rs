@@ -440,6 +440,7 @@ pub unsafe extern "C" fn shanjie_engine_reset(
         let mode = match mode {
             0 => ResetMode::Commit,
             1 => ResetMode::Discard,
+            2 => ResetMode::CommitFinished,
             _ => return SHANJIE_ERR_INVALID,
         };
         // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
@@ -724,6 +725,38 @@ pub unsafe extern "C" fn shanjie_engine_set_key_scheme(
         // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
         let e = unsafe { &mut (*engine).0 };
         match e.set_key_scheme(scheme) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(Some(o)) => unsafe { emit(o, out) },
+            Ok(None) => SHANJIE_ERR_INVALID,
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// docs/spec/c-abi.md, docs/spec/keys-and-composition.md §8.1. `layout` 0 (default, Apple Zhuyin's punctuation keys) or 1 (McBopomofo's: ten cells differ). The next key reads
+/// it. Returns the snapshot like `set_candidate_vertical` (nothing shown changes); any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_punct_layout(
+    engine: *mut ShanjieEngine,
+    layout: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_punct_layout(layout) {
             // SAFETY: `out` checked non-NULL above.
             Ok(Some(o)) => unsafe { emit(o, out) },
             Ok(None) => SHANJIE_ERR_INVALID,
@@ -1889,7 +1922,7 @@ mod tests {
         assert!(unsafe { shanjie_engine_reset(e, 0, ptr::null_mut()) } == 1, "reset out NULL");
         assert!(unsafe { shanjie_engine_reset(ptr::null_mut(), 0, &mut o) } == 1 && o.is_null(), "reset engine NULL");
         o = sentinel();
-        assert!(unsafe { shanjie_engine_reset(e, 2, &mut o) } == 2 && o.is_null(), "reset mode");
+        assert!(unsafe { shanjie_engine_reset(e, 3, &mut o) } == 2 && o.is_null(), "reset mode");
 
         // Ownership: an output outlives the engine; candidates NULL when closed.
         for c in ['c', 'l', '3'] {

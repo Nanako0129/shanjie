@@ -907,12 +907,12 @@ fn fixed_two_syllable_word_shifts_and_is_removed_when_cut() {
 
 // ---------- reset ----------
 #[test]
-fn reset_both_modes_equal_fresh_engine() {
+fn reset_modes_equal_fresh_engine() {
     let probe = |e: &mut Engine| -> Vec<Output> {
         let keys: Vec<Key> = "su3 ".chars().map(plain).chain([Key::new(KeyKind::Left), Key::new(KeyKind::Esc), Key::new(KeyKind::Tab)]).chain("cl3".chars().map(plain)).chain([Key::new(KeyKind::Down), Key::new(KeyKind::Enter), Key::new(KeyKind::Home), Key::new(KeyKind::Enter)]).collect();
         keys.into_iter().map(|key| e.key(key).unwrap()).collect()
     };
-    for mode in [ResetMode::Commit, ResetMode::Discard] {
+    for mode in [ResetMode::Commit, ResetMode::Discard, ResetMode::CommitFinished] {
         let mut e = std();
         typ(&mut e, NIHAO);
         kk(&mut e, KeyKind::Down);
@@ -925,6 +925,8 @@ fn reset_both_modes_equal_fresh_engine() {
             // docs/spec/keys-and-composition.md §7.1: Commit sends what is shown, the pending ㄏ at the cursor, like Enter
             ResetMode::Commit => assert!(o.commit == shown && o.commit.contains('ㄏ') && o.preedit.is_empty()),
             ResetMode::Discard => assert!(o == blank(true)),
+            // docs/spec/keys-and-composition.md §7.2: the same without the pending ㄏ
+            ResetMode::CommitFinished => assert!(o.commit == shown.replace('ㄏ', "") && o.commit.chars().count() == 2 && o.preedit.is_empty()),
         }
         assert!(o.candidates.is_empty() && o.selected.is_none() && o.cursor_utf16 == 0);
         let mut fresh = std();
@@ -993,4 +995,108 @@ fn enter_commits_what_is_shown_unfinished_symbols_included() {
     let o = k(&mut e, Key { kind: KeyKind::Enter, ch: '\0', modifiers: MOD_COMMAND });
     assert!(!o.handled && o.commit.is_empty() && o.preedit == "ㄅ");
     assert!(kk(&mut e, KeyKind::Up).preedit == "ㄅ");
+}
+
+// ---------- punctuation layout 1 (docs/spec/keys-and-composition.md §8.1, `set_punct_layout`) ----------
+
+/// The ten cells of layout 1 as (keycap, Shift held, the character the US keyboard gives for the key, which names the lexicon row).
+const PUNCT_LAYOUT_1_KEYS: [(char, bool, char); 10] = [
+    ('\'', false, '\''), ('\'', true, '"'), ('\\', false, '\\'),
+    ('2', true, '@'), ('3', true, '#'), ('4', true, '$'), ('5', true, '%'), ('6', true, '^'), ('7', true, '&'), ('8', true, '*'),
+];
+
+/// What McBopomofo's lexicon gives the character `c`: the first row of `_punctuation_Standard_<c>`, or else of `_punctuation_<c>`.
+fn mcbpmf_punct(c: char) -> char {
+    static TEXT: OnceLock<String> = OnceLock::new();
+    let text = TEXT.get_or_init(|| std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/lexicon/mcbpmf-data.txt")).unwrap());
+    let first = |key: String| text.lines().find_map(|l| l.strip_prefix(&key)?.split(' ').next()?.chars().next());
+    first(format!("_punctuation_Standard_{c} ")).or_else(|| first(format!("_punctuation_{c} "))).expect("a punctuation row of the lexicon")
+}
+fn layout1(l: Layout) -> Engine {
+    let mut e = eng(l);
+    assert!(e.set_punct_layout(1).unwrap().is_some());
+    e
+}
+fn punct_key(c: char, shift: bool) -> Key {
+    Key::ch(c, if shift { MOD_SHIFT } else { 0 })
+}
+
+/// Every cell of layout 1, with the expectation read from the lexicon file: into an empty composition, sent by Enter; with a composition and an
+/// unfinished syllable it is rule 2 (the syllable goes, nothing is sent).
+#[test]
+fn punct_layout_1_cells_are_the_lexicon_rows() {
+    let expected: Vec<char> = PUNCT_LAYOUT_1_KEYS.iter().map(|&(_, _, us)| mcbpmf_punct(us)).collect();
+    assert!(expected.iter().collect::<String>() == "、；＼＠＃＄％︿＆＊", "the lexicon rows are the table of docs/spec/keys-and-composition.md §8.1");
+    for (&(c, shift, _), &p) in PUNCT_LAYOUT_1_KEYS.iter().zip(&expected) {
+        let mut e = layout1(Layout::Standard);
+        let o = k(&mut e, punct_key(c, shift));
+        assert!(o.handled && o.commit.is_empty() && o.preedit == p.to_string(), "{c} {shift}: {}", o.preedit);
+        assert!(kk(&mut e, KeyKind::Enter).commit == p.to_string(), "{c} {shift}");
+        for scheme in [0, 1] {
+            let mut e = layout1(Layout::Standard);
+            e.set_key_scheme(scheme).unwrap();
+            typ(&mut e, NIHAO);
+            typ(&mut e, "c"); // pending ㄏ is dropped
+            let o = k(&mut e, punct_key(c, shift));
+            assert!(o.handled && o.commit.is_empty() && o.preedit == format!("你好{p}") && o.candidates.is_empty(), "scheme {scheme} {c} {shift}: {}", o.preedit);
+        }
+    }
+}
+
+/// Layout 0 (the default, and after going back from 1) is what it was: the three keys keep Apple's marks and Shift+2 to 8 are no
+/// punctuation (rule 21 with a composition, rule 22 without).
+#[test]
+fn punct_layout_0_is_unchanged() {
+    let back = || {
+        let mut e = layout1(Layout::Standard);
+        assert!(e.set_punct_layout(0).unwrap().is_some());
+        e
+    };
+    for mut e in [std(), back()] {
+        typ(&mut e, NIHAO);
+        assert!(k(&mut e, plain('\'')).preedit == "你好‘");
+        assert!(k(&mut e, Key::ch('\'', MOD_SHIFT)).preedit == "你好‘“");
+        assert!(k(&mut e, plain('\\')).preedit == "你好‘“、");
+        for c in '2'..='8' {
+            let mut e = std();
+            let o = k(&mut e, Key::ch(c, MOD_SHIFT));
+            assert!(o == blank(false), "rule 22: {c}");
+            typ(&mut e, NIHAO);
+            let o = k(&mut e, Key::ch(c, MOD_SHIFT));
+            assert!(!o.handled && o.commit == "你好" && o.preedit.is_empty(), "rule 21: {c}");
+        }
+    }
+}
+
+/// Layout 1 changes the ten cells only: the other keys keep layout 0's marks (`` ` `` and Shift+- among them, which the lexicon would
+/// give other marks), an Eten Zhuyin key stays one, and an unknown value is refused.
+#[test]
+fn punct_layout_1_leaves_the_other_keys() {
+    let mut e = layout1(Layout::Standard);
+    assert!(k(&mut e, plain('`')).preedit == "·");
+    let o = k(&mut e, Key::ch('-', MOD_SHIFT));
+    assert!(!o.handled && o.commit == "·" && o.preedit.is_empty(), "Shift+- is rule 21");
+    for (c, p) in PUNCT_TABLE {
+        if c != '\'' {
+            assert!(k(&mut layout1(Layout::Standard), Key::ch(c, MOD_SHIFT)).preedit == p.to_string(), "{c}");
+        }
+    }
+    for (c, p) in PLAIN_PUNCT_TABLE {
+        if c != '\'' && c != '\\' {
+            assert!(k(&mut layout1(Layout::Standard), plain(c)).preedit == p.to_string(), "{c}");
+        }
+    }
+    // Eten: ' is the Zhuyin key ㄘ; \ is no Zhuyin key there and gives layout 1's mark.
+    let mut e = layout1(Layout::Eten);
+    assert!(k(&mut e, plain('\'')).preedit == "ㄘ");
+    kk(&mut e, KeyKind::Esc);
+    assert!(k(&mut e, plain('\\')).preedit == "＼");
+    // An unknown value: refused, the layout stays 1.
+    let mut e = layout1(Layout::Standard);
+    assert!(e.set_punct_layout(2).unwrap().is_none());
+    assert!(k(&mut e, plain('\'')).preedit == "、");
+    // The snapshot of the call equals the output before it.
+    let mut e = std();
+    let before = typ(&mut e, NIHAO);
+    assert!(e.set_punct_layout(1).unwrap() == Some(before));
 }

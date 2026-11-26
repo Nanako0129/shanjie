@@ -49,13 +49,19 @@ public protocol ShiftHintPanel: AnyObject {
 @MainActor
 public protocol ShiftToggleStore: AnyObject {
     var shiftToggle: Bool? { get set }
+    /// The 用哪一側的 Shift choice (docs/spec/keys-and-composition.md §9.1): `both`, `right` or `left` (`ShiftTap.Side`); absent or unknown is `both`.
+    var shiftSide: String? { get set }
 }
 
 /// The in-memory ShiftToggleStore.
 @MainActor
 public final class MemoryShiftToggleStore: ShiftToggleStore {
     public var shiftToggle: Bool?
-    public init(_ shiftToggle: Bool? = nil) { self.shiftToggle = shiftToggle }
+    public var shiftSide: String?
+    public init(_ shiftToggle: Bool? = nil, side: String? = nil) {
+        self.shiftToggle = shiftToggle
+        shiftSide = side
+    }
 }
 
 /// The explanation window of the English defaults change (docs/spec/english-mixed.md §10.3): its own small
@@ -130,13 +136,19 @@ public enum InputMode: String, Sendable {
 @MainActor
 public protocol LayoutStore: AnyObject {
     var layout: String? { get set }
+    /// The 標點排列 choice (docs/spec/keys-and-composition.md §8.1): `apple` or `mcbopomofo` (`PunctLayout`); absent or unknown is `apple`.
+    var punctLayout: String? { get set }
 }
 
 /// The in-memory LayoutStore.
 @MainActor
 public final class MemoryLayoutStore: LayoutStore {
     public var layout: String?
-    public init(_ layout: String? = nil) { self.layout = layout }
+    public var punctLayout: String?
+    public init(_ layout: String? = nil, punctLayout: String? = nil) {
+        self.layout = layout
+        self.punctLayout = punctLayout
+    }
 }
 
 /// Where the "avoid ranking sensitive words first" switch is kept (docs/spec/decoder.md §2.4):
@@ -366,6 +378,19 @@ public final class MemoryRerankStore: RerankStore {
         self.rerank = rerank
         rerankLevel = level
     }
+}
+
+/// 標點排列 (docs/spec/keys-and-composition.md §8.1): stored by raw value; `code` is the C ABI's `set_punct_layout` value.
+public enum PunctLayout: String, CaseIterable, Sendable {
+    /// Apple Zhuyin's punctuation keys (the default).
+    case apple
+    /// McBopomofo's: ten cells differ.
+    case mcbopomofo
+
+    /// The stored preference: absent or unknown is `apple`.
+    public init(stored: String?) { self = stored.flatMap(PunctLayout.init(rawValue:)) ?? .apple }
+
+    var code: UInt32 { self == .mcbopomofo ? 1 : 0 }
 }
 
 /// 語意校正的強度 (docs/spec/semantic-rerank.md §8.2): stored by raw value; `code` is the C ABI's level, fixed per case.
@@ -671,7 +696,12 @@ public final class Shell {
     var englishNoticeArmed = false
     /// Set by the app: opens the settings window on the 選字 page (the notice's 打開設定 button).
     public var onOpenCandidateSettings: (() -> Void)?
+    /// Holds the chosen side too (`ShiftTap.side`): read from the store at start, kept when the toggle rebuilds it, changed by `setShiftSide`.
     var shiftTap = ShiftTap()
+    /// docs/spec/keys-and-composition.md §9.1: which Shift key's lone tap switches (default both).
+    public var shiftSide: ShiftTap.Side { shiftTap.side }
+    /// docs/spec/keys-and-composition.md §8.1: the punctuation layout (default Apple Zhuyin's); sent to every engine `build()` makes and on every change.
+    public private(set) var punctLayout = PunctLayout.apple
     /// docs/spec/macos-shell.md §13: the in-memory diagnostic log of the Shift toggle.
     public let diag: DiagLog
     /// docs/spec/macos-shell.md §13.1 (`flags`): the system's running count of `flagsChanged` events in this login session
@@ -992,6 +1022,8 @@ public final class Shell {
         self.flagsCounter = flagsCounter
         self.shiftToggleStore = shiftToggleStore
         shiftToggleOn = shiftToggleStore.shiftToggle ?? false // docs/spec/english-mixed.md §10.1: was true
+        shiftTap.side = ShiftTap.Side(stored: shiftToggleStore.shiftSide)
+        punctLayout = PunctLayout(stored: layoutStore.punctLayout)
         self.shiftHint = shiftHint
         self.englishNoticeStore = englishNoticeStore
         self.englishNotice = englishNotice
@@ -1129,6 +1161,10 @@ public final class Shell {
 
     func applyCandidateVertical(_ on: Bool) {
         if let o = owner { o.applyCandidateVertical(on) } else { dropOnFailure(setCandidateVertical(on)) }
+    }
+
+    func applyPunctLayout(_ layout: PunctLayout) {
+        if let o = owner { o.applyPunctLayout(layout) } else { dropOnFailure(setPunctLayout(layout)) }
     }
 
     func applyEnglishOverwrite(_ on: Bool) {
@@ -1315,6 +1351,15 @@ public final class Shell {
         return engine?.setCandidateVertical(on)
     }
 
+    /// The settings window's 標點排列 (docs/spec/keys-and-composition.md §8.1): stored, and sent to the engine, whose next key reads it. Nothing shown
+    /// changes, so the snapshot is not applied.
+    func setPunctLayout(_ layout: PunctLayout) -> CoreResult? {
+        punctLayout = layout
+        layoutStore.punctLayout = layout.rawValue
+        defer { changed() }
+        return engine?.setPunctLayout(layout.code)
+    }
+
     /// The menu's choice (docs/spec/semantic-rerank.md §8.2): stored, and sent to the engine, which recomputes the composition (off: the n-gram
     /// result at once); the snapshot is for the caller to show. A job waiting for the runner is dropped; one running is not applied.
     func setRerank(_ on: Bool) -> CoreResult? {
@@ -1470,9 +1515,10 @@ public final class Shell {
         Log.shell.debug("meme pack switched")
     }
 
-    /// Whether the core records the shadow and has an English run to keep a composition in (its `shadow_on()`): English mixing on, the
-    /// standard layout and the abbreviation composer off. Without it a switch to English first sends the composition (docs/spec/keys-and-composition.md §9.2).
-    var shadowOn: Bool { englishOn && mode == .standard && !abbreviationOn }
+    /// Whether the core's ASCII state is available, so that it keeps a composition through a switch to English (its `ascii_on()`): the
+    /// standard layout and the abbreviation composer off, whatever the English mixing switch says. Without it a switch to English first sends the
+    /// composition (docs/spec/keys-and-composition.md §9.2).
+    var asciiOn: Bool { mode == .standard && !abbreviationOn }
 
     /// The settings window's 單按 Shift 切換中英: stored; off clears every app's state and the core's (docs/spec/keys-and-composition.md §9.1). The snapshot is shown by the owner.
     func applyShiftToggle(_ on: Bool) {
@@ -1480,13 +1526,20 @@ public final class Shell {
         shiftToggleStore.shiftToggle = on
         if !on {
             asciiApps.removeAll()
-            shiftTap = ShiftTap()
+            shiftTap = ShiftTap(side: shiftTap.side)
             if let o = owner { o.pushAscii(false) } else if engineAscii {
                 engineAscii = false
                 diag.record(.ascii(bundle: "-", english: false))
                 dropOnFailure(engine?.setAscii(false))
             }
         }
+        changed()
+    }
+
+    /// The settings window's 用哪一側的 Shift (docs/spec/keys-and-composition.md §9.1): stored, and the running `ShiftTap` judges the next release by it.
+    func setShiftSide(_ side: ShiftTap.Side) {
+        shiftTap.side = side
+        shiftToggleStore.shiftSide = side.rawValue
         changed()
     }
 
@@ -1585,6 +1638,10 @@ public final class Shell {
         // Same for the candidate window's orientation (docs/spec/macos-shell.md §8.6.2).
         if case .failed(let c) = e.setCandidateVertical(candidateVertical) {
             Log.shell.error("shanjie_engine_set_candidate_vertical failed, code \(c)")
+        }
+        // And the punctuation layout (docs/spec/keys-and-composition.md §8.1), every time: the core's default is Apple Zhuyin's.
+        if case .failed(let c) = e.setPunctLayout(punctLayout.code) {
+            Log.shell.error("shanjie_engine_set_punct_layout failed, code \(c)")
         }
         // A rebuilt engine starts with the core's default (off since S7c-2c), and load_tinylm leaves the switch alone: the shell's
         // own value is sent every time, so the core's default never decides.
@@ -1833,16 +1890,16 @@ public final class Session {
             client.insertText(String(Character(c)), replacementRange: NSRange(location: NSNotFound, length: 0))
             return true
         }
-        // The same key with a composition the core cannot keep an English run in (`shadowOn` false; reached only when the setting or the app changed under an
+        // The same key with a composition where the core's ASCII state is not available (`asciiOn` false; reached only when the setting or the app changed under an
         // open composition): eaten, nothing typed, the composition stays. Not measured: Apple Zhuyin has no such state.
-        if let event, shell.engineAscii, !shell.shadowOn, event.modifierFlags.contains(.option), Self.asciiKey(event) != nil { return true }
+        if let event, shell.engineAscii, !shell.asciiOn, event.modifierFlags.contains(.option), Self.asciiKey(event) != nil { return true }
         // docs/spec/macos-shell.md §8.6.2: Page Up / Down reach the core only while the vertical window is on screen
         // and no modifier (Shift, Control, Option, Command, Caps Lock) is held; otherwise they are keys outside the tables.
         if let event, shell.verticalOpen, KeyMap.modifiers(event.modifierFlags) == 0, let kind = KeyMap.pageKeys[event.keyCode] {
             return send(ShanjieKey(kind: kind, ch: 0, modifiers: 0))
         }
         guard let event,
-              let key = (shell.engineAscii && shell.shadowOn ? Self.asciiKey(event) : nil) ?? KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
+              let key = (shell.engineAscii && shell.asciiOn ? Self.asciiKey(event) : nil) ?? KeyMap.translate(keyCode: event.keyCode, flags: event.modifierFlags)
         else {
             // nil, or a key outside the tables: never sent to the core.
             if shell.composing { finish(mode: 0) }
@@ -1914,8 +1971,9 @@ public final class Session {
         return false
     }
 
-    /// docs/spec/keys-and-composition.md §9.2: this app goes to English or back to Chinese. A composition the core cannot keep as an English run (`shadowOn` false)
-    /// is sent first. The hint shows which one (docs/spec/keys-and-composition.md §9.4).
+    /// docs/spec/keys-and-composition.md §9.2: this app goes to English or back to Chinese. Where the core's ASCII state is not available (`asciiOn` false: Eten,
+    /// the abbreviation composer) the composition is sent first, without its unfinished syllable (reset mode 2). The hint shows which one
+    /// (docs/spec/keys-and-composition.md §9.4).
     private func toggleAscii() {
         let bundle = client.bundleIdentifier  // a synchronous IPC: read once
         if claim() {
@@ -1924,7 +1982,7 @@ public final class Session {
         }
         let app = asciiApp(bundle)
         let on = !shell.asciiApps.contains(app)
-        if on && shell.composing && !shell.shadowOn { finish(mode: 0) }
+        if on && shell.composing && !shell.asciiOn { finish(mode: 2) }
         if on { shell.asciiApps.insert(app) } else { shell.asciiApps.remove(app) }
         pushAscii(on)
         shell.lastTypingAt = shell.idleClock()  // docs/spec/english-mixed.md §11: this hint already shows the mode
@@ -2153,6 +2211,11 @@ public final class Session {
         }
     }
 
+    /// 標點排列: nothing shown changes, so only a failure is handled.
+    func applyPunctLayout(_ layout: PunctLayout) {
+        if case .failed(let c)? = shell.setPunctLayout(layout) { _ = fail(c) }
+    }
+
     /// The menu's 語意校正 switch: the snapshot is shown, if this session owns the composition.
     func applyRerank(_ on: Bool) {
         switch shell.setRerank(on) {
@@ -2265,7 +2328,7 @@ public final class Session {
         }
     }
 
-    /// reset mode 0 commits to this session's client, 1 discards; either way the client's marked
+    /// reset mode 0 commits to this session's client, 1 discards, 2 commits without the unfinished syllable; either way the client's marked
     /// text and the panel are cleared.
     func finish(mode: UInt32) {
         guard let engine = shell.engine else { return }

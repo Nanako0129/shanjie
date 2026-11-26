@@ -277,12 +277,19 @@ final class CoreEngine {
     /// docs/spec/keys-and-composition.md §4.3 mouse pick: `index` is a position in the last output's candidates. With the
     /// candidate window closed and a prediction row showing (entered or not), it selects that row's item
     /// (docs/spec/prediction.md §1.1). Code 2 when neither is showing or `index` is outside that output (state unchanged).
+    /// docs/spec/keys-and-composition.md §8.1: the punctuation layout, 0 Apple Zhuyin's (the core's default) or 1 McBopomofo's. Sent to every engine
+    /// `Shell.build()` makes, like `setCandidateVertical`.
+    func setPunctLayout(_ layout: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_punct_layout(handle, layout, &out), out)
+    }
+
     func pick(_ index: UInt32) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_pick(handle, index, &out), out)
     }
 
-    /// mode 0 commits the composition then clears, 1 discards.
+    /// mode 0 commits the composition then clears, 1 discards, 2 drops the unfinished syllable and then commits.
     func reset(mode: UInt32) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_reset(handle, mode, &out), out)

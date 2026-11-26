@@ -2673,3 +2673,200 @@ fn the_zhuyin_replay_is_the_engine_with_mixing_off() {
     // Not a replay: a tone key first, an upper-case letter, any other character.
     assert!(e.english_replay("3a").is_none() && e.english_replay("aB").is_none() && e.english_replay("a!").is_none());
 }
+
+// ---------- docs/spec/keys-and-composition.md §9.3: the ASCII state with English mixing off ----------
+
+/// Standard layout, English mixing off (the core's default).
+fn plain_eng() -> Engine {
+    Engine::with_lexicon(real(), Layout::Standard)
+}
+fn has_zhuyin(s: &str) -> bool {
+    s.chars().any(|c| ('ㄅ'..='ㄩ').contains(&c) || "ˊˇˋ˙".contains(c))
+}
+
+#[test]
+fn ascii_without_mixing_keeps_the_composition() {
+    let mut e = plain_eng();
+    run(&mut e, "j i 3 u l 4"); // 我要
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.commit.is_empty() && o.preedit == "我要", "{}", o.preedit);
+    let os = run_all(&mut e, "o k Enter");
+    assert!(commits(&os) == "我要ok", "{}", commits(&os));
+}
+
+/// The unfinished syllable is dropped by `set_ascii(1)` itself (its snapshot shows it gone), there being no key record to turn into a run.
+#[test]
+fn ascii_without_mixing_drops_the_unfinished_syllable() {
+    let mut e = plain_eng();
+    let before = run(&mut e, "2 8 3").preedit; // 打
+    let pending = run(&mut e, "2 8"); // ㄉㄚ
+    assert!(before == "打" && has_zhuyin(&pending.preedit), "premise: {} / {}", before, pending.preedit);
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.handled && o.commit.is_empty() && o.preedit == "打" && fields(&o) == (0, 0), "the snapshot: {}", o.preedit);
+    run(&mut e, "o k");
+    let o = e.set_ascii(false).unwrap();
+    assert!(o.preedit == "打ok" && fields(&o) == (0, 0), "{}", o.preedit);
+    let os = run_all(&mut e, "c l 3 Enter"); // 好
+    assert!(commits(&os) == "打ok好", "{}", commits(&os));
+}
+
+/// Only the unfinished syllable: the snapshot of `set_ascii(1)` is empty, and so is the composition.
+#[test]
+fn ascii_without_mixing_drops_a_lone_unfinished_syllable() {
+    let mut e = plain_eng();
+    assert!(has_zhuyin(&run(&mut e, "2 8").preedit));
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.handled && o.commit.is_empty() && o.preedit.is_empty(), "{}", o.preedit);
+    assert!(is_empty(&mut e));
+}
+
+/// `!` and Space in the state are §9.3's, as with mixing on.
+#[test]
+fn ascii_without_mixing_marks_and_space() {
+    let mut e = plain_eng();
+    e.set_ascii(true).unwrap();
+    run(&mut e, "w o w");
+    let o = run(&mut e, "!");
+    assert!(o.preedit == "wow!" && fields(&o) == (0, 0) && e.syllables() == ["_punct_wow", "_punct_!"], "{} {:?}", o.preedit, e.syllables());
+    assert!(run(&mut e, "_").preedit == "wow! ");
+    let mut e = plain_eng();
+    e.set_ascii(true).unwrap();
+    run(&mut e, "H i ! _ t h e r e");
+    assert!(run(&mut e, "Enter").commit == "Hi! there");
+    // With a run open Space only ends it.
+    let mut e = plain_eng();
+    e.set_ascii(true).unwrap();
+    run(&mut e, "o k _");
+    assert!(run(&mut e, "Enter").commit == "ok");
+}
+
+/// Back in Chinese with mixing off, Space after the English token is what it always was after a token there (no space unit): the same
+/// output as an engine that got its token with mixing on and then had mixing switched off.
+#[test]
+fn space_after_a_token_without_mixing_types_no_space_unit() {
+    let mut e = plain_eng();
+    run(&mut e, "j i 3 u l 4");
+    e.set_ascii(true).unwrap();
+    run(&mut e, "o k");
+    e.set_ascii(false).unwrap();
+    let before = e.syllables().to_vec();
+    let o = run(&mut e, "_");
+    assert!(e.syllables() == before && before.last().is_some_and(|s| s == "_punct_ok"), "no space unit: {:?}", e.syllables());
+    let mut r = eng();
+    run(&mut r, "j i 3 u l 4");
+    r.set_ascii(true).unwrap();
+    run(&mut r, "o k");
+    r.set_ascii(false).unwrap();
+    r.set_english(false).unwrap();
+    assert!(r.syllables() == before, "premise: the same composition");
+    assert!(run(&mut r, "_") == o, "the same output as mixing off always gave here");
+}
+
+/// An English token is edited by the mixing-off rules: Backspace takes it whole, in either state, and never reopens it as a run.
+#[test]
+fn backspace_without_mixing_takes_the_whole_token() {
+    let mut e = plain_eng();
+    run(&mut e, "j i 3 u l 4");
+    e.set_ascii(true).unwrap();
+    run(&mut e, "o k _");
+    e.set_ascii(false).unwrap();
+    assert!(e.syllables().last().is_some_and(|s| s == "_punct_ok"));
+    let o = run(&mut e, "BS");
+    assert!(o.preedit == "我要" && fields(&o) == (0, 0) && e.syllables().len() == 2, "{} {:?}", o.preedit, e.syllables());
+}
+
+/// The same in the ASCII state: `wow!`, then Backspace twice, is an empty composition (with mixing on the second one leaves `wo`).
+#[test]
+fn backspace_without_mixing_takes_the_whole_token_in_the_ascii_state() {
+    let mut e = plain_eng();
+    e.set_ascii(true).unwrap();
+    run(&mut e, "w o w !");
+    let o = run(&mut e, "BS BS");
+    assert!(o.preedit.is_empty() && fields(&o) == (0, 0) && e.syllables().is_empty(), "{} {:?}", o.preedit, e.syllables());
+}
+
+/// What comes with English mixing stays off: Shift+letter, the digit layer and the reverts give, after a trip through the ASCII state, the
+/// outputs of an engine that never left Chinese.
+#[test]
+fn mixing_off_rules_are_untouched_by_the_ascii_state() {
+    use core::digits::DigitTable;
+    let build = |trip: bool| {
+        let (lm, capped) = lm_parts();
+        let mut e = plain_eng();
+        e.set_lm(lm, capped);
+        e.set_digit_table(Some(Arc::new(DigitTable::parse(&std::fs::read_to_string(root().join("data/lexicon/digits.tsv")).unwrap()).unwrap())));
+        if trip {
+            e.set_ascii(true).unwrap();
+            e.set_ascii(false).unwrap();
+        }
+        e
+    };
+    // Shift+letter on nothing and after a syllable; the digit row; a key over its own column, a key out of column order, a syllable the lexicon lacks.
+    for script in ["S-a", "j i 3 S-a", "1 2 3 _ Enter", "j j i 3 Enter", "8 j 3 Enter", "j 8 l 3 Enter", "x x _ Enter"] {
+        let (mut a, mut b) = (build(true), build(false));
+        for tok in script.split_whitespace() {
+            assert!(a.key(key_of(tok)).unwrap() == b.key(key_of(tok)).unwrap(), "{script} at {tok}");
+            assert!(a.english_reverted().is_none() && !a.english_split() && a.syllables() == b.syllables(), "{script} at {tok}");
+            assert!(a.syllables().iter().all(|s| english_of_test(s).is_none()), "{script} at {tok}: {:?}", a.syllables());
+        }
+    }
+}
+/// An English or digit token's text (the reading of a unit that is no punctuation mark).
+fn english_of_test(reading: &str) -> Option<&str> {
+    reading.strip_prefix("_punct_").filter(|t| t.chars().all(|c| c.is_ascii_alphanumeric()))
+}
+
+/// Where the ASCII state is not available (Eten, the abbreviation composer) `set_ascii(1)` only records it, with mixing off as with it on.
+#[test]
+fn ascii_without_mixing_is_only_recorded_in_eten_and_with_the_composer() {
+    let mut e = Engine::with_lexicon(real(), Layout::Eten);
+    let before = run(&mut e, "s e").preedit;
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.preedit == before && has_zhuyin(&o.preedit) && fields(&o) == (0, 0), "{} / {before}", o.preedit);
+    let o = run(&mut e, "a");
+    assert!(fields(&o) == (0, 0) && o.preedit != before && has_zhuyin(&o.preedit), "a Zhuyin key as ever: {}", o.preedit);
+    let mut e = plain_eng();
+    e.set_abbreviation(true).unwrap();
+    let before = run(&mut e, "c").preedit; // ㄏ
+    let o = e.set_ascii(true).unwrap();
+    assert!(o.preedit == before && has_zhuyin(&o.preedit), "{} / {before}", o.preedit);
+    let o = run(&mut e, "l");
+    assert!(has_zhuyin(&o.preedit) && o.preedit != before && e.syllables().is_empty(), "a Zhuyin key as ever: {}", o.preedit);
+}
+
+// ---------- docs/spec/keys-and-composition.md §7.2: reset mode 2 (`ResetMode::CommitFinished`) ----------
+
+#[test]
+fn reset_commit_finished_drops_the_unfinished_syllable() {
+    // Eten: 打 (ㄉㄚˇ: d a 3) and an unfinished ㄉㄚ.
+    let mut e = Engine::with_lexicon(real(), Layout::Eten);
+    let da = run(&mut e, "d a 3").preedit;
+    let o = run(&mut e, "d a");
+    assert!(da == "打" && o.preedit.starts_with("打") && has_zhuyin(&o.preedit), "premise: {}", o.preedit);
+    let o = e.reset(ResetMode::CommitFinished);
+    assert!(o.handled && o.commit == "打" && o.preedit.is_empty(), "{}", o.commit);
+    assert!(is_empty(&mut e));
+    // Only an unfinished syllable: nothing is sent.
+    let mut e = Engine::with_lexicon(real(), Layout::Eten);
+    run(&mut e, "d a");
+    let o = e.reset(ResetMode::CommitFinished);
+    assert!(o.commit.is_empty() && o.preedit.is_empty() && is_empty(&mut e));
+    // The abbreviation composer: every unfinished unit goes.
+    let (lm, capped) = lm_parts();
+    let mut e = plain_eng();
+    e.set_lm(lm, capped);
+    e.set_abbreviation(true).unwrap();
+    let da = run(&mut e, "2 8 3").preedit;
+    let o = run(&mut e, "2 2 2");
+    assert!(o.preedit == format!("{da}ㄉㄉㄉ"), "premise: three units: {}", o.preedit);
+    let o = e.reset(ResetMode::CommitFinished);
+    assert!(o.commit == da && o.preedit.is_empty(), "{}", o.commit);
+    // Nothing unfinished: mode 0's output, field by field.
+    let both = |mode| {
+        let mut e = eng();
+        run(&mut e, "j i 3 u l 4 S-o k");
+        e.reset(mode)
+    };
+    assert!(both(ResetMode::CommitFinished) == both(ResetMode::Commit));
+    assert!(both(ResetMode::Commit).commit.ends_with("Ok"));
+}
