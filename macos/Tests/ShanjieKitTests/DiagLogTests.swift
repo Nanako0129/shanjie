@@ -273,6 +273,7 @@ final class DiagLogTests: XCTestCase {
             .otherKeyReleased: { c, _ in self.flags(c, 56, 0x2); self.flags(c, 60, 0x6); self.time += 0.1; self.flags(c, 56, 0x4) },
             .modifierAtRelease: { c, _ in self.flags(c, 56, 0x2); self.time += 0.1; self.flags(c, 56, 0, extra: .control) },
             .capsLockAtRelease: { c, _ in self.flags(c, 56, 0x2); self.time += 0.1; self.flags(c, 56, 0, extra: .capsLock) },
+            .wrongSide: { c, s in s.setShiftSide(.right); self.flags(c, 56, 0x2); self.time += 0.1; self.flags(c, 56, 0) },
         ]
         XCTAssertEqual(Set(sequences.keys), Set(ShiftTap.Outcome.allCases).subtracting([.toggled]), "a reason without a test")
         for (outcome, run) in sequences {
@@ -314,6 +315,9 @@ final class DiagLogTests: XCTestCase {
             }),
             (.tooLong, "too long and a click", { c in
                 c.session.shell.mouseAgo = { 0.05 }; self.flags(c, 56, 0x2); self.time += ShiftTap.SHIFT_TAP_MAX + 0.1; self.flags(c, 56, 0)
+            }),
+            (.mouse, "a click, on the side that is not chosen", { c in
+                c.session.shell.setShiftSide(.right); c.session.shell.mouseAgo = { 0.05 }; self.flags(c, 56, 0x2); self.time += 0.1; self.flags(c, 56, 0)
             }),
         ]
         for (outcome, name, run) in cases {

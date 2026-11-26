@@ -136,7 +136,16 @@ public struct MenuEntry: Equatable, Sendable {
         public static let englishOverwriteNote = "ok、rust、gta6 這類字要靠它。開了之後，用重打同一個位置來改錯的注音也會變成英文（馬上按 Esc 變回注音）。"
         /// The Shift-toggle switch in the settings window and the line under it (docs/spec/keys-and-composition.md §9.1).
         public static let shiftToggle = "單按 Shift 切換中英"
-        public static let shiftToggleNote = "單按一下左或右 Shift 在中文和英文之間切換，游標旁會短暫顯示「英」或「中」，換 App 或停打一陣子後開始打字時也會顯示。每個 App 各自記住；組字區有字時，之後打的字母接在後面當英文。"
+        public static let shiftToggleNote = "單按一下 Shift 在中文和英文之間切換（用哪一側可以在下面選），游標旁會短暫顯示「英」或「中」，換 App 或停打一陣子後開始打字時也會顯示。每個 App 各自記住；組字區有字時，之後打的字母接在後面當英文。中英混打關著時，還沒打完的注音會丟掉。"
+        /// The picker under the switch (docs/spec/keys-and-composition.md §9.1) and its three choices.
+        public static let shiftSide = "用哪一側的 Shift"
+        public static let shiftSideBoth = "左右都可"
+        public static let shiftSideRight = "只有右邊"
+        public static let shiftSideLeft = "只有左邊"
+        /// The punctuation layout picker of the 鍵盤 section (docs/spec/keys-and-composition.md §8.1) and its two choices.
+        public static let punctLayout = "標點排列"
+        public static let punctLayoutApple = "macOS 注音"
+        public static let punctLayoutMcbopomofo = "小麥注音"
         /// The spacing toggle in the settings window and the line under it (docs/spec/english-mixed.md §9, §11).
         public static let spacing = "中英文之間自動加空格"
         public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"

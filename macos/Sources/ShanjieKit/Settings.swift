@@ -71,6 +71,11 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var memePack = true
     /// 單按 Shift 切換中英 (docs/spec/keys-and-composition.md §9.1). Default false since docs/spec/english-mixed.md §10.1.
     @Published public private(set) var shiftToggle = false
+    /// 用哪一側的 Shift (docs/spec/keys-and-composition.md §9.1); its control is greyed while the toggle is off (`shiftSideEnabled`).
+    @Published public private(set) var shiftSide = ShiftTap.Side.both
+    public var shiftSideEnabled: Bool { shiftToggle }
+    /// 標點排列 (docs/spec/keys-and-composition.md §8.1).
+    @Published public private(set) var punctLayout = PunctLayout.apple
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (docs/spec/lexicon-and-packs.md §4.5): the same text as the menu's, `nil` for no line.
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
     @Published public private(set) var backupExcluded = false
@@ -141,6 +146,8 @@ public final class SettingsModel: ObservableObject {
         beautyPack = shell.beautyPackOn
         memePack = shell.memePackOn
         shiftToggle = shell.shiftToggleOn
+        shiftSide = shell.shiftSide
+        punctLayout = shell.punctLayout
         glassTint = shell.glassTint
         candidateVertical = shell.candidateVertical
         profileMode = shell.profileMode
@@ -203,6 +210,8 @@ public final class SettingsModel: ObservableObject {
     public func setBeautyPack(_ on: Bool) { shell.setBeautyPack(on) }
     public func setMemePack(_ on: Bool) { shell.setMemePack(on) }
     public func setShiftToggle(_ on: Bool) { shell.applyShiftToggle(on) }
+    public func setShiftSide(_ side: ShiftTap.Side) { shell.setShiftSide(side) }
+    public func setPunctLayout(_ layout: PunctLayout) { shell.applyPunctLayout(layout) }
     public func setBackupExcluded(_ on: Bool) {
         shell.setBackupExcluded(on)
         refreshExternal()  // not read on the change notification
