@@ -1,7 +1,7 @@
 import XCTest
 @testable import ShanjieKit
 
-/// 可省略韻母 does not ship in v0.4.0: with `showsAbbreviation: false`, as the app passes, the switch is in
+/// A shell built with `showsAbbreviation: false` (the app passes `Shell.shipsAbbreviation`, true; see AbbreviationShellTests): the switch is in
 /// neither the menu nor the settings model, the composer stays off even when the store says on, and nothing writes the store.
 @MainActor
 final class HiddenAbbreviationTests: XCTestCase {

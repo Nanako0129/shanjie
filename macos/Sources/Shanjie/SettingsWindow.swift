@@ -4,8 +4,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The settings window (docs/spec/macos-shell.md §9.1, layout and size from docs/spec/macos-shell.md §9.2): one
-/// NSWindow with a SwiftUI sidebar of pages and the selected page's grouped Form, in the input method's own process. It
-/// has no text field, so it needs no Edit menu and the input method never types into its own window. Brought forward like
+/// NSWindow with a SwiftUI sidebar of pages and the selected page's grouped Form, in the input method's own process. Its one
+/// text field is the 可省略韻母 try field, which the input method composes into; there is no Edit menu. Brought forward like
 /// `AlertDialogs`: remember the frontmost app, `NSApp.activate()`, `makeKeyAndOrderFront`; on close the focus goes back.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {

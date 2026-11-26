@@ -314,8 +314,8 @@ extension Session {
         if shell.showsAbbreviation {
             items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         }
-        // docs/spec/english-mixed.md §1.1, §11: after 即時預測 and before 語意校正, where 可省略韻母 sits when it is shown (the app hides it, so there it
-        // follows 即時預測 directly); greyed (checkmark kept) when the layout is Eten.
+        // docs/spec/english-mixed.md §1.1, §11: after 即時預測 and before 語意校正, where 可省略韻母 sits (shown in the app; a shell built with
+        // showsAbbreviation false has it follow 即時預測 directly); greyed (checkmark kept) when the layout is Eten.
         items.append(MenuEntry(title: T.english, action: .toggleEnglish, checked: shell.englishOn, enabled: shell.englishEnabled))
         // docs/spec/semantic-rerank.md §8.2, §8.3 (F11): greyed while the demotion table is off or the small model did not load, where the core makes
         // no rerank job.
