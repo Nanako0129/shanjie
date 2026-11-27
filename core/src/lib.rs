@@ -847,7 +847,7 @@ impl Lexicon {
         self.path_readings_with_fuzzy(syls, words, t3, 0)
     }
 
-    /// `path_readings` with the flags the path was decoded under (docs/spec/decoder.md §6.5): bit 5 reads an unknown syllable through the
+    /// `path_readings` with the flags the path was decoded under (docs/spec/decoder.md §7): bit 5 reads an unknown syllable through the
     /// one-symbol table, bits 4 and 5 through both. The sound bits (0-3) are masked out, so they never reach the readings (and the manual-word mask).
     pub fn path_readings_with_fuzzy<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>, t3: &[tone3::Pos], flags: u32) -> Vec<String> {
         let flags = flags & (fuzzy::FUZZY_ADJACENT | fuzzy::FUZZY_ONE_SYM);

@@ -339,7 +339,7 @@ int32_t shanjie_engine_set_english_overwrite(ShanjieEngine *engine, uint32_t ena
 //   while typing, which stays English) accept a syllable the lexicon lacks when replacing one symbol of a lexicon syllable by another
 //   of its column (initial, medial or final; the tone kept) would show it: ㄒㄧㄟˇ is read as ㄒㄧㄤˇ, ㄒㄧㄚˇ ... With both bit 4 and bit 5
 //   the adjacent-key readings come first and rank above the one-symbol ones; the ETen layout reads bit 5 only, whatever bit 4 says.
-//   A syllable only bit 5 accepted is never written to the learning file. Turning bit 5 off, or on without bit 4, first stores every
+//   A syllable bit 5 is on for and the lexicon lacks is never written to the learning file, with 48 also one that bit 4 accepted. Turning bit 5 off, or on without bit 4, first stores every
 //   accepted syllable of the composition as the lexicon reading it shows as now, so the text stays. Call it after
 //   every engine creation, like set_english.
 int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out); // bits 0-5; returns a snapshot
