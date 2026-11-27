@@ -76,7 +76,10 @@ const _: () = {
 /// calls may read it. No `Debug`: it holds the data folder's path, which no log may carry.
 pub struct ShanjieShared(Shared);
 
-// Send and Sync from the field types (an `Arc` of the model and tables, a path), never from an `unsafe impl` of this crate's own.
+// Send and Sync from the field types (an `Arc` of the model and tables, a path), never from a new `unsafe impl`: the only one beneath them is
+// `mmap::Mapped`'s (read-only maps of the n-gram model and its side files, the colloquial table and the .sjtl,
+// docs/spec/c-abi.md §5.4); the small model's purgeable slabs (Apple)
+// are Send and Sync from their `Mutex` of plain integers.
 const _: () = {
     fn send_sync<T: Send + Sync>() {}
     fn send<T: Send>() {}

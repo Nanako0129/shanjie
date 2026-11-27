@@ -17,6 +17,7 @@
 use crate::colloquial::{self, Colloquial};
 use crate::learn::{context_key, is_han, last_chars, SENTINEL};
 use crate::lm::{Lm, Profile, SinitLayer, EPS_SINIT_COARSE, EPS_SINIT_FINE, EPS_SINIT_MID};
+use crate::mmap::{MapError, Mapped};
 use crate::ManualSet;
 use std::collections::HashMap;
 use std::fmt;
@@ -223,6 +224,62 @@ fn gemm(be: Backend, a: &[f32], b: &[f32], c: &mut [f32], (m, k, n): (usize, usi
             debug_assert!(ran, "the selected kernel is one this CPU has");
         }
     }
+}
+
+/// `check_gemm` for a product whose b is int8 rows plus one f32 scale per row (`gemm_q8`): b holds k * n bytes, and the scales are one per
+/// row of b as stored, n when transposed (b is n x k), else k. In release too.
+fn check_gemm_q8(a: &[f32], bq: &[u8], b_scale: &[f32], c: &[f32], (m, k, n): (usize, usize, usize), trans_b: bool) {
+    assert!(
+        m.checked_mul(k) == Some(a.len())
+            && k.checked_mul(n) == Some(bq.len())
+            && m.checked_mul(n) == Some(c.len())
+            && b_scale.len() == if trans_b { n } else { k },
+        "gemm: matrix lengths do not match"
+    );
+}
+
+/// Rows of int8 `q` (each `cols` bytes) restored into `out` as f32, row r times `scales[r]`: `(q as i8 as f32) * scale`, the one product the
+/// export's dequantization defines (and what the f32 matrices of earlier builds held), computed once per element and never folded into another
+/// product (docs/spec/semantic-rerank.md §2.4).
+fn restore_rows(q: &[u8], scales: &[f32], cols: usize, out: &mut [f32]) {
+    assert!(q.len() == out.len() && cols.checked_mul(scales.len()) == Some(q.len()), "restore: lengths do not match");
+    if cols == 0 {
+        return;
+    }
+    for ((row, o), s) in q.chunks_exact(cols).zip(out.chunks_exact_mut(cols)).zip(scales) {
+        o.iter_mut().zip(row).for_each(|(o, &x)| *o = x as i8 as f32 * s);
+    }
+}
+
+/// docs/spec/semantic-rerank.md §2.4: the portable product with an int8 b (the matrices are never expanded whole). A few rows of b at a time are
+/// restored (`restore_rows`) into one heap tile of at most 128 KiB (`MAX_D` wide: never on the stack of a 512 KiB worker thread), then every row of a
+/// goes through `gemm_kernel` against that tile: not transposed, 4 rows of b (as the vector kernels block them), so each c[i][j] still takes its
+/// products with p in order; transposed, `32_768 / k` rows (1 to 32), each c[i][j] one independent dot product. Every element therefore sees the
+/// same operations in the same order as the product with the expanded f32 b: the same bits on every kernel. False when this CPU lacks `kernel`.
+fn gemm_q8(kernel: Kernel, a: &[f32], bq: &[u8], b_scale: &[f32], c: &mut [f32], (m, k, n): (usize, usize, usize), trans_b: bool) -> bool {
+    check_gemm_q8(a, bq, b_scale, c, (m, k, n), trans_b);
+    if m == 0 {
+        return true;
+    }
+    // (rows of b per tile, length of a row of b, rows of b)
+    let (per, len, rows) = if trans_b { ((32_768 / k.max(1)).clamp(1, 32), k, n) } else { (4, n, k) };
+    let mut tile = vec![0f32; per * len];
+    for r0 in (0..rows).step_by(per) {
+        let r1 = (r0 + per).min(rows);
+        let t = &mut tile[..(r1 - r0) * len];
+        restore_rows(&bq[r0 * len..r1 * len], &b_scale[r0..r1], len, t);
+        for i in 0..m {
+            let ran = if trans_b {
+                gemm_kernel(kernel, &a[i * k..][..k], t, &mut c[i * n + r0..i * n + r1], (1, k, r1 - r0), true)
+            } else {
+                gemm_kernel(kernel, &a[i * k + r0..i * k + r1], t, &mut c[i * n..][..n], (1, r1 - r0, n), false)
+            };
+            if !ran {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 /// Runs one kernel; false (and nothing computed) when this CPU does not have it. The one place the vector kernels are called from: it
@@ -510,6 +567,322 @@ mod x86 {
     }
 }
 
+#[cfg(all(target_vendor = "apple", not(target_pointer_width = "64")))]
+compile_error!("PurgeableSlab requires 64-bit Apple targets");
+
+/// docs/spec/semantic-rerank.md §2.4, B1: one int8 matrix restored to f32 in Mach purgeable memory, for the Accelerate path. Anonymous memory of
+/// this process only (no file, nothing written to disk, no entitlement): allocated on first use, restored, pinned non-volatile for one
+/// `cblas_sgemm`, then volatile again, so between uses it is not in the process's phys_footprint and the system may empty it under pressure;
+/// a pin that finds it emptied restores it again. Only `<mach/vm_map.h>` calls (`vm_allocate`, `vm_deallocate`, `vm_purgable_control`), which
+/// macOS and iOS both have (`mach_vm.h` is unsupported on iOS).
+///
+/// The state, all under one `Mutex` (SEC-03): `addr` (0: not allocated), `pins` (how many `PinGuard`s are alive: non-volatile and restored
+/// while > 0), `populated` (the region holds the restored matrix as of the last restore). A restore runs with the lock held, so a second
+/// thread pinning the same matrix waits on the lock until it is done, and the region is written only while nobody holds a pin. A panic out
+/// of a restore leaves `populated` false and the region volatile (`Unwind`), so the poisoned lock is recovered safely and the next pin
+/// restores again. The state read back from the kernel is masked with `VM_PURGABLE_STATE_MASK` (the higher bits carry order, behavior and
+/// group). A Mach call that does not return `KERN_SUCCESS`, or a pin count that would overflow, never reads the region: the pin is refused
+/// (`None`), `fallbacks` counts it, and the caller computes that product on the portable path instead.
+#[cfg(target_vendor = "apple")]
+mod purgeable {
+    use std::sync::{Mutex, MutexGuard};
+
+    // <mach/mach_init.h>, <mach/vm_page_size.h>, <mach/vm_map.h> (checked against the macOS and iOS SDKs): mach_port_t and vm_map_t are u32,
+    // vm_address_t and vm_size_t are pointer-sized, kern_return_t, vm_purgable_t and the state are int.
+    extern "C" {
+        static mach_task_self_: u32;
+        static vm_page_size: usize;
+        fn vm_allocate(target_task: u32, address: *mut usize, size: usize, flags: i32) -> i32;
+        fn vm_deallocate(target_task: u32, address: usize, size: usize) -> i32;
+        fn vm_purgable_control(target_task: u32, address: usize, control: i32, state: *mut i32) -> i32;
+    }
+    const KERN_SUCCESS: i32 = 0;
+    /// What the test-only fault injection returns in place of a Mach call.
+    const KERN_FAILURE: i32 = 5;
+    const VM_FLAGS_ANYWHERE: i32 = 0x0001;
+    const VM_FLAGS_PURGABLE: i32 = 0x0002;
+    const VM_PURGABLE_SET_STATE: i32 = 0;
+    const VM_PURGABLE_GET_STATE: i32 = 1;
+    const VM_PURGABLE_STATE_MASK: i32 = 3;
+    const VM_PURGABLE_NONVOLATILE: i32 = 0;
+    const VM_PURGABLE_VOLATILE: i32 = 1;
+    const VM_PURGABLE_EMPTY: i32 = 2;
+
+    fn task() -> u32 {
+        // SAFETY: a plain read of a port name libSystem sets before main and never changes.
+        unsafe { mach_task_self_ }
+    }
+
+    /// `elem_len` f32 rounded up to whole pages, or `None` (an overflow, an empty matrix, or a page size that is not a power of two).
+    fn alloc_bytes(elem_len: usize) -> Option<usize> {
+        // SAFETY: a plain read of a value libSystem sets before main and never changes.
+        let page = unsafe { vm_page_size };
+        let bytes = elem_len.checked_mul(4)?;
+        if bytes == 0 || !page.is_power_of_two() {
+            return None;
+        }
+        let rounded = bytes.checked_add(page - 1)? & !(page - 1);
+        (rounded <= isize::MAX as usize).then_some(rounded)
+    }
+
+    /// `vm_purgable_control` on the region at `addr`: `(kern_return_t, state)` (for SET_STATE the state returned is the old one).
+    fn control(addr: usize, op: i32, state: i32) -> (i32, i32) {
+        let mut st = state;
+        // SAFETY: `addr` is a region this slab allocated and has not deallocated; `st` is a valid in/out pointer for the call.
+        let kr = unsafe { vm_purgable_control(task(), addr, op, &mut st) };
+        (kr, st)
+    }
+
+    /// Test-only fault injection (never compiled into the library): make the next Mach calls fail, or panic out of a restore.
+    #[cfg(test)]
+    #[derive(Default)]
+    pub(super) struct Inject {
+        pub(super) fail_alloc: bool,
+        pub(super) fail_control: bool,
+        pub(super) panic_restore: bool,
+    }
+
+    #[derive(Default)]
+    struct SlabInner {
+        addr: usize,
+        alloc_bytes: usize,
+        pins: usize,
+        populated: bool,
+        alloc_ok: usize,
+        pin_ok: usize,
+        volatile_ok: usize,
+        empty_rebuilds: usize,
+        fallbacks: usize,
+        #[cfg(test)]
+        inject: Inject,
+    }
+
+    pub(super) struct PurgeableSlab {
+        elem_len: usize,
+        inner: Mutex<SlabInner>,
+    }
+
+    /// The counters of one slab (`TinyLm::purgeable_stats` sums them).
+    pub(super) struct SlabCounts {
+        pub(super) alloc_ok: usize,
+        pub(super) pin_ok: usize,
+        pub(super) volatile_ok: usize,
+        pub(super) empty_rebuilds: usize,
+        pub(super) fallbacks: usize,
+        pub(super) volatile_now: bool,
+    }
+
+    /// The restored matrix, non-volatile for as long as this lives; the slice cannot outlive the guard.
+    pub(super) struct PinGuard<'a> {
+        slab: &'a PurgeableSlab,
+        data: &'a [f32],
+    }
+
+    impl std::ops::Deref for PinGuard<'_> {
+        type Target = [f32];
+        fn deref(&self) -> &[f32] {
+            self.data
+        }
+    }
+
+    impl Drop for PinGuard<'_> {
+        fn drop(&mut self) {
+            let mut g = self.slab.lock();
+            g.pins -= 1;
+            // The last pin: volatile again (out of phys_footprint). A failure leaves it non-volatile, visible as volatile_ok falling behind and
+            // in `currently_volatile`.
+            if g.pins == 0 && control(g.addr, VM_PURGABLE_SET_STATE, VM_PURGABLE_VOLATILE).0 == KERN_SUCCESS {
+                g.volatile_ok += 1;
+            }
+        }
+    }
+
+    impl PurgeableSlab {
+        /// Nothing is allocated until the first `pin`.
+        pub(super) fn new(elem_len: usize) -> PurgeableSlab {
+            PurgeableSlab { elem_len, inner: Mutex::new(SlabInner::default()) }
+        }
+
+        /// The lock, recovered if a panic poisoned it (the state is consistent at every point a panic can leave it: see the module comment).
+        fn lock(&self) -> MutexGuard<'_, SlabInner> {
+            self.inner.lock().unwrap_or_else(|e| e.into_inner())
+        }
+
+        /// The restored matrix, pinned non-volatile until the guard drops; `restore` fills the region when it does not hold the matrix (first
+        /// use, emptied by the system, or a restore that panicked). `None`, with nothing read from the region, when a Mach call fails.
+        pub(super) fn pin(&self, restore: impl FnOnce(&mut [f32])) -> Option<PinGuard<'_>> {
+            let mut g = self.lock();
+            #[cfg(test)]
+            let (fail_alloc, fail_control) = (g.inject.fail_alloc, g.inject.fail_control);
+            #[cfg(not(test))]
+            let (fail_alloc, fail_control) = (false, false);
+            let restore_needed = if g.addr == 0 {
+                let Some(bytes) = alloc_bytes(self.elem_len) else {
+                    g.fallbacks += 1;
+                    return None;
+                };
+                let mut addr = 0usize;
+                let kr = if fail_alloc {
+                    KERN_FAILURE
+                } else {
+                    // SAFETY: `addr` is a valid out-pointer; the kernel picks the address (ANYWHERE). Fresh memory is non-volatile and zero.
+                    unsafe { vm_allocate(task(), &mut addr, bytes, VM_FLAGS_ANYWHERE | VM_FLAGS_PURGABLE) }
+                };
+                if kr != KERN_SUCCESS || addr == 0 {
+                    g.fallbacks += 1;
+                    return None;
+                }
+                (g.addr, g.alloc_bytes, g.populated) = (addr, bytes, false);
+                g.alloc_ok += 1;
+                true
+            } else if g.pins > 0 {
+                // Pinned by another caller: non-volatile and restored already.
+                let Some(pins) = g.pins.checked_add(1) else {
+                    g.fallbacks += 1;
+                    return None;
+                };
+                g.pins = pins;
+                g.pin_ok += 1;
+                return Some(self.guard(&g));
+            } else {
+                let (kr, old) =
+                    if fail_control { (KERN_FAILURE, 0) } else { control(g.addr, VM_PURGABLE_SET_STATE, VM_PURGABLE_NONVOLATILE) };
+                if kr != KERN_SUCCESS {
+                    g.fallbacks += 1;
+                    return None;
+                }
+                let emptied = old & VM_PURGABLE_STATE_MASK == VM_PURGABLE_EMPTY;
+                if emptied && g.populated {
+                    g.empty_rebuilds += 1;
+                }
+                emptied || !g.populated
+            };
+            if restore_needed {
+                g.populated = false;
+                /// Unwinding out of `restore`: the region holds a partial restore; `populated` stays false and the region goes back to volatile.
+                struct Unwind(usize);
+                impl Drop for Unwind {
+                    fn drop(&mut self) {
+                        let _ = control(self.0, VM_PURGABLE_SET_STATE, VM_PURGABLE_VOLATILE);
+                    }
+                }
+                let unwind = Unwind(g.addr);
+                // SAFETY: the region is `alloc_bytes >= 4 * elem_len` bytes, page-aligned (so f32-aligned), allocated by this slab, now
+                // non-volatile, and written by nobody else: no pin is alive (pins == 0) and the lock is held for the whole restore.
+                let dst = unsafe { std::slice::from_raw_parts_mut(g.addr as *mut f32, self.elem_len) };
+                #[cfg(test)]
+                if g.inject.panic_restore {
+                    dst[..self.elem_len / 2].fill(f32::NAN);
+                    panic!("injected restore panic");
+                }
+                restore(dst);
+                std::mem::forget(unwind);
+                g.populated = true;
+            }
+            g.pins = 1;
+            g.pin_ok += 1;
+            Some(self.guard(&g))
+        }
+
+        fn guard(&self, g: &SlabInner) -> PinGuard<'_> {
+            // SAFETY: called with pins >= 1 just counted under the lock: the region is non-volatile (the kernel cannot empty it) and restored,
+            // and nobody writes it until the last pin drops; the slice is bound to the guard's lifetime, which ends before that.
+            let data = unsafe { std::slice::from_raw_parts(g.addr as *const f32, self.elem_len) };
+            PinGuard { slab: self, data }
+        }
+
+        pub(super) fn counts(&self) -> SlabCounts {
+            let g = self.lock();
+            let volatile_now = g.addr != 0 && g.pins == 0 && {
+                let (kr, st) = control(g.addr, VM_PURGABLE_GET_STATE, 0);
+                kr == KERN_SUCCESS && matches!(st & VM_PURGABLE_STATE_MASK, VM_PURGABLE_VOLATILE | VM_PURGABLE_EMPTY)
+            };
+            SlabCounts {
+                alloc_ok: g.alloc_ok,
+                pin_ok: g.pin_ok,
+                volatile_ok: g.volatile_ok,
+                empty_rebuilds: g.empty_rebuilds,
+                fallbacks: g.fallbacks,
+                volatile_now,
+            }
+        }
+
+        #[cfg(test)]
+        pub(super) fn inject(&self, f: impl FnOnce(&mut Inject)) {
+            f(&mut self.lock().inject)
+        }
+
+        /// Test only: empty the region as the system would under memory pressure (only when unpinned: the system only empties volatile
+        /// memory); true when the kernel then reports it empty.
+        #[cfg(test)]
+        pub(super) fn force_empty(&self) -> bool {
+            let g = self.lock();
+            if g.addr == 0 || g.pins > 0 {
+                return false;
+            }
+            let (kr, _) = control(g.addr, VM_PURGABLE_SET_STATE, VM_PURGABLE_EMPTY);
+            let (kr2, st) = control(g.addr, VM_PURGABLE_GET_STATE, 0);
+            kr == KERN_SUCCESS && kr2 == KERN_SUCCESS && st & VM_PURGABLE_STATE_MASK == VM_PURGABLE_EMPTY
+        }
+    }
+
+    impl Drop for PurgeableSlab {
+        fn drop(&mut self) {
+            let g = self.inner.get_mut().unwrap_or_else(|e| e.into_inner());
+            if g.addr != 0 && g.pins == 0 {
+                // SAFETY: exactly the region `vm_allocate` returned, deallocated once; no guard can be alive (`&mut self`).
+                let _ = unsafe { vm_deallocate(task(), g.addr, g.alloc_bytes) };
+            }
+        }
+    }
+}
+
+/// docs/spec/semantic-rerank.md §2.4: the B1 counters of a model (`TinyLm::purgeable_stats`), integers only (no path, no content; not in the C ABI).
+/// `slab_count`: int8 matrices (one slab each; 33 for the shipped model: the embedding and 4 per layer). `alloc_ok`: slabs allocated. `pin_ok`:
+/// pins granted. `volatile_ok`: times the last pin made a slab volatile again. `empty_rebuilds`: restores because the system had emptied a slab.
+/// `fallbacks`: pins refused because a Mach call failed (that product ran on the portable path). `currently_volatile`: slabs the kernel reports
+/// volatile or emptied right now (`VM_PURGABLE_GET_STATE`).
+#[cfg(target_vendor = "apple")]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PurgeableStats {
+    pub slab_count: usize,
+    pub alloc_ok: usize,
+    pub pin_ok: usize,
+    pub volatile_ok: usize,
+    pub empty_rebuilds: usize,
+    pub fallbacks: usize,
+    pub currently_volatile: usize,
+}
+
+#[cfg(target_vendor = "apple")]
+impl PurgeableStats {
+    /// SEC-12: whether B1 really ran rather than falling back silently: at least one slab, no fallback, every slab allocated once, pinned and made
+    /// volatile at least once each, and every slab volatile now. The probe and the tests judge with this one function; `Err` names the first
+    /// condition that fails.
+    pub fn check(&self) -> Result<(), &'static str> {
+        let n = self.slab_count;
+        if n == 0 {
+            return Err("slab_count");
+        }
+        if self.fallbacks != 0 {
+            return Err("fallbacks");
+        }
+        if self.alloc_ok != n {
+            return Err("alloc_ok");
+        }
+        if self.pin_ok < n {
+            return Err("pin_ok");
+        }
+        if self.volatile_ok < n {
+            return Err("volatile_ok");
+        }
+        if self.currently_volatile != n {
+            return Err("currently_volatile");
+        }
+        Ok(())
+    }
+}
+
 /// y = tanh(x), elementwise (out of place: vForce is not documented to allow y == x).
 fn tanh_into(be: Backend, x: &[f32], y: &mut [f32]) {
     assert!(x.len() == y.len() && x.len() < i32::MAX as usize, "tanh: lengths do not match");
@@ -530,18 +903,56 @@ fn exp_into(be: Backend, x: &[f32], y: &mut [f32]) {
     }
 }
 
+/// Where the `.sjtl` bytes live (docs/spec/semantic-rerank.md §2.2): the read-only mapping `load` and `load_paired` make, or a copy (`parse`). The
+/// int8 matrices are read from here for as long as the model lives.
+enum SjtlBytes {
+    Map(Mapped),
+    Mem(Vec<u8>),
+}
+
+impl std::ops::Deref for SjtlBytes {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        match self {
+            SjtlBytes::Map(m) => m,
+            SjtlBytes::Mem(v) => v,
+        }
+    }
+}
+
+/// A 2-D weight matrix as the file stores it, `rows` x `cols` row-major.
+struct Matrix {
+    rows: usize,
+    cols: usize,
+    w: Weights,
+}
+
+enum Weights {
+    /// wtype 0 (test and golden files, never shipped): the f32 values, copied out of the file and checked finite.
+    F32(Vec<f32>),
+    /// wtype 1: the int8 rows stay in the file bytes (`at`, rows * cols bytes into `TinyLm::raw`); the per-row scales are copied to the heap
+    /// (never a `&[f32]` cast of the bytes, which need not be aligned) and were checked so that every int8 value restores finite.
+    Q8 {
+        at: usize,
+        scales: Vec<f32>,
+        /// docs/spec/semantic-rerank.md §2.4: where the Accelerate path keeps this matrix restored, purgeable between uses (B1).
+        #[cfg(target_vendor = "apple")]
+        slab: purgeable::PurgeableSlab,
+    },
+}
+
 struct Layer {
     ln1_w: Vec<f32>,
     ln1_b: Vec<f32>,
-    qkv_w: Vec<f32>,
+    qkv_w: Matrix,
     qkv_b: Vec<f32>,
-    proj_w: Vec<f32>,
+    proj_w: Matrix,
     proj_b: Vec<f32>,
     ln2_w: Vec<f32>,
     ln2_b: Vec<f32>,
-    fc1_w: Vec<f32>,
+    fc1_w: Matrix,
     fc1_b: Vec<f32>,
-    fc2_w: Vec<f32>,
+    fc2_w: Matrix,
     fc2_b: Vec<f32>,
 }
 
@@ -566,11 +977,16 @@ pub struct TinyLm {
     /// Version 6 with the boundary flag: the policy-key threshold K (Han characters); `None` otherwise. [SEP] is then id V - 1.
     boundary_k: Option<usize>,
     ids: HashMap<char, u32>,
-    emb: Vec<f32>,
+    /// The vocabulary size V (rows of `emb`).
+    v: usize,
+    emb: Matrix,
+    /// ctx x d, restored to f32 at parse (128 KiB for the shipped model).
     pos: Vec<f32>,
     lnf_w: Vec<f32>,
     lnf_b: Vec<f32>,
     layers: Vec<Layer>,
+    /// The file the int8 matrices point into; declared last so it outlives nothing that reads it.
+    raw: SjtlBytes,
 }
 
 fn hex(b: &[u8]) -> String {
@@ -592,71 +1008,102 @@ impl Cursor<'_> {
         self.ok &= out.iter().all(|x| x.is_finite());
         out
     }
-    /// A 2-D matrix: f32 as is; int8 as `q as f32 * scale` per row (the f32 product int8check.dequant takes).
-    fn mat(&mut self, rows: usize, cols: usize) -> Vec<f32> {
+    /// The per-row scales of an int8 matrix: finite, and finite times 128 (SEC-08: `i8::MIN` is -128, so a scale near `f32::MAX / 127` that 127
+    /// keeps finite would still restore -128 to -inf); every int8 value then restores to a finite f32.
+    fn scales(&mut self, rows: usize) -> Vec<f32> {
+        let s = self.f32s(rows);
+        self.ok &= s.iter().all(|s| (128.0_f32 * s).is_finite());
+        s
+    }
+    /// A 2-D matrix: f32 copied out; int8 left in the file (its offset) with its scales on the heap.
+    fn mat(&mut self, rows: usize, cols: usize) -> Matrix {
+        let w = if self.int8 {
+            let at = self.at;
+            self.at += rows * cols;
+            let scales = self.scales(rows);
+            #[cfg(target_vendor = "apple")]
+            let slab = purgeable::PurgeableSlab::new(rows * cols);
+            Weights::Q8 {
+                at,
+                scales,
+                #[cfg(target_vendor = "apple")]
+                slab,
+            }
+        } else {
+            Weights::F32(self.f32s(rows * cols))
+        };
+        Matrix { rows, cols, w }
+    }
+    /// A 2-D matrix restored to f32 on the heap (`pos`): int8 as `(q as i8 as f32) * scale` per row (the f32 product int8check.dequant takes).
+    fn dense(&mut self, rows: usize, cols: usize) -> Vec<f32> {
         if !self.int8 {
             return self.f32s(rows * cols);
         }
-        let q = &self.b[self.at..self.at + rows * cols];
+        let at = self.at;
         self.at += rows * cols;
-        let scale = self.f32s(rows);
-        let mut out = Vec::with_capacity(rows * cols);
-        for (row, s) in q.chunks_exact(cols).zip(&scale) {
-            out.extend(row.iter().map(|&x| x as i8 as f32 * s));
-        }
-        // finite scales can still restore to inf (127 * f32::MAX).
-        self.ok &= out.iter().all(|x| x.is_finite());
+        let scales = self.scales(rows);
+        let mut out = vec![0f32; rows * cols];
+        restore_rows(&self.b[at..at + rows * cols], &scales, cols, &mut out);
         out
     }
 }
 
-/// `O_NONBLOCK`: opening a FIFO for reading must not wait for a writer (it is rejected right after, as not a regular file).
-#[cfg(target_os = "linux")]
-pub(crate) const O_NONBLOCK: i32 = 0o4000;
-#[cfg(all(unix, not(target_os = "linux")))]
-pub(crate) const O_NONBLOCK: i32 = 0x0004; // macOS and the BSDs
+/// docs/spec/semantic-rerank.md §2.2: maps a regular file of at most `MAX_FILE` bytes read-only (`Mapped::open_bounded`: one open, the checks on that
+/// handle, no `O_NOFOLLOW`). `Io`: unopenable, not a regular file, or the mapping failed; `Format`: empty or over the cap.
+fn map_bounded(path: &Path) -> Result<Mapped, TinyLmError> {
+    // SAFETY: the model files are never rewritten in place while loaded: every install path replaces them by rename or with the host stopped
+    // (docs/spec/models.md §2.2); the mapping lives as long as the model.
+    unsafe { Mapped::open_bounded(path, Some(MAX_FILE)) }.map_err(|e| match e {
+        MapError::Io => TinyLmError::Io,
+        MapError::Empty | MapError::TooLarge => TinyLmError::Format,
+    })
+}
 
-/// docs/spec/semantic-rerank.md §2.2: opens first, then checks the opened handle (a regular file of at most `max` bytes) and reads at
-/// most the cap from that same handle, so the file checked is the file read. `Io`: unopenable or not a regular file; `Format`: over the cap.
-fn read_bounded(path: &Path, max: u64) -> Result<Vec<u8>, TinyLmError> {
-    use std::io::Read;
-    let mut opts = std::fs::OpenOptions::new();
-    opts.read(true);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut opts, O_NONBLOCK);
-    let file = opts.open(path).map_err(|_| TinyLmError::Io)?;
-    let meta = file.metadata().map_err(|_| TinyLmError::Io)?;
-    if !meta.is_file() {
-        return Err(TinyLmError::Io);
-    }
-    if meta.len() > max {
-        return Err(TinyLmError::Format);
-    }
-    let mut bytes = Vec::with_capacity(meta.len() as usize);
-    file.take(max + 1).read_to_end(&mut bytes).map_err(|_| TinyLmError::Io)?;
-    if bytes.len() as u64 > max {
-        return Err(TinyLmError::Format);
-    }
-    Ok(bytes)
+/// The exact length of a file of these sizes (`int8`: wtype 1), in u64 with every step checked: `None` when it does not even fit in 64 bits.
+/// u64, not usize, so a 32-bit target cannot wrap a huge header back to a small length that a short file matches (SEC-05); the caller compares
+/// it with the file's length as u64.
+#[allow(clippy::too_many_arguments)]
+fn sjtl_len(header: usize, n_chars: usize, n_layer: usize, d: usize, ctx: usize, v: usize, int8: bool) -> Option<u64> {
+    let u = |x: usize| x as u64;
+    let (d, four) = (u(d), 4u64);
+    let mat = |r: u64, c: u64| -> Option<u64> {
+        let rc = r.checked_mul(c)?;
+        if int8 { rc.checked_add(r.checked_mul(four)?) } else { rc.checked_mul(four) }
+    };
+    let vec = |n: u64| n.checked_mul(four);
+    let layer = [
+        vec(d.checked_mul(4)?)?,                          // ln1_w, ln1_b, ln2_w, ln2_b
+        mat(d, d.checked_mul(3)?)?,                       // qkv_w
+        vec(d.checked_mul(3)?)?,                          // qkv_b
+        mat(d, d)?,                                       // proj_w
+        vec(d)?,                                          // proj_b
+        mat(d, d.checked_mul(4)?)?,                       // fc1_w
+        vec(d.checked_mul(4)?)?,                          // fc1_b
+        mat(d.checked_mul(4)?, d)?,                       // fc2_w
+        vec(d)?,                                          // fc2_b
+    ]
+    .into_iter()
+    .try_fold(0u64, u64::checked_add)?;
+    [u(header), vec(u(n_chars))?, mat(u(v), d)?, mat(u(ctx), d)?, vec(d.checked_mul(2)?)?, u(n_layer).checked_mul(layer)?]
+        .into_iter()
+        .try_fold(0u64, u64::checked_add)
 }
 
 impl TinyLm {
-    /// Reads only a regular file of at most `MAX_FILE` bytes (`read_bounded`).
+    /// Maps only a regular file of at most `MAX_FILE` bytes (`map_bounded`) and parses that mapping in place; the model keeps it.
     pub fn load(path: &Path) -> Result<TinyLm, TinyLmError> {
-        TinyLm::parse(&read_bounded(path, MAX_FILE)?)
+        TinyLm::parse_backed(SjtlBytes::Map(map_bounded(path)?))
     }
 
     /// The one loader of the engine and the evaluation CLI (S7c-2a): `load`'s checks, then the pairing with `lm` — the n-gram
     /// model hash the file records must be `lm`'s, and the Kneser-Ney side file hash it records (docs/spec/models.md §3.5, §8.1: none for
     /// versions 1 to 3 and for an all-zero version 4 field) must be the one `lm` has loaded, all 32 bytes, or none when `lm` has none ("loaded" is about the file beside the model, not whether the formal profile scores with it).
-    /// A pairing check only, not an integrity check of the `.sjtl`. `file_sha256` is the hash of exactly the bytes parsed, made here and the bytes
-    /// dropped on return (so a table loaded later never finds them alive). Measured: release build, the real tinylm.sjtl (14,638,352 bytes), 7 runs:
-    /// the core's software SHA-256 takes 35 to 52 ms (median about 37 ms), `parse` 5 to 9 ms.
+    /// A pairing check only, not an integrity check of the `.sjtl`. `file_sha256` is the hash of exactly the bytes parsed: the one mapping `load`
+    /// made (one open, so the file hashed is the file parsed), hashed in place 64 bytes at a time with no copy of the file. Measured: release build,
+    /// the real tinylm.sjtl (14,638,352 bytes), 7 runs: the core's software SHA-256 takes 35 to 52 ms (median about 37 ms), `parse` 5 to 9 ms.
     pub fn load_paired(path: &Path, lm: &Lm) -> Result<TinyLm, TinyLmError> {
-        let bytes = read_bounded(path, MAX_FILE)?;
-        let mut model = TinyLm::parse(&bytes)?;
-        model.file_sha = crate::eval::sha256_hex(&bytes);
-        drop(bytes);
+        let mut model = TinyLm::load(path)?;
+        model.file_sha = crate::eval::sha256_hex(&model.raw);
         if model.ngram_sha256() != lm.sha256() {
             return Err(TinyLmError::OtherNgram);
         }
@@ -668,8 +1115,14 @@ impl TinyLm {
         }
     }
 
-    /// Every check of the format; a bad file is an error, never a partial model.
+    /// Every check of the format; a bad file is an error, never a partial model. The model keeps a copy of `bytes` (its int8 matrices are read
+    /// from there); `load` maps the file instead.
     pub fn parse(bytes: &[u8]) -> Result<TinyLm, TinyLmError> {
+        TinyLm::parse_backed(SjtlBytes::Mem(bytes.to_vec()))
+    }
+
+    fn parse_backed(raw: SjtlBytes) -> Result<TinyLm, TinyLmError> {
+        let bytes: &[u8] = &raw;
         let bad = TinyLmError::Format;
         if bytes.len() < 12 {
             return Err(bad);
@@ -739,10 +1192,9 @@ impl TinyLm {
         }
         let n_chars = v - specials;
         let int8 = wtype == 1;
-        let mat = |r: usize, c: usize| if int8 { r * c + 4 * r } else { 4 * r * c };
-        let layer_bytes = 4 * 4 * d + mat(d, 3 * d) + 4 * 3 * d + mat(d, d) + 4 * d + mat(d, 4 * d) + 4 * 4 * d + mat(4 * d, d) + 4 * d;
-        let want = header + 4 * n_chars + mat(v, d) + mat(ctx, d) + 4 * 2 * d + n_layer * layer_bytes;
-        if bytes.len() != want {
+        // SEC-05: the exact length in checked u64; once it equals the file's, every offset below is at most the file length (a slice length,
+        // so it fits in usize on any target).
+        if sjtl_len(header, n_chars, n_layer, d, ctx, v, int8) != Some(bytes.len() as u64) {
             return Err(bad);
         }
         let mut ids = HashMap::new();
@@ -755,7 +1207,7 @@ impl TinyLm {
         let mut r = Cursor { b: bytes, at: header + 4 * n_chars, int8, ok: true };
         // The tensor order of export_sjtl.py: emb, pos, lnf_w, lnf_b, then for each layer ln1_w, ln1_b, qkv_w, qkv_b, proj_w, proj_b,
         // ln2_w, ln2_b, fc1_w, fc1_b, fc2_w, fc2_b (tinylm.LAYER_KEYS). Struct fields evaluate in source order.
-        let (emb, pos, lnf_w, lnf_b) = (r.mat(v, d), r.mat(ctx, d), r.f32s(d), r.f32s(d));
+        let (emb, pos, lnf_w, lnf_b) = (r.mat(v, d), r.dense(ctx, d), r.f32s(d), r.f32s(d));
         let layers = (0..n_layer)
             .map(|_| Layer {
                 ln1_w: r.f32s(d),
@@ -775,6 +1227,7 @@ impl TinyLm {
         if !r.ok || r.at != bytes.len() {
             return Err(bad);
         }
+        let ng_sha = bytes[68..100].try_into().unwrap();
         Ok(TinyLm {
             n_head,
             d,
@@ -782,17 +1235,19 @@ impl TinyLm {
             chat,
             formal,
             levels,
-            ng_sha: bytes[68..100].try_into().unwrap(),
+            ng_sha,
             file_sha: String::new(),
             kn_sha,
             left_len,
             boundary_k,
             ids,
+            v,
             emb,
             pos,
             lnf_w,
             lnf_b,
             layers,
+            raw,
         })
     }
 
@@ -1006,7 +1461,7 @@ impl TinyLm {
     /// `SEP_CHAR` in k (and only in k) as [SEP], id V - 1; every character outside the table, a candidate's NUL included, is UNK. The oldest
     /// tokens of k are dropped when the whole exceeds the context; a c longer than ctx - 1 is `TooLong`.
     pub fn sequence(&self, k: &str, c: &str) -> Result<(Vec<u32>, usize), TinyLmError> {
-        let sep = self.boundary_k.map(|_| (self.emb.len() / self.d - 1) as u32);
+        let sep = self.boundary_k.map(|_| (self.v - 1) as u32);
         let id = |c: char| self.ids.get(&c).copied().unwrap_or(UNK);
         let c: Vec<u32> = c.chars().map(id).collect();
         if c.len() > self.ctx - 1 {
@@ -1028,6 +1483,11 @@ impl TinyLm {
 
     /// One right-padded batch: the hidden states, then the logits of only the positions that predict a token of c.
     fn ll_batch(&self, be: Backend, seqs: &[(Vec<u32>, usize)]) -> Vec<f64> {
+        // SEC-11: no scored position (every c empty): every LL is 0, as the products over zero rows would give, without running the model
+        // (no matrix restored or pinned, no m = 0 product).
+        if seqs.iter().all(|(q, st)| q.len() <= *st) {
+            return vec![0.0; seqs.len()];
+        }
         let (d, t) = (self.d, seqs.iter().map(|(q, _)| q.len()).max().unwrap());
         let mut ids = vec![PAD; seqs.len() * t];
         for (b, (q, _)) in seqs.iter().enumerate() {
@@ -1043,9 +1503,9 @@ impl TinyLm {
                 targets.push((b, q[p + 1] as usize));
             }
         }
-        let v = self.emb.len() / d;
+        let v = self.v;
         let mut logits = vec![0f32; targets.len() * v];
-        gemm(be, &rows, &self.emb, &mut logits, (targets.len(), d, v), true);
+        self.mul(be, &rows, &self.emb, &mut logits, (targets.len(), d, v), true);
         let (mut ll, mut e) = (vec![0f64; seqs.len()], vec![0f32; v]);
         for (z, &(b, target)) in logits.chunks_exact_mut(v).zip(&targets) {
             let m = z.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
@@ -1064,15 +1524,17 @@ impl TinyLm {
         let (d, h) = (self.d, self.n_head);
         let (dh, rows) = (d / h, ids.len());
         let mut x = vec![0f32; rows * d];
+        let mut e = vec![0f32; d];
         for (r, &id) in ids.iter().enumerate() {
-            let (e, p) = (&self.emb[id as usize * d..][..d], &self.pos[r % t * d..][..d]);
+            self.emb_row(id as usize, &mut e);
+            let p = &self.pos[r % t * d..][..d];
             x[r * d..(r + 1) * d].iter_mut().zip(e.iter().zip(p)).for_each(|(o, (a, b))| *o = a + b);
         }
         let scale = (dh as f32).sqrt();
         let mut s = vec![0f32; t];
         for l in &self.layers {
             let mut qkv = bias_rows(&l.qkv_b, rows);
-            gemm(be, &layer_norm(&x, &l.ln1_w, &l.ln1_b), &l.qkv_w, &mut qkv, (rows, d, 3 * d), false);
+            self.mul(be, &layer_norm(&x, &l.ln1_w, &l.ln1_b), &l.qkv_w, &mut qkv, (rows, d, 3 * d), false);
             let mut att = vec![0f32; rows * d];
             for (b, &len) in lens.iter().enumerate() {
                 for hd in 0..h {
@@ -1095,16 +1557,74 @@ impl TinyLm {
                 }
             }
             let mut proj = bias_rows(&l.proj_b, rows);
-            gemm(be, &att, &l.proj_w, &mut proj, (rows, d, d), false);
+            self.mul(be, &att, &l.proj_w, &mut proj, (rows, d, d), false);
             x.iter_mut().zip(&proj).for_each(|(a, b)| *a += b);
             let mut f = bias_rows(&l.fc1_b, rows);
-            gemm(be, &layer_norm(&x, &l.ln2_w, &l.ln2_b), &l.fc1_w, &mut f, (rows, d, 4 * d), false);
+            self.mul(be, &layer_norm(&x, &l.ln2_w, &l.ln2_b), &l.fc1_w, &mut f, (rows, d, 4 * d), false);
             gelu(be, &mut f);
             let mut o = bias_rows(&l.fc2_b, rows);
-            gemm(be, &f, &l.fc2_w, &mut o, (rows, 4 * d, d), false);
+            self.mul(be, &f, &l.fc2_w, &mut o, (rows, 4 * d, d), false);
             x.iter_mut().zip(&o).for_each(|(a, b)| *a += b);
         }
         layer_norm(&x, &self.lnf_w, &self.lnf_b)
+    }
+
+    /// The int8 matrices in file order: the embedding, then each layer's qkv, proj, fc1 and fc2.
+    #[cfg(target_vendor = "apple")]
+    fn slabs(&self) -> impl Iterator<Item = &purgeable::PurgeableSlab> {
+        std::iter::once(&self.emb)
+            .chain(self.layers.iter().flat_map(|l| [&l.qkv_w, &l.proj_w, &l.fc1_w, &l.fc2_w]))
+            .filter_map(|m| match &m.w {
+                Weights::Q8 { slab, .. } => Some(slab),
+                Weights::F32(_) => None,
+            })
+    }
+
+    /// docs/spec/semantic-rerank.md §2.4: the B1 counters summed over this model's slabs (`PurgeableStats`), for the SEC-12 probe and the tests.
+    #[cfg(target_vendor = "apple")]
+    pub fn purgeable_stats(&self) -> PurgeableStats {
+        self.slabs().fold(PurgeableStats::default(), |mut s, slab| {
+            let c = slab.counts();
+            s.slab_count += 1;
+            s.alloc_ok += c.alloc_ok;
+            s.pin_ok += c.pin_ok;
+            s.volatile_ok += c.volatile_ok;
+            s.empty_rebuilds += c.empty_rebuilds;
+            s.fallbacks += c.fallbacks;
+            s.currently_volatile += usize::from(c.volatile_now);
+            s
+        })
+    }
+
+    /// Row `id` of the embedding (d values) into `out`. An int8 embedding restores just that row from the file (SEC-09: the lookup never pins
+    /// the 20 MiB restored embedding); the values are the ones the whole restored matrix holds.
+    fn emb_row(&self, id: usize, out: &mut [f32]) {
+        let d = self.d;
+        match &self.emb.w {
+            Weights::F32(w) => out.copy_from_slice(&w[id * d..][..d]),
+            Weights::Q8 { at, scales, .. } => restore_rows(&self.raw[at + id * d..][..d], &scales[id..id + 1], d, out),
+        }
+    }
+
+    /// c (m x n) += a (m x k) . w, as `gemm` with the matrix `w` (b x n, or n x k transposed when `trans_b`). docs/spec/semantic-rerank.md §2.4:
+    /// an f32 matrix goes to `gemm` as it is. An int8 matrix: on Accelerate, restored whole into its purgeable slab (B1) and pinned for exactly this
+    /// one `cblas_sgemm`, the same call on the same values as with the expanded matrix; one pin at a time, released before return. When the slab is
+    /// not available (a Mach call failed, counted in `purgeable_stats().fallbacks`), and always on `Backend::Plain`, `gemm_q8`.
+    fn mul(&self, be: Backend, a: &[f32], w: &Matrix, c: &mut [f32], dims: (usize, usize, usize), trans_b: bool) {
+        match &w.w {
+            Weights::F32(b) => gemm(be, a, b, c, dims, trans_b),
+            Weights::Q8 { at, scales, #[cfg(target_vendor = "apple")] slab } => {
+                let q = &self.raw[*at..*at + w.rows * w.cols];
+                #[cfg(target_vendor = "apple")]
+                if be == Backend::Accelerate {
+                    if let Some(pin) = slab.pin(|dst| restore_rows(q, scales, w.cols, dst)) {
+                        return gemm(be, a, &pin, c, dims, trans_b);
+                    }
+                }
+                let ran = gemm_q8(selected_kernel(), a, q, scales, c, dims, trans_b);
+                debug_assert!(ran, "the selected kernel is one this CPU has");
+            }
+        }
     }
 }
 
@@ -1246,17 +1766,31 @@ mod tests {
         ((*state >> 40) as f32 / (1u64 << 24) as f32 * 2.0 - 1.0) * s
     }
 
-    /// A random matrix as the file stores it (int8 rows plus f32 scales, or f32).
-    fn put_mat(b: &mut Vec<u8>, st: &mut u64, int8: bool, r: usize, c: usize) {
+    /// How a random matrix is stored: f32, int8 rows plus f32 scales, or (`Dequant`) f32 holding exactly what the int8 form restores to, so an int8
+    /// file and its `Dequant` twin are the same model, one through the int8 path and one through the f32 path.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Store {
+        F32,
+        Int8,
+        Dequant,
+    }
+
+    /// A random matrix as the file stores it.
+    fn put_mat(b: &mut Vec<u8>, st: &mut u64, store: Store, r: usize, c: usize) {
         let w: Vec<f32> = (0..r * c).map(|_| rnd(st, 0.3)).collect();
-        if int8 {
-            let scales: Vec<f32> = w.chunks(c).map(|row| row.iter().fold(0f32, |m, x| m.max(x.abs())).max(1e-12) / 127.0).collect();
-            for (row, s) in w.chunks(c).zip(&scales) {
-                b.extend(row.iter().map(|x| (x / s).round() as i8 as u8));
-            }
+        if store == Store::F32 {
+            w.iter().for_each(|x| b.extend_from_slice(&x.to_le_bytes()));
+            return;
+        }
+        let scales: Vec<f32> = w.chunks(c).map(|row| row.iter().fold(0f32, |m, x| m.max(x.abs())).max(1e-12) / 127.0).collect();
+        let q: Vec<i8> = w.chunks(c).zip(&scales).flat_map(|(row, s)| row.iter().map(move |x| (x / s).round() as i8)).collect();
+        if store == Store::Int8 {
+            b.extend(q.iter().map(|&x| x as u8));
             scales.iter().for_each(|s| b.extend_from_slice(&s.to_le_bytes()));
         } else {
-            w.iter().for_each(|x| b.extend_from_slice(&x.to_le_bytes()));
+            for (row, s) in q.chunks(c).zip(&scales) {
+                row.iter().for_each(|&x| b.extend_from_slice(&(x as f32 * s).to_le_bytes()));
+            }
         }
     }
 
@@ -1268,11 +1802,18 @@ mod tests {
     /// A random SJTL0001 file written the way export_sjtl.py lays it out (d = 64, 2 layers, 4 heads, V = 120): wide enough for
     /// the two matrix paths to differ in summation order.
     fn random_file(int8: bool) -> Vec<u8> {
-        let (n_layer, n_head, d, ctx, v) = (2usize, 4usize, 64usize, 64usize, 120usize);
+        random_file_as(if int8 { Store::Int8 } else { Store::F32 })
+    }
+
+    fn random_file_as(store: Store) -> Vec<u8> {
+        random_file_dims(store, 2, 4, 64, 64, 120)
+    }
+
+    fn random_file_dims(store: Store, n_layer: usize, n_head: usize, d: usize, ctx: usize, v: usize) -> Vec<u8> {
         let mut st = 0x2545_f491_4f6c_dd1du64;
         let mut b = Vec::new();
         b.extend_from_slice(MAGIC);
-        for x in [VERSION, int8 as u32, n_layer as u32, n_head as u32, d as u32, ctx as u32, v as u32] {
+        for x in [VERSION, (store == Store::Int8) as u32, n_layer as u32, n_head as u32, d as u32, ctx as u32, v as u32] {
             b.extend_from_slice(&x.to_le_bytes());
         }
         for x in [0.7f64, 2.0, 0.7, 2.0] {
@@ -1280,29 +1821,29 @@ mod tests {
         }
         b.extend_from_slice(&[7u8; 32]);
         (0..v - 3).for_each(|i| b.extend_from_slice(&(0x4e00 + i as u32).to_le_bytes()));
-        put_mat(&mut b, &mut st, int8, v, d);
-        put_mat(&mut b, &mut st, int8, ctx, d);
+        put_mat(&mut b, &mut st, store, v, d);
+        put_mat(&mut b, &mut st, store, ctx, d);
         put_vec(&mut b, &mut st, d, 1.0);
         put_vec(&mut b, &mut st, d, 0.0);
         for _ in 0..n_layer {
             put_vec(&mut b, &mut st, d, 1.0);
             put_vec(&mut b, &mut st, d, 0.0);
-            put_mat(&mut b, &mut st, int8, d, 3 * d);
+            put_mat(&mut b, &mut st, store, d, 3 * d);
             put_vec(&mut b, &mut st, 3 * d, 0.0);
-            put_mat(&mut b, &mut st, int8, d, d);
+            put_mat(&mut b, &mut st, store, d, d);
             put_vec(&mut b, &mut st, d, 0.0);
             put_vec(&mut b, &mut st, d, 1.0);
             put_vec(&mut b, &mut st, d, 0.0);
-            put_mat(&mut b, &mut st, int8, d, 4 * d);
+            put_mat(&mut b, &mut st, store, d, 4 * d);
             put_vec(&mut b, &mut st, 4 * d, 0.0);
-            put_mat(&mut b, &mut st, int8, 4 * d, d);
+            put_mat(&mut b, &mut st, store, 4 * d, d);
             put_vec(&mut b, &mut st, d, 0.0);
         }
         b
     }
 
-    /// A file of exactly the length `parse` expects for these sizes, all tensors zero (finite), f32.
-    fn zero_file(n_layer: usize, d: usize, ctx: usize, v: usize) -> Vec<u8> {
+    /// The 100 header bytes of a version 1 file of these sizes (wtype 0, one head).
+    fn header_v1(n_layer: usize, d: usize, ctx: usize, v: usize) -> Vec<u8> {
         let mut b = Vec::new();
         b.extend_from_slice(MAGIC);
         for x in [VERSION, 0, n_layer as u32, 1, d as u32, ctx as u32, v as u32] {
@@ -1312,6 +1853,12 @@ mod tests {
             b.extend_from_slice(&x.to_le_bytes());
         }
         b.extend_from_slice(&[7u8; 32]);
+        b
+    }
+
+    /// A file of exactly the length `parse` expects for these sizes, all tensors zero (finite), f32.
+    fn zero_file(n_layer: usize, d: usize, ctx: usize, v: usize) -> Vec<u8> {
+        let mut b = header_v1(n_layer, d, ctx, v);
         // From U+10000: 65,533 characters from U+4E00 would cross the surrogates.
         (0..v - 3).for_each(|i| b.extend_from_slice(&(0x10000 + i as u32).to_le_bytes()));
         // Per layer: four matrices (3 d^2 + d^2 + 4 d^2 + 4 d^2) and the vectors ln1 2d, qkv_b 3d, proj_b d, ln2 2d, fc1_b 4d, fc2_b d.
@@ -1647,6 +2194,23 @@ mod tests {
         Some(out.iter().map(|x| x.to_bits()).collect())
     }
 
+    /// `guarded` for `gemm_q8`: bq inside -128 bytes and the scales inside NaN (a read outside them changes or NaNs the output), c inside the
+    /// guard pattern; `pad` elements on each side. None when this CPU does not have the kernel.
+    #[allow(clippy::too_many_arguments)]
+    fn guarded_q8(kernel: Kernel, a: &[f32], bq: &[u8], sc: &[f32], c0: &[f32], dims: (usize, usize, usize), trans_b: bool, pad: usize) -> Option<Vec<u32>> {
+        let gq = [vec![0x80u8; pad].as_slice(), bq, vec![0x80u8; pad].as_slice()].concat();
+        let gs = [vec![f32::NAN; pad].as_slice(), sc, vec![f32::NAN; pad].as_slice()].concat();
+        let mut gc = [vec![f32::from_bits(GUARD); pad].as_slice(), c0, vec![f32::from_bits(GUARD); pad].as_slice()].concat();
+        let ran = gemm_q8(kernel, a, &gq[pad..pad + bq.len()], &gs[pad..pad + sc.len()], &mut gc[pad..pad + c0.len()], dims, trans_b);
+        if !ran {
+            return None;
+        }
+        assert!(gc[..pad].iter().chain(&gc[pad + c0.len()..]).all(|x| x.to_bits() == GUARD), "q8 {kernel:?} wrote outside c");
+        let out = &gc[pad..pad + c0.len()];
+        assert!(out.iter().all(|x| !x.is_nan()), "q8 {kernel:?} read outside the scales");
+        Some(out.iter().map(|x| x.to_bits()).collect())
+    }
+
     /// docs/spec/semantic-rerank.md §2.4: every kernel this CPU has gives the scalar kernel's result bit for bit, on both products, over
     /// the sizes around the vector widths and the model's, with the matrices at every alignment; the product that is not transposed is
     /// also the old portable product bit for bit. Prints which kernels ran.
@@ -1682,6 +2246,18 @@ mod tests {
                         let mut c = c0.clone();
                         gemm(Backend::Plain, &a, &b, &mut c, (m, k, n), trans_b);
                         assert!(c.iter().map(|x| x.to_bits()).eq(want.iter().copied()), "dispatch vs scalar, trans_b={trans_b} m={m} k={k} n={n}");
+                        // the int8 product (`gemm_q8`) against the f32 product on the restored b, every kernel, b and its scales 0 to 15 elements off
+                        let (rows, len) = if trans_b { (n, k) } else { (k, n) };
+                        let bq: Vec<u8> = (0..k * n).map(|_| (rnd(&mut st, 128.0) as i32).clamp(-128, 127) as i8 as u8).collect();
+                        let sc: Vec<f32> = (0..rows).map(|_| rnd(&mut st, 0.01).abs() + 1e-4).collect();
+                        let mut bx = vec![0f32; k * n];
+                        restore_rows(&bq, &sc, len, &mut bx);
+                        let want_q = guarded(Kernel::Scalar, &a, &bx, &c0, (m, k, n), trans_b, pad).unwrap();
+                        for (kernel, name) in kernels() {
+                            if let Some(got) = guarded_q8(kernel, &a, &bq, &sc, &c0, (m, k, n), trans_b, 64 + case % 16) {
+                                assert!(got == want_q, "q8 {name} vs f32 scalar, trans_b={trans_b} m={m} k={k} n={n}");
+                            }
+                        }
                     }
                 }
             }
@@ -1738,13 +2314,8 @@ mod tests {
     /// are the plain path and the test only checks that scoring is deterministic.
     #[test]
     fn matrix_paths_agree() {
-        let items: Vec<(String, String)> = (0..20)
-            .map(|i| {
-                let text = |n: usize, a: usize, b: usize| -> String { (0..n).map(|j| char::from_u32(0x4e00 + ((i * a + j * b) % 125) as u32).unwrap()).collect() };
-                (text((i * 3) % 40, 31, 7), text(1 + i % 17, 13, 5))
-            })
-            .collect();
-        let pairs: Vec<(&str, &str)> = items.iter().map(|(k, c)| (k.as_str(), c.as_str())).collect();
+        let items = test_items();
+        let pairs = as_pairs(&items);
         for int8 in [false, true] {
             let m = TinyLm::parse(&random_file(int8)).unwrap();
             let (a, p) = (m.ll_many_with(Backend::DEFAULT, &pairs).unwrap(), m.ll_many_with(Backend::Plain, &pairs).unwrap());
@@ -1753,6 +2324,41 @@ mod tests {
                 assert!((x - y).abs() < 1e-5, "int8={int8}: {x} vs {y}");
             }
         }
+    }
+
+    /// 20 (k, c) pairs over the random files' vocabulary (and a few characters outside it), keys of 0 to 39 characters.
+    fn test_items() -> Vec<(String, String)> {
+        (0..20)
+            .map(|i| {
+                let text = |n: usize, a: usize, b: usize| -> String { (0..n).map(|j| char::from_u32(0x4e00 + ((i * a + j * b) % 125) as u32).unwrap()).collect() };
+                (text((i * 3) % 40, 31, 7), text(1 + i % 17, 13, 5))
+            })
+            .collect()
+    }
+
+    fn as_pairs(items: &[(String, String)]) -> Vec<(&str, &str)> {
+        items.iter().map(|(k, c)| (k.as_str(), c.as_str())).collect()
+    }
+
+    fn bits(v: &[f64]) -> Vec<u64> {
+        v.iter().map(|x| x.to_bits()).collect()
+    }
+
+    /// docs/spec/semantic-rerank.md §2.4: the int8 model scores exactly (bit for bit) as its `Dequant` twin, whose f32 matrices hold what the int8 ones
+    /// restore to (the matrices of earlier builds): on the portable path (`gemm_q8` against the expanded product) and on the default path (macOS:
+    /// Accelerate, through the purgeable slabs, against `cblas_sgemm` on the expanded matrices).
+    #[test]
+    fn q8_matches_dequantized_f32_bit_for_bit() {
+        let (q, f) = (TinyLm::parse(&random_file_as(Store::Int8)).unwrap(), TinyLm::parse(&random_file_as(Store::Dequant)).unwrap());
+        let items = test_items();
+        let pairs = as_pairs(&items);
+        for be in [Backend::Plain, Backend::DEFAULT] {
+            let (a, b) = (q.ll_many_with(be, &pairs).unwrap(), f.ll_many_with(be, &pairs).unwrap());
+            assert!(a.iter().any(|x| *x != 0.0));
+            assert_eq!(bits(&a), bits(&b), "{be:?}");
+        }
+        #[cfg(target_vendor = "apple")]
+        q.purgeable_stats().check().unwrap();
     }
 
     /// Apple platforms (macOS, and iOS for the simulator run) multiply through Accelerate, never the portable path.
@@ -1932,5 +2538,252 @@ mod tests {
         assert_eq!(m.rerank_colloquial(&[0.0, -10.0], &[cands[0], &long], &words_finite, "", &co, RerankLevel::Standard, &[], &Default::default()).unwrap_err(), TinyLmError::TooLong);
         let learn = Learning { layer: SinitLayer::Fine, scale: 1.0, b: vec![0.0, 1.0] };
         assert!(m.rerank_colloquial(&[0.0, -5.0], &cands, &words_finite, "", &co, RerankLevel::Standard, &[], &learn).unwrap().1.is_some());
+    }
+
+    // ---- item C (docs/spec/semantic-rerank.md §2.2-§2.4, §10): the mapped int8 weights, the portable tiles and the B1 slabs ----
+
+    /// SEC-05: the security review's case, wtype 0 with 64 layers, d 2048, V 3, ctx 2, is 12,891,775,076 bytes; 32-bit usize arithmetic wraps
+    /// it to 6,873,188, under the cap, so a file of that many bytes would have passed the length check on i686. In checked u64 it cannot, on any
+    /// target; and the largest sizes the header bounds allow fit in u64.
+    #[test]
+    fn parse_rejects_32bit_want_overflow() {
+        let want = sjtl_len(HEADER, 0, 64, 2048, 2, 3, false).unwrap();
+        assert_eq!(want, 12_891_775_076);
+        assert_eq!(want % (1u64 << 32), 6_873_188, "what a 32-bit usize would have compared");
+        let mut b = header_v1(64, 2048, 2, 3);
+        b.resize(6_873_188, 0);
+        assert_eq!(TinyLm::parse(&b).err(), Some(TinyLmError::Format));
+        assert!(sjtl_len(HEADER_V6, MAX_V, MAX_LAYERS, MAX_D, MAX_CTX, MAX_V, true).is_some());
+        assert_eq!(sjtl_len(HEADER, usize::MAX, 1, 1, 2, 3, false), None, "4 * usize::MAX does not fit in u64 on a 64-bit host");
+        // the helper is the old formula where nothing wraps
+        let (n_layer, d, ctx, v) = (2usize, 64usize, 64usize, 120usize);
+        assert_eq!(sjtl_len(HEADER, v - 3, n_layer, d, ctx, v, true), Some(random_file(true).len() as u64));
+        assert_eq!(sjtl_len(HEADER, v - 3, n_layer, d, ctx, v, false), Some(random_file(false).len() as u64));
+    }
+
+    /// SEC-08: a scale whose 127 multiple is finite but whose 128 multiple is not (-128 would restore to -inf) is `Format`, whether or not the row
+    /// holds a -128; the largest scale that passes is f32::MAX / 128, with a -128 in its row.
+    #[test]
+    fn parse_rejects_i8_min_scale_overflow() {
+        let good = random_file(true);
+        // the first matrix (emb, V 120 x d 64) follows the vocabulary; its first row is the first d bytes, its scales follow its V * d bytes
+        let (row0, scale0) = (HEADER + 4 * (120 - 3), HEADER + 4 * (120 - 3) + 120 * 64);
+        let s = f32::MAX / 127.5;
+        assert!((127.0f32 * s).is_finite() && !(128.0f32 * s).is_finite(), "premise");
+        for (with_min, scale) in [(false, s), (true, s), (true, -s)] {
+            let mut b = good.clone();
+            b[scale0..scale0 + 4].copy_from_slice(&scale.to_le_bytes());
+            b[row0] = if with_min { 0x80 } else { 0x7f };
+            assert_eq!(TinyLm::parse(&b).err(), Some(TinyLmError::Format), "{with_min} {scale}");
+        }
+        let mut b = good.clone();
+        b[scale0..scale0 + 4].copy_from_slice(&(f32::MAX / 128.0).to_le_bytes());
+        b[row0] = 0x80;
+        assert!(TinyLm::parse(&b).is_ok(), "-128 * (f32::MAX / 128) is -f32::MAX, finite");
+    }
+
+    /// SEC-08: odd sizes put the scales at offsets that are not a multiple of 4 (read with `from_le_bytes`, never cast), from a slice that does not
+    /// start aligned either; the model loads (parse and the mapped `load`) and scores exactly as its `Dequant` twin.
+    #[test]
+    fn parse_accepts_unaligned_slice_and_odd_dims() {
+        let (n_layer, n_head, d, ctx, v) = (1, 1, 3, 6, 5);
+        let file = random_file_dims(Store::Int8, n_layer, n_head, d, ctx, v);
+        let shifted = [&[0xaa][..], &file].concat();
+        let a = TinyLm::parse(&shifted[1..]).unwrap();
+        let f = TinyLm::parse(&random_file_dims(Store::Dequant, n_layer, n_head, d, ctx, v)).unwrap();
+        let dir = std::env::temp_dir().join(format!("shanjie-tinylm-odd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("odd.sjtl");
+        std::fs::write(&path, &file).unwrap();
+        let mapped = TinyLm::load(&path).unwrap();
+        let pairs = [("\u{4e00}\u{4e01}", "\u{4e01}"), ("", "\u{4e00}\u{9fff}"), ("\u{4e01}", "\u{4e00}\u{4e00}\u{4e01}")];
+        for be in [Backend::Plain, Backend::DEFAULT] {
+            let want = bits(&f.ll_many_with(be, &pairs).unwrap());
+            assert_eq!(bits(&a.ll_many_with(be, &pairs).unwrap()), want, "{be:?} parse");
+            assert_eq!(bits(&mapped.ll_many_with(be, &pairs).unwrap()), want, "{be:?} load");
+        }
+        drop(mapped); // Windows refuses to delete a mapped file
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// SEC-10: `gemm_q8` checks every length in release, the scales included (one per stored row of b: k, or n when transposed), with
+    /// `checked_mul`, before any read.
+    #[test]
+    fn gemm_q8_rejects_short_scale_and_overflow() {
+        let run = |a: Vec<f32>, bq: Vec<u8>, sc: Vec<f32>, c: usize, dims: (usize, usize, usize), trans_b: bool| {
+            std::panic::catch_unwind(move || {
+                let mut c = vec![0f32; c];
+                gemm_q8(Kernel::Scalar, &a, &bq, &sc, &mut c, dims, trans_b)
+            })
+            .is_ok()
+        };
+        assert!(run(vec![0.0; 6], vec![0; 6], vec![1.0; 3], 4, (2, 3, 2), false), "control: k scales");
+        assert!(run(vec![0.0; 6], vec![0; 6], vec![1.0; 2], 4, (2, 3, 2), true), "control: n scales");
+        assert!(!run(vec![0.0; 6], vec![0; 6], vec![1.0; 2], 4, (2, 3, 2), false), "short scales");
+        assert!(!run(vec![0.0; 6], vec![0; 6], vec![1.0; 3], 4, (2, 3, 2), true), "k scales where n are needed");
+        assert!(!run(vec![0.0; 6], vec![0; 5], vec![1.0; 3], 4, (2, 3, 2), false), "short b");
+        assert!(!run(vec![], vec![], vec![], 0, (usize::MAX / 2 + 1, 2, 0), false), "m * k wraps to 0");
+    }
+
+    /// SEC-10: the portable int8 product keeps its tile on the heap: a model at `MAX_D` scores on a thread with a 512 KiB stack (the GCD worker
+    /// size), on both paths.
+    #[test]
+    fn plain_q8_fits_512kib_worker_stack() {
+        let m = TinyLm::parse(&random_file_dims(Store::Int8, 1, 1, MAX_D, 2, 3)).unwrap();
+        let got = std::thread::Builder::new()
+            .stack_size(512 * 1024)
+            .spawn(move || [Backend::Plain, Backend::DEFAULT].map(|be| m.ll_many_with(be, &[("", "\u{4e00}")]).unwrap()[0]))
+            .unwrap()
+            .join()
+            .unwrap();
+        assert!(got.iter().all(|x| x.is_finite() && *x < 0.0), "{got:?}");
+    }
+
+    /// SEC-11: a batch with no scored position (every candidate empty) is all 0, as before, without running the model: no slab is pinned.
+    #[test]
+    fn ll_many_empty_candidates_short_circuits() {
+        let m = TinyLm::parse(&random_file(true)).unwrap();
+        for be in [Backend::Plain, Backend::DEFAULT] {
+            assert_eq!(m.ll_many_with(be, &[("\u{4e01}\u{4e02}", ""), ("", "")]).unwrap(), [0.0, 0.0]);
+        }
+        #[cfg(target_vendor = "apple")]
+        assert_eq!(m.purgeable_stats().pin_ok, 0, "no slab was pinned");
+        // a batch with one scored candidate still scores it, and the empty one stays 0
+        let mixed = m.ll_many(&[("", ""), ("", "\u{4e00}")]).unwrap();
+        assert_eq!(mixed[0], 0.0);
+        assert!(mixed[1] < 0.0);
+    }
+
+    /// docs/spec/semantic-rerank.md §2.3: `load_paired` hashes the mapping it parses; on the shipped files that is the hash of the file on disk and the
+    /// one the colloquial term pairs with (`colloquial::PAIRED_TINYLM_SHA256`). Needs data/lm (CI fetches it; see data/*.sha256).
+    #[test]
+    fn load_paired_preserves_colloquial_pairing() {
+        let lm_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../data/lm");
+        let lm = Lm::load(&lm_dir.join("bigram.sjlm")).unwrap();
+        let path = lm_dir.join("tinylm.sjtl");
+        let m = TinyLm::load_paired(&path, &lm).unwrap();
+        assert_eq!(m.file_sha256(), colloquial::PAIRED_TINYLM_SHA256);
+        assert_eq!(m.file_sha256(), crate::eval::sha256_hex(&std::fs::read(&path).unwrap()));
+        assert!(colloquial::applies(Profile::Chat, &m));
+        assert!(TinyLm::load(&path).unwrap().file_sha256().is_empty(), "`load` pairs with nothing");
+    }
+
+    /// The slab of every int8 matrix of `m`.
+    #[cfg(target_vendor = "apple")]
+    fn slabs(m: &TinyLm) -> Vec<&purgeable::PurgeableSlab> {
+        m.slabs().collect()
+    }
+
+    /// SEC-03: a slab the system emptied (forced here; only an unpinned one, as the system only empties volatile memory) is restored on its next pin;
+    /// the scores stay bit for bit those before, and the B1 judge still passes (one restore per emptied slab counted).
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn b1_purge_empty_recovers_bit_for_bit() {
+        let m = TinyLm::parse(&random_file(true)).unwrap();
+        let items = test_items();
+        let pairs = as_pairs(&items);
+        let first = bits(&m.ll_many(&pairs).unwrap());
+        let s = m.purgeable_stats();
+        assert_eq!(s.slab_count, 1 + 4 * 2);
+        s.check().unwrap();
+        assert_eq!(s.empty_rebuilds, 0);
+        assert!(slabs(&m).iter().all(|s| s.force_empty()), "every slab emptied");
+        assert_eq!(bits(&m.ll_many(&pairs).unwrap()), first);
+        let s = m.purgeable_stats();
+        assert_eq!(s.empty_rebuilds, s.slab_count);
+        s.check().unwrap();
+    }
+
+    /// SEC-03: 6 threads scoring through one model while another empties every unpinned slab as fast as it can: every result is bit for bit the
+    /// single-thread one, nothing falls back, and slabs really were emptied and restored.
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn b1_concurrent_threads_and_purge_stress() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let m = TinyLm::parse(&random_file(true)).unwrap();
+        let items = test_items();
+        let pairs = as_pairs(&items);
+        let want = bits(&m.ll_many(&pairs).unwrap());
+        let stop = AtomicBool::new(false);
+        let emptied = std::thread::scope(|sc| {
+            let purger = sc.spawn(|| {
+                let mut n = 0usize;
+                while !stop.load(Ordering::Relaxed) {
+                    n += slabs(&m).iter().filter(|s| s.force_empty()).count();
+                    std::thread::yield_now();
+                }
+                n
+            });
+            let workers: Vec<_> = (0..6)
+                .map(|_| {
+                    sc.spawn(|| {
+                        for _ in 0..15 {
+                            assert_eq!(bits(&m.ll_many(&pairs).unwrap()), want);
+                        }
+                    })
+                })
+                .collect();
+            let ok = workers.into_iter().all(|w| w.join().is_ok());
+            stop.store(true, Ordering::Relaxed);
+            let n = purger.join().unwrap();
+            assert!(ok, "a worker saw other scores");
+            n
+        });
+        let s = m.purgeable_stats();
+        s.check().unwrap();
+        assert!(emptied > 0 && s.empty_rebuilds > 0, "emptied {emptied}, rebuilt {}", s.empty_rebuilds);
+    }
+
+    /// SEC-03: a panic out of a restore (half the region already overwritten) poisons that slab's lock; it is recovered, the slab restores
+    /// again on the next pin, and the scores are bit for bit those of a model that never panicked.
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn b1_populate_panic_unwind_recovers() {
+        let items = test_items();
+        let pairs = as_pairs(&items);
+        let want = bits(&TinyLm::parse(&random_file(true)).unwrap().ll_many(&pairs).unwrap());
+        let m = TinyLm::parse(&random_file(true)).unwrap();
+        for at in [0, 3] {
+            slabs(&m)[at].inject(|i| i.panic_restore = true);
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| m.ll_many(&pairs)));
+            assert!(r.is_err(), "slab {at}: the restore panicked");
+            slabs(&m)[at].inject(|i| i.panic_restore = false);
+            assert_eq!(bits(&m.ll_many(&pairs).unwrap()), want, "slab {at}");
+            // the next round finds slab `at` populated again: empty it so the injected panic is reached on the next one
+            slabs(&m).iter().for_each(|s| assert!(s.force_empty()));
+        }
+        assert_eq!(m.purgeable_stats().fallbacks, 0);
+    }
+
+    /// SEC-03, SEC-12: when the kernel refuses (`vm_allocate`, or `vm_purgable_control` on a later pin), the pin is refused, the product runs on the
+    /// portable path (the scores stay within the 1e-5 of docs/spec/semantic-rerank.md §2.4), `fallbacks` counts it, and the B1 judge rejects the
+    /// stats; synthetic stats with one fallback are rejected as well, and the same stats without it pass.
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn b1_kernel_error_falls_back_to_plain() {
+        let items = test_items();
+        let pairs = as_pairs(&items);
+        let want = TinyLm::parse(&random_file(true)).unwrap().ll_many(&pairs).unwrap();
+        let close = |got: &[f64]| got.iter().zip(&want).all(|(x, y)| (x - y).abs() < 1e-5);
+        let m = TinyLm::parse(&random_file(true)).unwrap();
+        slabs(&m).iter().for_each(|s| s.inject(|i| i.fail_alloc = true));
+        assert!(close(&m.ll_many(&pairs).unwrap()));
+        let s = m.purgeable_stats();
+        assert!(s.fallbacks > 0 && s.alloc_ok == 0 && s.pin_ok == 0, "{s:?}");
+        assert_eq!(s.check(), Err("fallbacks"));
+        slabs(&m).iter().for_each(|s| s.inject(|i| i.fail_alloc = false));
+        assert!(close(&m.ll_many(&pairs).unwrap()));
+        let before = m.purgeable_stats().fallbacks;
+        slabs(&m).iter().for_each(|s| s.inject(|i| i.fail_control = true));
+        assert!(close(&m.ll_many(&pairs).unwrap()));
+        let s = m.purgeable_stats();
+        assert!(s.fallbacks > before, "{s:?}");
+        assert_eq!(s.check(), Err("fallbacks"));
+        let synthetic =
+            PurgeableStats { slab_count: 33, alloc_ok: 33, pin_ok: 66, volatile_ok: 66, empty_rebuilds: 0, fallbacks: 1, currently_volatile: 33 };
+        assert_eq!(synthetic.check(), Err("fallbacks"));
+        assert_eq!(PurgeableStats { fallbacks: 0, ..synthetic }.check(), Ok(()));
+        assert_eq!(PurgeableStats { currently_volatile: 32, fallbacks: 0, ..synthetic }.check(), Err("currently_volatile"));
+        assert_eq!(PurgeableStats::default().check(), Err("slab_count"));
     }
 }

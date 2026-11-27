@@ -80,7 +80,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 ### 2.2 載入規則
 
 - `shanjie_engine_load_lm`：`classes.sjc` 必須在模型旁邊，缺了或不符回 3；`kn.sjkn` 在模型旁邊就載入，沒有就關閉，存在但讀不了或不符回 3（不靜默略過，連指向不存在檔案的符號連結也算「存在」）；兩張連文表各自在模型旁邊找（書面 `trigram.sjt3`、聊天 `trigram-chat.sjt3`），沒有就只是那個設定不用連文，任何一張存在但壞掉回 3（兩個設定都載入失敗）。
-- 通語（`bigram.sjlm`）、辨類（`classes.sjc`）、承接（`kn.sjkn`）、兩張連文表（`trigram.sjt3`、`trigram-chat.sjt3`）與常談（`colloquial.sjlm`）皆以唯讀記憶體映射載入（`Mapped::open`）。載入期間這些檔案不能被原地截斷或改寫（會讀到映射之外的頁而 SIGBUS 或破壞已驗過的不變量）；建置工具（`build_lm.py`、`build_classes.py`、`kn_cont.py`、`build_trigram.py`）一律先寫暫存檔再以 `os.replace` 取代，安裝路徑一律整個 bundle 以 rename 換掉。
+- 通語（`bigram.sjlm`）、辨類（`classes.sjc`）、承接（`kn.sjkn`）、兩張連文表（`trigram.sjt3`、`trigram-chat.sjt3`）、常談（`colloquial.sjlm`）與會意模型（`tinylm.sjtl`）皆以唯讀記憶體映射載入（同一個 `core/src/mmap.rs`：n-gram 各檔用 `Mapped::open`，會意用設上限的 `Mapped::open_bounded`；會意的 int8 矩陣在模型活著的期間直接從映射讀，`docs/spec/semantic-rerank.md` §2.2）。載入期間這些檔案不能被原地截斷或改寫（會讀到映射之外的頁而 SIGBUS，或讀到解析之後才改的值而破壞已驗過的不變量）；建置工具（`build_lm.py`、`build_classes.py`、`kn_cont.py`、`build_trigram.py`）一律先寫暫存檔再以 `os.replace` 取代，安裝路徑一律整個 bundle 以 rename 換掉，Windows 安裝程式先停常駐程序再換檔。
 - `shanjie_engine_load_tinylm`：要先有成功載入的通語；檔案必須是一般檔案、不超過 64 MiB、格式正確；通語雜湊與 KN 狀態要符合檔頭（§8.1）；失敗回 3，引擎保留原本的小模型（或沒有），n-gram 照常運作。
 - `shanjie_engine_load_colloquial`：把檔案當成純二元表讀（不載入旁邊的詞類表、KN、連文表）；讀不了或格式錯回 3。
 - 錯誤只帶種類，不帶任何內容。

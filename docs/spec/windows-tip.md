@@ -36,17 +36,17 @@
 - Windows 才需要的系統呼叫用 `windows-sys`（`core/Cargo.toml` 的 `[target."cfg(windows)".dependencies]`，版本 0.59，開 `Win32_Foundation`、`Win32_Storage_FileSystem`、`Win32_System_Memory`、`Win32_System_SystemInformation`、`Win32_System_IO`、`Win32_Security`）。`windows-sys` 之外沒有別的 Windows 專用相依。
 - 核心的測試在 macOS、x86_64 Linux 與 x86_64 Windows 上跑；i686 與 aarch64 的 Windows 目標只編譯、不測試（§2.9）。
 
-### 2.2 唯讀 mmap（n-gram 模型與伴生表）
+### 2.2 唯讀 mmap（n-gram 模型、伴生表與會意模型）
 
-`core/src/trigram.rs` 的 `Mapped::open`（與共用列舉 `MappedBytes`）供通語／常談模型（`.sjlm`）、辨類（`classes.sjc`）、承接（`kn.sjkn`）與兩張 trigram 表（`trigram*.sjt3`）共用，有 Unix 與 Windows 兩個版本，語意相同：
+`core/src/mmap.rs` 的 `Mapped::open_bounded` 是核心唯一的唯讀映射，有 Unix 與 Windows 兩個版本，語意相同。n-gram 各檔（通語／常談 `.sjlm`、辨類 `classes.sjc`、承接 `kn.sjkn`、兩張 trigram 表 `trigram*.sjt3`）經不設上限的 `Mapped::open`（由 `trigram.rs` 轉匯出，與共用列舉 `MappedBytes` 一起給 `lm.rs` 用），會意模型 `tinylm.sjtl` 以 `MAX_FILE` 為上限直接用 `open_bounded`：
 
-- 在同一個 handle 上驗證「是一般檔（Windows 再驗 `FILE_TYPE_DISK`）、不是空檔、長度不超過 `isize::MAX`（以 `isize::try_from` 檢查，確保 32 位元 `i686` 目標也滿足 `slice::from_raw_parts` 前提）」，內容唯讀；失敗回 `MapError::Empty`（0 位元組一般檔）或 `MapError::Io`（缺檔、目錄、裝置、管線、超限或對映失敗；錯誤不帶內容，R2）。呼叫端依檔案各自保持原本的錯誤語意：`.sjlm` 與 `classes.sjc` 經 `map_or_empty` 把 `Empty` 轉為空緩衝交給解析器報 `LmError::Format`、`Io` 維持 `LmError::Io`，`kn.sjkn` 依存在檢查後報 `LmError::KnSide`，trigram 表報 `LmError::TriTable`。
-- Windows：用 std 的 `OpenOptions` 加 `share_mode(FILE_SHARE_READ)` 開檔（等於 `CreateFileW(GENERIC_READ, FILE_SHARE_READ)`），先以 `meta.is_file()` 與 `GetFileType == FILE_TYPE_DISK` 拒絕目錄、裝置、管線（避免 0 位元組特殊檔誤判為 `Empty`），再檢查長度非 0 與 `isize::try_from(meta.len())`，然後 `CreateFileMappingW(PAGE_READONLY)` 與 `MapViewOfFile(FILE_MAP_READ)`；對映物件的 handle 立刻關掉，由 view 撐住 section，`Drop` 時 `UnmapViewOfFile`。
-- 平台差異：Windows 在 view 存在時不讓人刪除、截斷或以 rename 覆蓋該檔，卻擋不住別的程序之後以寫入開檔就地改位元組。所以「對映期間不就地改寫」仍是呼叫端的契約（`open` 是 `unsafe fn`）；更新上述任一模型或伴生檔要等引擎放掉對映之後。
+- 開檔一次，在同一個 handle 上驗證「是一般檔（Windows 再驗 `FILE_TYPE_DISK`）」，長度以 64 位元判斷：0 位元組回 `Empty`、超過上限或超過 `isize::MAX` 回 `TooLarge`（32 位元的 i686 不會把長度截斷，`slice::from_raw_parts` 的前提成立），其餘失敗（缺檔、目錄、裝置、管線、對映失敗）回 `Io`；內容唯讀，錯誤不帶內容（R2）。`Mapped::open` 沒有上限，`TooLarge` 只可能是超過 `isize::MAX`。呼叫端依檔案各自保持原本的錯誤語意：`.sjlm` 與 `classes.sjc` 經 `map_or_empty` 把 `Empty` 轉為空緩衝交給解析器報 `LmError::Format`、`Io` 與 `TooLarge` 報 `LmError::Io`，`kn.sjkn` 依存在檢查後報 `LmError::KnSide`，trigram 表報 `LmError::TriTable`；會意把 `Io` 報成 `Io`、另兩種報成 `Format`。
+- Windows：用 std 的 `OpenOptions` 加 `share_mode(FILE_SHARE_READ)` 開檔（等於 `CreateFileW(GENERIC_READ, FILE_SHARE_READ)`），先以 `meta.is_file()` 與 `GetFileType == FILE_TYPE_DISK` 拒絕目錄、裝置、管線（避免 0 位元組特殊檔誤判為 `Empty`），長度檢查過後 `CreateFileMappingW(PAGE_READONLY)` 傳那個長度的高低 32 位元、`MapViewOfFile(FILE_MAP_READ)` 傳同一個長度；對映物件的 handle 立刻關掉，由 view 撐住 section，`Drop` 時 `UnmapViewOfFile`。
+- 平台差異：Windows 在 view 存在時不讓人刪除、截斷或以 rename 覆蓋該檔，卻擋不住別的程序之後以寫入開檔就地改位元組。所以「對映期間不就地改寫」仍是呼叫端的契約（`open`、`open_bounded` 都是 `unsafe fn`）；更新上述任一檔案要等引擎放掉對映之後（安裝程式升級前先停常駐程序）。會意模型也映射之後，常駐程序活著的期間 `data\lm\tinylm.sjtl` 一樣不能被刪除或覆蓋；測試在刪除暫存模型檔之前先放掉載入它的模型。
 
 ### 2.3 小模型與其他檔案讀取
 
-- `core/src/tinylm.rs`：`O_NONBLOCK` 與它的使用只在 `cfg(unix)`（Linux 0o4000，其他 Unix 0x0004）。Windows 的 `read_bounded` 用一般的 `File::open`，同樣先開檔、再檢查「是一般檔且不超過上限」、再從同一個 handle 讀到上限為止。
+- `core/src/mmap.rs`：`O_NONBLOCK` 與它的使用只在 `cfg(unix)`（Linux 0o4000，其他 Unix 0x0004）。會意模型在 Windows 與其他平台一樣映射（§2.2），不再整檔讀進記憶體；int8 矩陣不展開，可攜路徑每次只還原幾列到至多 128 KiB 的堆積暫存（`docs/spec/semantic-rerank.md` §2.4），結果和展開時逐位元相同，所以 Linux 對 Windows 的 rowstats 逐位元組比對不變。
 - Accelerate 只在 Apple 平台（macOS；iOS 在 CI 只檢查編譯，測試只在本機模擬器跑）；Windows 與 Linux 一樣走 Plain 路徑（x86-64 上依執行期偵測用 AVX2 或 AVX-512F 的核心函式，結果和純量逐位元相同；`docs/spec/semantic-rerank.md` §2.4）。
 
 ### 2.4 當地日期

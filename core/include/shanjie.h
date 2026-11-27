@@ -539,7 +539,10 @@ typedef struct ShanjieRerankJob ShanjieRerankJob;
 //   zero for none; versions 1 to 3 count as none; the loaded kn.sjkn, or none, must match all 32 bytes; docs/spec/models.md §6.2
 //   docs/spec/semantic-rerank.md §2.3) (a pairing check only, not an integrity check of the .sjtl); the engine keeps its previous model (or none) and
 //   the n-gram keeps working. 1 for a NULL engine or path, 2 for a path that is not UTF-8. Does not change the rerank setting
-//   (set_rerank) or the current display.
+//   (set_rerank) or the current display. The file is memory-mapped read-only for as long as the small model lives (this engine, and
+//   any ShanjieShared or engine built from it): it must not be truncated or rewritten in place meanwhile (replace it by rename, or after
+//   freeing them; docs/spec/models.md §2.2). Nothing is written to disk; on Apple platforms the restored weights live in purgeable
+//   memory of the process (docs/spec/semantic-rerank.md §2.4).
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 // load_colloquial: the colloquial table (colloquial.sjlm, docs/spec/semantic-rerank.md §4), loaded as a read-only memory map
 //   (docs/spec/decoder.md §3.5): while an engine has it loaded it must not be truncated or rewritten in place (replace by rename).
@@ -593,7 +596,8 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
 
 // Parts shared between engines (docs/spec/c-abi.md §5.4): a pack switch builds a new engine without reading the model files again.
 //   A ShanjieShared owns only data: the loaded n-gram model (the .sjlm file, classes.sjc, kn.sjkn and the two trigram tables inside
-//   it are read-only memory maps), the small model, the colloquial table (its .sjlm file is a read-only memory map), the digit table,
+//   it are read-only memory maps), the small model (its .sjtl is a read-only memory map too: the same no-rewrite-in-place rule as
+//   load_tinylm), the colloquial table (its .sjlm file is a read-only memory map), the digit table,
 //   the English follower table and the reading table when it can be reused (no enabled pack of
 //   either engine holds a one-syllable reading), plus the data folder's path. No user input is in it (no left context, composition,
 //   candidates or choice memory). It borrows nothing from the engine, so it stays valid after the engine is freed, and it never changes.
