@@ -212,11 +212,91 @@ struct SettingsForm: View {
             // background the two read as a different tint and opacity (seen in screenshots; checked in a
             // VM, the device check is docs/spec/install-and-update.md §10.4).
             .scrollContentBackground(.hidden)
+            // Pinned footer; in the list's own safe area, not a sibling VStack, so it shares the list's material and the list
+            // scrolls above it (docs/spec/macos-shell.md §9.2 左欄頁尾).
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                SidebarFooter(versionText: model.updates?.versionText ?? Updates.versionText(nil))
+            }
             .frame(width: Self.sidebarWidth)
             // A fresh form per page, so a page opens at its top rather than at the previous page's scroll offset.
             SettingsPageForm(page: navigation.page, model: model, appLabels: appLabels)
                 .id(navigation.page)
         }
+    }
+}
+
+/// The sidebar's footer (docs/spec/macos-shell.md §9.2 左欄頁尾), laid out like Syrtis's `sidebarFooter` (TokenBar SettingsWindowView.swift):
+/// app icon, name and version, then the icon-only links. No background of its own: the list's hidden background lets the
+/// glass through.
+struct SidebarFooter: View {
+    /// All values below are Syrtis SettingsWindowView.swift's.
+    private static let iconSize: CGFloat = 26
+    private static let rowSpacing: CGFloat = 7
+    private static let iconTextSpacing: CGFloat = 8
+    private static let linkSpacing: CGFloat = 4
+    private static let outerPadding: CGFloat = 6
+    private static let bottomPadding: CGFloat = 12
+
+    /// Shared with the 關於 page's 版本 row (`model.updates?.versionText`); not read separately from Info.plist.
+    let versionText: String
+
+    /// The localized name (中文介面), then the plain one, then 善解; not `CFBundleName`, which is the English name.
+    private static var appName: String {
+        let localized = (Bundle.main.localizedInfoDictionary?["CFBundleDisplayName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let plain = (Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        return localized ?? plain ?? "善解"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Self.rowSpacing) {
+            HStack(spacing: Self.iconTextSpacing) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .frame(width: Self.iconSize, height: Self.iconSize)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(Self.appName).font(.caption.weight(.medium))
+                    Text(versionText)
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.leading, Self.outerPadding)
+            HStack(spacing: Self.linkSpacing) {
+                ForEach(SidebarLinks.all, id: \.url) { SidebarIconLink(item: $0) }
+            }
+        }
+        .padding(.horizontal, Self.outerPadding)
+        .padding(.bottom, Self.bottomPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// One icon-only link: secondary colour, primary with a faint rounded chip on hover (Syrtis `FooterLink` in SettingsWindowView.swift), pointing-hand cursor.
+private struct SidebarIconLink: View {
+    /// All values below are Syrtis SettingsWindowView.swift's (`FooterLink`).
+    private static let cornerRadius: CGFloat = 5
+    private static let hoverOpacity = 0.09
+    private static let hPadding: CGFloat = 6
+    private static let vPadding: CGFloat = 3
+    let item: SidebarLinks.Item
+    @State private var hovering = false
+
+    var body: some View {
+        Link(destination: URL(string: item.url)!) {
+            Image(systemName: item.symbol)
+                .font(.caption2)
+                .foregroundStyle(hovering ? Color.primary : Color.secondary)
+                .padding(.horizontal, Self.hPadding)
+                .padding(.vertical, Self.vPadding)
+                .background(RoundedRectangle(cornerRadius: Self.cornerRadius).fill(Color.primary.opacity(hovering ? Self.hoverOpacity : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .pointerStyle(.link)
+        .help(item.name)
+        .accessibilityLabel(item.name)
     }
 }
 
