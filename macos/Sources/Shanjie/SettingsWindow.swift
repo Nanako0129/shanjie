@@ -621,7 +621,9 @@ private struct TintPreview: NSViewRepresentable {
 /// method has no main menu to hold a Close item; everything else, ⌘Q included, goes on to `super` and stays unbound.
 private final class SettingsNSWindow: NSWindow {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if isCloseWindowShortcut(flags: event.modifierFlags, charactersIgnoringModifiers: event.charactersIgnoringModifiers) {
+        // Only as the key window: AppKit also offers key equivalents to the main window, and ⌘W meant for another of the input
+        // method's windows (the notice panel) must not close this one.
+        if isKeyWindow, isCloseWindowShortcut(flags: event.modifierFlags, charactersIgnoringModifiers: event.charactersIgnoringModifiers) {
             performClose(nil)
             return true
         }
