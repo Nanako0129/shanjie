@@ -28,3 +28,9 @@ brew install --cask nanako0129/tap/shanjie
 **手動**（只裝在你的帳號）：從 Releases 下載 `shanjie-<版本>.zip`，用 Finder 解壓，在這個 repo 的根目錄執行 `scripts/install-ime.sh <解壓出來的 善解輸入法.app 路徑>`。
 
 裝好後在選單列的輸入法選單選「善解輸入法」；選單裡的「善解設定…」打開設定視窗。v0.4.7 起可以在設定的「關於」頁直接更新。
+
+## 贊助
+
+善解是一個人利用空閒時間開發、免費開源的專案。贊助會用在模型訓練的雲端運算、測試與發版的基礎設施，以及持續改進選字的時間。如果善解對你有幫助，可以在 Patreon 支持它的開發。
+
+[![在 Patreon 支持善解](https://img.shields.io/badge/Support_on_Patreon-FF424D?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/cw/Nanako0129/membership)
