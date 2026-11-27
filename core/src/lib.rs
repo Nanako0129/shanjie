@@ -633,6 +633,25 @@ impl Lexicon {
         self.tol().adjacent(shown).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
     }
 
+    /// One symbol (bit 5): the lexicon syllables that show as the unknown `shown` when one symbol of them is replaced by another of its column
+    /// (docs/contracts/typo-one-sym.md §2.2), sorted by name. Empty for a syllable the lexicon has.
+    pub fn one_sym_alts(&self, shown: &str) -> Vec<&str> {
+        self.tol().one_sym(shown).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
+    }
+
+    /// The lexicon syllables an unknown syllable `syl` is read through under `flags` (docs/contracts/typo-one-sym.md §2.4 item 2): without bit 5 only
+    /// the adjacent-key table (the table of every flags value before bit 5 existed: never `one_sym`); bit 5 alone only the one-symbol table; both bits the
+    /// adjacent table first and, with `extra`, the one-symbol syllables the adjacent table does not hold (the second source, a larger penalty).
+    fn unknown_alts(&self, syl: &str, flags: u32, extra: bool) -> Vec<u32> {
+        let one = flags & fuzzy::FUZZY_ONE_SYM != 0;
+        let both = one && flags & fuzzy::FUZZY_ADJACENT != 0;
+        if extra {
+            let adj = self.tol().adjacent(syl);
+            return if both { self.tol().one_sym(syl).iter().copied().filter(|a| !adj.contains(a)).collect() } else { Vec::new() };
+        }
+        if one && !both { self.tol().one_sym(syl).to_vec() } else { self.tol().adjacent(syl).to_vec() }
+    }
+
     /// The readings (syllable ids) of the words a span may be tolerantly read as: exactly one syllable replaced. A span with an
     /// unknown syllable (id `u32::MAX`) replaces that syllable by its adjacent alternatives (none when it has two or more
     /// unknown ones); a span of known syllables replaces each syllable by its fuzzy-sound alternatives (`flags` bits 0-3).
@@ -640,7 +659,9 @@ impl Lexicon {
     ///
     /// `t3` is the span's slice of the sandhi position table (docs/spec/decoder.md §6.6; empty for none): an unknown syllable the table marks unaccepted (or an
     /// unaccepted tail) was accepted by the sandhi rule, not as a slip, so it has no adjacent reading here, whatever the adjacent bit says: it is read as Xˇ only.
-    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32, t3: &[tone3::Pos]) -> Vec<Vec<u32>> {
+    ///
+    /// Bit 5 (docs/contracts/typo-one-sym.md §2.4): see `unknown_alts`; `extra` asks for the second source of a span read through both bits.
+    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32, t3: &[tone3::Pos], extra: bool) -> Vec<Vec<u32>> {
         let mut out = Vec::new();
         let mut put = |j: usize, alts: &[u32]| {
             for &a in alts {
@@ -652,8 +673,8 @@ impl Lexicon {
         let unknown: Vec<usize> = (0..ids.len()).filter(|&j| ids[j] == u32::MAX).collect();
         match unknown[..] {
             [j] if t3.get(j).is_some_and(|p| p.unaccepted) => {}
-            [j] => put(j, self.tol().adjacent(&syls[j])),
-            [] if flags & fuzzy::FUZZY_SOUND != 0 => (0..ids.len()).for_each(|j| put(j, self.tol().sound(ids[j], flags))),
+            [j] => put(j, &self.unknown_alts(&syls[j], flags, extra)),
+            [] if flags & fuzzy::FUZZY_SOUND != 0 && !extra => (0..ids.len()).for_each(|j| put(j, self.tol().sound(ids[j], flags))),
             _ => {}
         }
         out
@@ -678,7 +699,27 @@ impl Lexicon {
         if flags & fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
             return (Vec::new(), Vec::new());
         }
-        self.pick(self.tolerant_readings(ids, syls, flags, t3), ids, per_reading, total, entry, &HashSet::new())
+        self.pick(self.tolerant_readings(ids, syls, flags, t3, false), ids, per_reading, total, entry, &HashSet::new())
+    }
+
+    /// The second source of a span with an unknown syllable under both bit 4 and bit 5: the words of the one-symbol readings that the adjacent-key
+    /// readings do not hold, without the words `taken` (those `tolerant_pick` found). Nothing under any other flags.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn tolerant_pick_extra<'a>(
+        &self,
+        ids: &[u32],
+        syls: &[String],
+        flags: u32,
+        t3: &[tone3::Pos],
+        per_reading: usize,
+        total: usize,
+        entry: impl Fn(usize) -> (&'a str, f64),
+        taken: &HashSet<&str>,
+    ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
+        if !ids.contains(&u32::MAX) || flags & fuzzy::FUZZY_ONE_SYM == 0 || flags & fuzzy::FUZZY_ADJACENT == 0 {
+            return (Vec::new(), Vec::new());
+        }
+        self.pick(self.tolerant_readings(ids, syls, flags, t3, true), ids, per_reading, total, entry, taken)
     }
 
     /// The sandhi source of a span (docs/spec/decoder.md §6.6): `tolerant_pick` over the readings `tone3::readings` gives for the span's slice `t3` of the
@@ -777,7 +818,11 @@ impl Lexicon {
         let entry = |p: usize| (self.word(p), self.ents[p].score);
         let name = |r: &[u32]| r.iter().map(|&i| self.syl_names[i as usize].clone()).collect::<Vec<String>>();
         let (readings, words) = self.tolerant_pick(&ids, key, flags, t3, usize::MAX, usize::MAX, entry);
+        // Both bit 4 and bit 5: the adjacent-key words are listed first, then the one-symbol words they do not hold (docs/contracts/typo-one-sym.md §2.4.4).
+        let taken: HashSet<&str> = words.iter().map(|w| w.0).collect();
+        let (extra_readings, extra_words) = self.tolerant_pick_extra(&ids, key, flags, t3, usize::MAX, usize::MAX, entry, &taken);
         let mut out: Vec<(&str, Vec<String>)> = words.into_iter().map(|(w, _, _, a)| (w, name(&readings[a].1))).collect();
+        out.extend(extra_words.into_iter().map(|(w, _, _, a)| (w, name(&extra_readings[a].1))));
         let (readings, words) = self.tone3_pick(&ids, t3, usize::MAX, usize::MAX, entry);
         let taken: HashSet<&str> = words.iter().map(|w| w.0).collect();
         // Then K's one-syllable words and the neutral source's, the order the decoder reads them in.
@@ -799,12 +844,19 @@ impl Lexicon {
     /// `t3` is the position table of `syls` (`tone3::positions`, docs/spec/decoder.md §6.6): a word read through the sandhi source is given under the lexicon
     /// reading it was found under too. An empty `t3` (or all empty positions) is the table of the switch off.
     pub fn path_readings<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>, t3: &[tone3::Pos]) -> Vec<String> {
+        self.path_readings_with_fuzzy(syls, words, t3, 0)
+    }
+
+    /// `path_readings` with the flags the path was decoded under (docs/contracts/typo-one-sym.md §2.4.4): bit 5 reads an unknown syllable through the
+    /// one-symbol table, bits 4 and 5 through both. The sound bits (0-3) are masked out, so they never reach the readings (and the manual-word mask).
+    pub fn path_readings_with_fuzzy<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>, t3: &[tone3::Pos], flags: u32) -> Vec<String> {
+        let flags = flags & (fuzzy::FUZZY_ADJACENT | fuzzy::FUZZY_ONE_SYM);
         let mut out: Vec<String> = Vec::with_capacity(syls.len());
         for (w, l) in words {
             let at = out.len();
             let Some(span) = syls.get(at..at + l) else { return syls.to_vec() };
             // `tolerant_words` with the table: the adjacent readings of an unknown syllable that is no unaccepted one, then the sandhi readings.
-            let tolerated = self.tolerant_words(span, 0, t3.get(at..at + l).unwrap_or(&[])).into_iter().find(|(tw, _)| *tw == w);
+            let tolerated = self.tolerant_words(span, flags, t3.get(at..at + l).unwrap_or(&[])).into_iter().find(|(tw, _)| *tw == w);
             match tolerated {
                 Some((_, reading)) => out.extend(reading),
                 None => out.extend_from_slice(span),

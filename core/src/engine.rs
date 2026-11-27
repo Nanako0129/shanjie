@@ -8,7 +8,7 @@ use crate::predict::{
     abbr_cuts, predict_capped, predict_digits_capped, predict_english_capped, reading_matches_in, unit_of_syllable, DigitWords,
     Mode, Unit,
 };
-use crate::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
+use crate::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL, FUZZY_ONE_SYM};
 use crate::lm::{decode_segment_fuzzy, history, pool_order, rerank_pool, fuzzy_path, CappedLexicon, DecodedWord, Demote, End, Learn, Lm, Profile, RecurGrams, Scored, Sinit, SinitLayer};
 use crate::trigram::TriMemo;
 use crate::digits::DigitTable;
@@ -534,6 +534,12 @@ impl Layout {
         let i = TONE_MARKS[1..].iter().position(|m| m.chars().next() == Some(mark))?;
         Some(self.tone_keys()[i])
     }
+}
+
+/// The fuzzy flags the decoder, the window and the learning guard read (docs/contracts/typo-one-sym.md §2.4 item 1): the Eten layout has no standard
+/// keyboard rows, so it never reads the adjacent-key bit; every other bit, and the standard layout, as set.
+pub fn effective_fuzzy_for(layout: Layout, flags: u32) -> u32 {
+    if layout == Layout::Eten { flags & !FUZZY_ADJACENT } else { flags }
 }
 
 /// Which trigger of the direct revert fired (docs/spec/english-mixed.md §3.2; tool hook `Engine::english_reverted`).
@@ -1130,7 +1136,7 @@ pub struct Engine {
     /// How many `dispatch` calls the running key is inside: a key that ends a run or a digit buffer first and then dispatches itself again
     /// calls `dispatch` a second time, and whatever the inner call does nothing about, the key as a whole changed something.
     depth: u32,
-    /// Fuzzy input flags (`set_fuzzy`, default 0): bits 0-3 the sound pairs, bit 4 adjacent-key slips.
+    /// Fuzzy input flags (`set_fuzzy`, default 0): bits 0-3 the sound pairs, bit 4 adjacent-key slips, bit 5 one-symbol slips; the decoder reads `effective_fuzzy`.
     fuzzy: u32,
     /// Third-tone and colloquial sandhi (`set_tone3`, default on; docs/spec/decoder.md §6.6): the switch handed to `tone3::positions`, and whether the `colloq` rows are read.
     tone3: bool,
@@ -2028,11 +2034,17 @@ impl Engine {
             }
             let today = self.today();
             let uses = if new_on { self.new_word_uses(today) } else { Vec::new() };
+            // docs/contracts/typo-one-sym.md §2.4 item 4: a syllable only bit 5 accepted is never in a record, a key or a reading.
+            let unk = self.bit5_unknown();
+            let u = |i: usize| unk.get(i).copied().unwrap_or(false);
             let plans: Vec<_> = self
                 .fixed
                 .iter()
                 .flat_map(|f| {
                     let Some(pre) = f.pre.as_ref().filter(|p| **p != f.word && !self.is_punct(f.start)) else { return Vec::new() };
+                    if (f.start..f.end).any(u) {
+                        return Vec::new();
+                    }
                     let off: usize = (0..f.start).map(|i| self.token_width(i)).sum();
                     let before: String = display.chars().take(off).collect();
                     let ctx = f.key.clone().unwrap_or_else(|| context_key(&format!("{}{before}", self.left)));
@@ -2040,6 +2052,10 @@ impl Engine {
                     // prediction pick (`f.key` set) was made at the end of the composition, so it is `^>$`.
                     let next = if f.key.is_some() { None } else { self.syls.get(f.end).map(String::as_str) };
                     let ctx = record_key(ctx, next);
+                    let sentence_start = f.key.is_none() && ctx.starts_with(NEXT_PREFIX);
+                    if sentence_start && u(f.end) {
+                        return Vec::new(); // `^>` + a syllable only bit 5 accepted, or `^>$` made of it: neither key is recorded
+                    }
                     let reading = self.syls[f.start..f.end].to_vec();
                     // docs/spec/learning.md §7.1: a sentence-start single character is also learned under the mid key (the next two syllables) and the fine key (the next three, or
                     // two and `$` when the composition ends there). A mid or fine key is not made when a syllable it needs is missing, English, a digit or punctuation
@@ -2048,7 +2064,8 @@ impl Engine {
                     let (a, b, c) = (self.syls.get(f.end), self.syls.get(f.end + 1), self.syls.get(f.end + 2));
                     let (a, b, c) = (a.map(String::as_str), b.map(String::as_str), c.map(String::as_str));
                     let deeper: Vec<String> = if is_single(&f.word) && f.key.is_none() && ctx.starts_with(NEXT_PREFIX) {
-                        [mid_key(a, b), fine_key(a, b, c)].into_iter().flatten().collect()
+                        let (mid_ok, fine_ok) = (!u(f.end + 1), !u(f.end + 1) && !u(f.end + 2));
+                        [mid_ok.then(|| mid_key(a, b)).flatten(), fine_ok.then(|| fine_key(a, b, c)).flatten()].into_iter().flatten().collect()
                     } else {
                         Vec::new()
                     };
@@ -2141,6 +2158,8 @@ impl Engine {
         if picked.is_empty() {
             return out;
         }
+        // docs/contracts/typo-one-sym.md §2.4 item 4: a syllable only bit 5 accepted breaks the run, so it is no part of a new word's reading.
+        let unk = self.bit5_unknown();
         let mut run: Vec<(usize, char)> = Vec::new();
         let mut flush = |run: &mut Vec<(usize, char)>| {
             let take = std::mem::take(run);
@@ -2173,7 +2192,7 @@ impl Engine {
         for (p, s) in self.path.iter().zip(self.path_starts()) {
             let mut cs = p.word.chars();
             match (cs.next(), cs.next()) {
-                (Some(c), None) if !p.is_punct && is_han(c) && !NEWWORD_BREAK.contains(c) => run.push((s, c)),
+                (Some(c), None) if !p.is_punct && is_han(c) && !NEWWORD_BREAK.contains(c) && !unk.get(s).copied().unwrap_or(false) => run.push((s, c)),
                 _ => flush(&mut run),
             }
         }
@@ -2446,19 +2465,74 @@ impl Engine {
     }
 
     /// Fuzzy input (docs/spec/decoder.md §6): `flags` bits 0-3 are the sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ), bit 4 the
-    /// adjacent-key slips; default 0, and 0 changes nothing. Bit 4 only decides whether `finish_syllable` accepts a syllable the
-    /// lexicon lacks; a syllable already accepted is decoded whatever the flags say. Recomputes the composition and returns the
-    /// snapshot, like `set_demote`; on a decode failure the engine resets itself. Bits above 4 are ignored here (the C ABI refuses them).
+    /// adjacent-key slips, bit 5 the one-symbol slips (docs/contracts/typo-one-sym.md); default 0, and 0 changes nothing. Bits 4 and 5 only decide whether
+    /// `finish_syllable` accepts a syllable the lexicon lacks; a syllable already accepted is decoded whatever the flags say, except that bit 5 changes
+    /// which table reads it: when the flags change so that the table reading an accepted syllable changes (bit 5 turned off, or turned on without
+    /// bit 4), every such syllable of the composition (not under a fixed word) is first stored as the lexicon reading it is shown as now, so the
+    /// composition keeps its text and a syllable only the old table knew never has no path. Recomputes the composition and returns the
+    /// snapshot, like `set_demote`; on a decode failure the engine resets itself. Bits above 5 are ignored here (the C ABI refuses them).
     pub fn set_fuzzy(&mut self, flags: u32) -> Result<Output, EngineError> {
         self.setting_changed();
         self.invalidate();
-        self.fuzzy = flags & FUZZY_ALL;
+        let new = flags & FUZZY_ALL;
+        let (old_eff, new_eff) = (self.effective_fuzzy(), effective_fuzzy_for(self.layout, new));
+        let leaves = old_eff & FUZZY_ONE_SYM != 0 && new_eff & FUZZY_ONE_SYM == 0;
+        let enters = (old_eff & FUZZY_ONE_SYM == 0 || old_eff & FUZZY_ADJACENT != 0) && new_eff & FUZZY_ONE_SYM != 0 && new_eff & FUZZY_ADJACENT == 0;
+        if (leaves || enters) && self.freeze_unknown_syllables(old_eff) {
+            self.cands = None;
+        }
+        self.fuzzy = new;
         self.clear_pred();
         if let Err(e) = self.refresh() {
             self.clear_all();
             return Err(e);
         }
         self.handled()
+    }
+
+    /// The flags the decoder, the window and the learning guard read (`effective_fuzzy_for`).
+    fn effective_fuzzy(&self) -> u32 {
+        effective_fuzzy_for(self.layout, self.fuzzy)
+    }
+
+    /// The learning guard's positions (docs/contracts/typo-one-sym.md §2.4 item 4.0): the syllables of the composition that stand there only because bit 5
+    /// accepted them, i.e. no lexicon syllable, no punctuation or English token, no sandhi or neutral one (the position table marks those unaccepted). Never one
+    /// the user chose from the window (that rewrites the syllable to the lexicon reading). All false without bit 5, so with the flags 0 and 16 nothing of learning changes.
+    fn bit5_unknown(&self) -> Vec<bool> {
+        if self.effective_fuzzy() & FUZZY_ONE_SYM == 0 {
+            return vec![false; self.syls.len()];
+        }
+        let t3 = self.t3();
+        (0..self.syls.len()).map(|i| !self.is_punct(i) && !self.lex.has_syllable(&self.syls[i]) && !t3.get(i).is_some_and(|p| p.unaccepted)).collect()
+    }
+
+    /// `set_fuzzy`'s rewrite: each syllable of the composition the lexicon lacks (not under a fixed word, no punctuation or English token, no sandhi one) is
+    /// stored as the lexicon reading the decode under `old_eff` shows it as (`path_readings_with_fuzzy`); one the path does not cover through a table
+    /// (a learned word's) falls back to its first adjacent, then one-symbol, alternative. Returns whether a syllable changed.
+    fn freeze_unknown_syllables(&mut self, old_eff: u32) -> bool {
+        let t3 = self.t3();
+        let unknown = |i: usize| {
+            !self.fixed.iter().any(|f| f.start <= i && i < f.end) && !self.is_punct(i) && !t3.get(i).is_some_and(|x| x.unaccepted) && !self.lex.has_syllable(&self.syls[i])
+        };
+        let mut edits: Vec<(usize, String)> = Vec::new();
+        for (p, s) in self.path.iter().zip(self.path_starts()) {
+            if p.is_punct || !(s..s + p.syllables).any(unknown) {
+                continue;
+            }
+            let used = self.lex.path_readings_with_fuzzy(&self.syls[s..s + p.syllables], [(p.word.as_str(), p.syllables)], &t3[s..s + p.syllables], old_eff);
+            for i in (s..s + p.syllables).filter(|&i| unknown(i)) {
+                let now = &used[i - s];
+                if self.lex.has_syllable(now) {
+                    edits.push((i, now.clone()));
+                } else if let Some(a) = self.lex.adjacent_alts(now).first().or(self.lex.one_sym_alts(now).first()) {
+                    edits.push((i, a.to_string()));
+                }
+            }
+        }
+        for (i, to) in &edits {
+            self.syls[*i] = to.clone();
+        }
+        !edits.is_empty()
     }
 
     /// Third-tone and colloquial sandhi (docs/spec/decoder.md §6.6, §8.7, docs/spec/keys-and-composition.md §3.2): on (the default), `finish_syllable` accepts
@@ -4078,6 +4152,7 @@ impl Engine {
     /// the sentence end when there is none. Fixed words score with `lp_F`, the capped score under their reading.
     fn refresh_lm(&mut self, st: &LmState) -> Result<(), EngineError> {
         let cfg = st.lm.scoring(self.profile);
+        let fuzzy = self.effective_fuzzy();
         // The clock (a libc time conversion) is read only when a record could use it.
         let today = if self.learner.is_empty() { 0 } else { self.today() };
         // docs/spec/learning.md §8.4: a fixed word the lexicon lacks is a new word picked in the window; once its record is
@@ -4167,7 +4242,7 @@ impl Engine {
                 let edges = table.as_deref().filter(|_| !after_run && start == from).map_or_else(Vec::new, |t| self.mixed_edges(t, &st.capped, start, stop));
                 let mixed = (!edges.is_empty()).then_some((edges.as_slice(), self.mixed_bonus));
                 let mut best = decode_segment_fuzzy(
-                    &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote, self.fuzzy,
+                    &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, learn.as_ref(), self.demote, fuzzy,
                     crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur), tone3, mixed,
                 )
                 .map_err(|_| EngineError::Internal)?;
@@ -4187,7 +4262,7 @@ impl Engine {
                     self.sinit.stretches += 1;
                     let lift = Learn { sinit: Sinit::Lift, ..*ln };
                     let lifted = decode_segment_fuzzy(
-                        &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, Some(&lift), self.demote, self.fuzzy,
+                        &st.capped, &self.syls[start..stop], &st.lm, cfg, prev, end, BEAM_S1, Some(&lift), self.demote, fuzzy,
                         crate::fuzzy::DELTA_SOUND, self.recur_on.then_some(&self.recur), tone3, mixed,
                     )
                     .map_err(|_| EngineError::Internal)?;
@@ -4221,7 +4296,7 @@ impl Engine {
                     let texts: Vec<String> = top.iter().map(|(_, ws)| text_of(ws)).collect();
                     let cands: Vec<&str> = texts.iter().map(String::as_str).collect();
                     let ng: Vec<f64> = top.iter().map(|(score, _)| *score).collect();
-                    let used = || self.lex.path_readings(&self.syls[start..stop], best[0].1.iter().map(|w| (w.0, w.3)), &t3[start..stop]);
+                    let used = || self.lex.path_readings_with_fuzzy(&self.syls[start..stop], best[0].1.iter().map(|w| (w.0, w.3)), &t3[start..stop], fuzzy);
                     let (masked, bonus, order) = pool_lists(&cands, &ng, used, &manual, pool_recur.then_some(&self.recur), taken.map(|t| t.0));
                     stretches.push(Stretch {
                         at: path.len(),
@@ -5028,7 +5103,7 @@ impl Engine {
         // and goes on as a syllable of the lexicon, scored as its third tone (`score`) wherever a score is read here.
         let sandhi = if missing { self.tone3_accepts(&syl) } else { None };
         let known = !missing || sandhi.is_some();
-        if !known && !self.adjacent_accepts(&syl) {
+        if !known && !self.adjacent_accepts(&syl) && !self.one_sym_accepts(&syl, tone) {
             // docs/spec/english-mixed.md §3.4: the adjacent-key rule above had its turn; what it did not take reverts (c).
             if let Some(o) = self.revert_missing(tone)? {
                 return Ok(o);
@@ -5091,6 +5166,18 @@ impl Engine {
             && self.layout == Layout::Standard
             && !self.lex.has_syllable(syl)
             && !self.lex.adjacent_alts(syl).is_empty()
+    }
+
+    /// Fuzzy input, bit 5 (docs/contracts/typo-one-sym.md §2.3 step 4): a syllable the lexicon lacks is accepted when one symbol of some lexicon syllable,
+    /// replaced by another of its column, shows it. Needs a language model; both layouts (no keyboard row is read). With English mixing on, Space does not
+    /// take a syllable at least one of whose columns was overwritten while typing (`line`, `steam`, `wifi`): that reverts to English (`revert_missing`).
+    /// A tone key does, as a syllable the lexicon lacks always did.
+    fn one_sym_accepts(&self, syl: &str, tone: usize) -> bool {
+        self.fuzzy & FUZZY_ONE_SYM != 0
+            && self.lm.is_some()
+            && !self.lex.has_syllable(syl)
+            && !self.lex.one_sym_alts(syl).is_empty()
+            && !(self.shadow_on() && tone == 0 && self.typed != self.shadow_text())
     }
 
     /// Insert one token (a syllable, or punctuation with its fixed word) at the cursor, shift the
@@ -5386,7 +5473,7 @@ impl Engine {
         for l in (1..=self.lex.max_len.min(self.avail())).rev() {
             let (from, to) = if a == 0 { (0, l) } else { (a - l, a) };
             let key = &self.syls[from..to];
-            for (w, reading) in self.lex.tolerant_words(key, self.fuzzy, &t3[from..to]) {
+            for (w, reading) in self.lex.tolerant_words(key, self.effective_fuzzy(), &t3[from..to]) {
                 if seen.insert(w.to_string()) {
                     alt.insert(list.len(), reading);
                     list.push((w.to_string(), l));
@@ -5595,7 +5682,13 @@ impl Engine {
         }
         let syl = |i: usize| self.syls.get(i).map(String::as_str);
         let (a, b, c) = (syl(end), syl(end + 1), syl(end + 2));
-        let deeper = if single { vec![mid_key(a, b), fine_key(a, b, c)] } else { Vec::new() };
+        // docs/contracts/typo-one-sym.md §2.4 item 4: no key names a syllable only bit 5 accepted.
+        let unk = self.bit5_unknown();
+        let u = |i: usize| unk.get(i).copied().unwrap_or(false);
+        if u(end) {
+            return Vec::new();
+        }
+        let deeper = if single { vec![(!u(end + 1)).then(|| mid_key(a, b)).flatten(), (!u(end + 1) && !u(end + 2)).then(|| fine_key(a, b, c)).flatten()] } else { Vec::new() };
         std::iter::once(next_key(a)).chain(deeper.into_iter().flatten()).collect()
     }
 

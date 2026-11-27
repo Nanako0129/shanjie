@@ -509,10 +509,19 @@ static int run_fuzzy(const char *dir) {
   CHECK(1102, shanjie_engine_set_fuzzy(0, 1, &o) == 1 && o == 0);
   CHECK(1103, shanjie_engine_set_fuzzy(e, 1, 0) == 1);
   o = &dummy;
-  CHECK(1104, shanjie_engine_set_fuzzy(e, 32, &o) == 2 && o == 0);
+  CHECK(1104, shanjie_engine_set_fuzzy(e, 64, &o) == 2 && o == 0);
+  o = &dummy;
+  CHECK(1108, shanjie_engine_set_fuzzy(e, 65, &o) == 2 && o == 0);
   o = &dummy;
   CHECK(1105, shanjie_engine_set_fuzzy(e, 0xffffffffu, &o) == 2 && o == 0);
   CHECK(1106, shanjie_engine_set_fuzzy(e, 31, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  /* bit 5 (one-symbol slips) is a defined bit: 32 and 63 are accepted. */
+  CHECK(1109, shanjie_engine_set_fuzzy(e, 32, &o) == 0 && o != 0 && o->handled == 1);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1110, shanjie_engine_set_fuzzy(e, 63, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
   o = 0;
   CHECK(1107, shanjie_engine_set_fuzzy(e, 0, &o) == 0 && o != 0 && o->handled == 1);

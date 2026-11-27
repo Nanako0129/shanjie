@@ -3,7 +3,7 @@
 //! core/src/fuzzy.rs; the ABI codes in core/src/ffi.rs and core/tests/c/abi_smoke.c.
 use core::engine::*;
 use core::eval::{parse_rows, usable};
-use core::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL};
+use core::fuzzy::{FUZZY_ADJACENT, FUZZY_ALL, FUZZY_ONE_SYM};
 use core::lm::{decode_from, decode_from_fuzzy_scored, CappedLexicon, Lm, Profile};
 use core::{Lexicon, Syls, BEAM_S1};
 use std::path::PathBuf;
@@ -37,6 +37,8 @@ fn shared() -> &'static Shared {
     })
 }
 const DAY: i64 = 20_000;
+/// Every bit before the one-symbol bit (what `FUZZY_ALL` was): the older tests below keep their meaning when a bit is added.
+const BITS_0_4: u32 = 0b1_1111;
 
 /// An engine with the model (chat profile) and `flags`; learning on with a fixed clock when `learn`.
 fn engine(layout: Layout, flags: u32, learn: bool) -> Engine {
@@ -118,7 +120,7 @@ fn all_off_and_adjacent_only_replay_the_python_golden() {
 }
 
 /// docs/spec/decoder.md §6.4, a measurement (run with `--ignored --nocapture` in release on the Linux box): per-key latency of the dev302 replay,
-/// all on (31) against all off. The bound is a p95 ratio of at most 2.
+/// all on (63, bit 5 included) against all off. The bound is a p95 ratio of at most 2.
 #[test]
 #[ignore]
 fn per_key_latency_all_on_against_all_off() {
@@ -199,7 +201,7 @@ fn adjacent_accepts_when_on_and_refuses_when_off() {
 #[test]
 fn no_model_never_accepts() {
     let mut e = Engine::with_lexicon(shared().lex.clone(), Layout::Standard);
-    e.set_fuzzy(FUZZY_ALL).expect("setting the flags without a model is fine");
+    e.set_fuzzy(BITS_0_4).expect("setting the flags without a model is fine");
     let o = type_syls(&mut e, Layout::Standard, UNKNOWN);
     assert_eq!(o.preedit, UNKNOWN);
     assert!(e.syllables().is_empty());
@@ -237,7 +239,7 @@ fn shipping_models_take_a_rerank_job_over_tolerant_syllables() {
     e.load_colloquial(&lm("colloquial.sjlm")).unwrap();
     e.set_rerank(true).unwrap();
     e.set_left_context("今天");
-    e.set_fuzzy(FUZZY_ALL).unwrap();
+    e.set_fuzzy(BITS_0_4).unwrap();
     for (reading, rescue) in [("ㄗ ㄉㄠˋ ㄋㄧˇ ㄉㄜ˙", true), (&*format!("ㄨㄛˇ {UNKNOWN} ㄉㄠˋ ㄋㄧˇ"), false)] {
         let o = type_syls(&mut e, Layout::Standard, reading);
         let n = reading.split(' ').count();
@@ -260,7 +262,7 @@ fn shipping_models_take_a_rerank_job_over_tolerant_syllables() {
 /// outgrows the cap is frozen and committed like any other, without an internal error; everything typed comes out as characters.
 #[test]
 fn an_accepted_syllable_in_the_head_survives_the_composition_cap() {
-    let mut e = engine(Layout::Standard, FUZZY_ALL, false);
+    let mut e = engine(Layout::Standard, BITS_0_4, false);
     let mut sent = String::new();
     let mut typed = 0;
     for reading in std::iter::once(UNKNOWN).chain(std::iter::repeat("ㄋㄧˇ ㄏㄠˇ").take(80)) {
@@ -297,7 +299,7 @@ fn only_the_unknown_syllable_uses_its_alternative() {
     };
     assert!(s.lex.entries(&["ㄅㄧㄝ".to_string(), "ㄒㄧㄥ".to_string()]).iter().any(|e| e.0 == "鱉星"), "premise: 鱉星 is a word of the pair's reading");
     assert!(!surfaces(FUZZY_ADJACENT).iter().any(|w| w == "鱉星"), "bit 4 alone does not read ㄒㄧㄣ as ㄒㄧㄥ");
-    assert!(surfaces(FUZZY_ALL).iter().any(|w| w == "鱉星"), "with the pair on, the span of the known syllable alone is read through it");
+    assert!(surfaces(BITS_0_4).iter().any(|w| w == "鱉星"), "with the pair on, the span of the known syllable alone is read through it");
 }
 
 /// docs/spec/decoder.md §6.4, ETen: the neighbour table is the standard layout's keyboard, so with the ETen layout bit 4 accepts nothing (the
@@ -331,7 +333,7 @@ fn a_sound_pair_costs_its_delta_and_an_adjacent_slip_two() {
     assert!((exact - word_score(&["ㄗ", "ㄉㄠˋ"], 0b0010, "知道") - core::fuzzy::DELTA_SOUND).abs() < 1e-9);
     let exact = word_score(&["ㄅㄧㄝ"], 0, "憋");
     assert!((exact - word_score(&[UNKNOWN], 0, "憋") - 2.0).abs() < 1e-9, "whatever the flags say");
-    assert!((exact - word_score(&[UNKNOWN], FUZZY_ALL, "憋") - 2.0).abs() < 1e-9);
+    assert!((exact - word_score(&[UNKNOWN], BITS_0_4, "憋") - 2.0).abs() < 1e-9);
     let s = shared();
     let v: Vec<String> = ["ㄓ", "ㄉㄠˋ"].iter().map(|x| x.to_string()).collect();
     let a = decode_from(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true).unwrap();
@@ -513,7 +515,7 @@ fn the_learning_guard_does_not_depend_on_whether_the_learner_has_records() {
         e.load_tinylm(&lm("tinylm.sjtl")).unwrap();
         e.load_colloquial(&lm("colloquial.sjlm")).unwrap();
         e.set_rerank(true).unwrap();
-        e.set_fuzzy(FUZZY_ALL).unwrap();
+        e.set_fuzzy(BITS_0_4).unwrap();
         e.set_today(Some(DAY));
         e.set_learning(true);
         if taught {
@@ -617,4 +619,384 @@ fn a_pack_only_syllable_without_a_single_entry_is_not_an_alternative() {
     let o = type_syls(&mut e, Layout::Standard, SLIP);
     assert!(e.syllables().is_empty() && !o.preedit.chars().any(|c| c as u32 >= 0x3400), "refused: no syllable, no decoded character, got {}", o.preedit);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------- one symbol (bit 5, docs/contracts/typo-one-sym.md) ----------
+
+const ONE: u32 = FUZZY_ONE_SYM;
+fn lname(l: Layout) -> &'static str {
+    if l == Layout::Eten { "Eten" } else { "Standard" }
+}
+/// ㄋㄟ: only the one-symbol table has an alternative; ㄐㄝ: only the adjacent-key one; ㄒㄧㄟˇ (a slip of ㄒㄧㄤˇ, 想) and ㄅㄩ (`UNKNOWN`) are in both.
+const ONLY_ONE: &str = "ㄋㄟ";
+const ONLY_ADJ: &str = "ㄐㄝ";
+const SLIP: &str = "ㄒㄧㄟˇ";
+
+fn premises() {
+    let lex = &shared().lex;
+    for s in [ONLY_ONE, ONLY_ADJ, SLIP, UNKNOWN] {
+        assert!(!lex.has_syllable(s), "premise: {s} is no lexicon syllable");
+    }
+    assert!(lex.adjacent_alts(ONLY_ONE).is_empty() && !lex.one_sym_alts(ONLY_ONE).is_empty(), "premise: {ONLY_ONE} is one-symbol only");
+    assert!(!lex.adjacent_alts(ONLY_ADJ).is_empty() && lex.one_sym_alts(ONLY_ADJ).is_empty(), "premise: {ONLY_ADJ} is adjacent only");
+    assert!(lex.one_sym_alts(SLIP).contains(&"ㄒㄧㄤˇ") && !lex.adjacent_alts(SLIP).is_empty(), "premise: {SLIP} is in both tables");
+    assert!(!lex.one_sym_alts(UNKNOWN).contains(&"ㄅㄧㄝ") && lex.adjacent_alts(UNKNOWN).contains(&"ㄅㄧㄝ"), "premise: {UNKNOWN} is read as ㄅㄧㄝ (憋) by the adjacent table only");
+}
+
+/// docs/contracts/typo-one-sym.md §2.3 step 4, §2.4: with bit 5 (alone) a syllable the lexicon lacks is accepted on both layouts and the composition shows the word
+/// read through the one-symbol alternatives (想 for ㄒㄧㄟˇ, between 我 and 去); with the bit off it is refused as before; choosing a window word rewrites the
+/// span to the lexicon reading.
+#[test]
+fn one_sym_accepts_a_slip_on_both_layouts_and_shows_the_word() {
+    premises();
+    let typed = ["ㄨㄛˇ", SLIP, "ㄑㄩˋ"];
+    for layout in [Layout::Standard, Layout::Eten] {
+        let mut e = engine(layout, ONE, false);
+        let o = type_syls_in(&mut e, layout, &typed);
+        assert_eq!(o.preedit, "我想去", "{}", lname(layout));
+        assert_eq!(e.syllables(), typed);
+        // The window lists the words of the other readings; choosing 寫 makes the span ㄒㄧㄝˇ.
+        e.set_prediction(false).unwrap();
+        press(&mut e, KeyKind::Left);
+        let o = press(&mut e, KeyKind::Space);
+        let list = window_list(&mut e, o);
+        assert!(list.iter().any(|w| w == "小") && list.iter().any(|w| w == "寫"), "{}: the one-symbol words are listed: {list:?}", lname(layout));
+        press(&mut e, KeyKind::Esc);
+        let o = press(&mut e, KeyKind::Space);
+        select(&mut e, o, "寫");
+        let o = press(&mut e, KeyKind::Enter);
+        assert!(o.preedit.contains('寫'), "{}: {}", lname(layout), o.preedit);
+        assert_eq!(e.syllables()[1], "ㄒㄧㄝˇ", "{}: the span is the word's lexicon reading", lname(layout));
+    }
+    let mut off = engine(Layout::Standard, 0, false);
+    let o = type_syls(&mut off, Layout::Standard, &typed.join(" "));
+    assert_eq!(off.syllables(), ["ㄨㄛˇ"], "bit 5 off: refused, the unfinished syllable stays: {}", o.preedit);
+    // Bit 5 alone does not take what only the adjacent table knows.
+    let mut e = engine(Layout::Standard, ONE, false);
+    let o = type_syls(&mut e, Layout::Standard, ONLY_ADJ);
+    assert!(e.syllables().is_empty(), "{ONLY_ADJ} has no one-symbol alternative: {}", o.preedit);
+}
+
+/// Without a model nothing is accepted (the decoder without one reads no alternative), with bit 5 as with bit 4.
+#[test]
+fn one_sym_needs_a_model() {
+    let mut e = Engine::with_lexicon(shared().lex.clone(), Layout::Standard);
+    e.set_fuzzy(FUZZY_ONE_SYM).unwrap();
+    type_syls(&mut e, Layout::Standard, ONLY_ONE);
+    assert!(e.syllables().is_empty());
+}
+
+/// docs/contracts/typo-one-sym.md §2.4 item 2 and §4.1 (1): `shanjie-eval --fuzzy 0` and `--fuzzy 16` never read the one-symbol table (the decoder
+/// has no path through ㄋㄟ, which only that table knows), `--fuzzy 32` does; and the penalties: a word read through the one-symbol table is
+/// `DELTA_ONE_SYM` (2.5) below the lexicon's reading, through the adjacent table `DELTA_ADJACENT` (2), with both bits on as with either alone.
+#[test]
+fn the_flags_choose_the_table_and_its_penalty() {
+    premises();
+    let s = shared();
+    let nb = |syls: &[&str], flags: u32| {
+        let v: Vec<String> = syls.iter().map(|x| x.to_string()).collect();
+        decode_from_fuzzy_scored(&s.capped, &v, &s.lm, Profile::Chat, BEAM_S1, "<s>", true, flags, core::fuzzy::DELTA_SOUND, None, None)
+    };
+    for flags in [0, FUZZY_ADJACENT, 0b1111, BITS_0_4] {
+        assert!(nb(&[ONLY_ONE], flags).is_err(), "flags {flags}: no path through {ONLY_ONE}");
+    }
+    for flags in [ONE, ONE | FUZZY_ADJACENT, FUZZY_ALL] {
+        assert!(nb(&[ONLY_ONE], flags).is_ok(), "flags {flags}");
+    }
+    // 想 (ㄒㄧㄤˇ) is read through the one-symbol table of ㄒㄧㄟˇ only (the adjacent one holds other syllables), at 2.5 in both settings that have it.
+    let exact = word_score(&["ㄒㄧㄤˇ"], 0, "想");
+    for flags in [ONE, ONE | FUZZY_ADJACENT, FUZZY_ALL] {
+        assert!((exact - word_score(&[SLIP], flags, "想") - core::fuzzy::DELTA_ONE_SYM).abs() < 1e-9, "flags {flags}");
+    }
+    assert!(nb(&[SLIP], FUZZY_ADJACENT).unwrap().iter().all(|(_, ws)| ws.iter().all(|w| w.0 != "想")), "bit 4 alone does not reach 想");
+    // The adjacent table's word keeps 2 when bit 5 joins: ㄅㄩ -> ㄅㄧㄝ (憋) is not a one-symbol reading, so with bit 5 alone it is gone.
+    let exact = word_score(&["ㄅㄧㄝ"], 0, "憋");
+    assert!((exact - word_score(&[UNKNOWN], ONE | FUZZY_ADJACENT, "憋") - core::fuzzy::DELTA_ADJACENT).abs() < 1e-9);
+    assert!(nb(&[UNKNOWN], ONE).unwrap().iter().all(|(_, ws)| ws.iter().all(|w| w.0 != "憋")), "bit 5 alone never reads the adjacent table");
+    assert!(core::fuzzy::DELTA_ONE_SYM > core::fuzzy::DELTA_ADJACENT, "the adjacent-key reading ranks above the wider net");
+}
+
+/// docs/contracts/typo-one-sym.md §2.4 item 1: the ETen layout reads no adjacent key, so a flags value with bit 4 is bit 5 alone there (`effective_fuzzy_for`),
+/// and nothing of the standard keyboard shows through: the window of an accepted ㄅㄩ has no 憋 (a word of the adjacent reading ㄅㄧㄝ), and the standard
+/// layout with the same flags has it.
+#[test]
+fn eten_reads_bit_5_without_the_adjacent_table() {
+    premises();
+    assert_eq!(effective_fuzzy_for(Layout::Eten, 0b11_1111), 0b10_1111);
+    assert_eq!(effective_fuzzy_for(Layout::Standard, 0b11_1111), 0b11_1111);
+    let list = |layout| {
+        let mut e = engine(layout, ONE | FUZZY_ADJACENT, false);
+        e.set_prediction(false).unwrap();
+        type_syls_in(&mut e, layout, &[UNKNOWN]);
+        let o = press(&mut e, KeyKind::Space);
+        window_list(&mut e, o)
+    };
+    assert!(list(Layout::Standard).iter().any(|w| w == "憋"), "premise: the standard layout reads the adjacent table");
+    let eten = list(Layout::Eten);
+    assert!(!eten.is_empty() && !eten.iter().any(|w| w == "憋"), "ETen: {eten:?}");
+}
+
+// ---- the English guard (docs/contracts/typo-one-sym.md §2.3 step 4) ----
+
+/// The engine with the macOS defaults of English mixing (§4.1: english on, overwrite off, key order on, reversal guard on) and the flags.
+fn english_engine(flags: u32) -> Engine {
+    let mut e = engine(Layout::Standard, flags, false);
+    e.set_english(true).unwrap();
+    e.set_english_overwrite(false).unwrap();
+    e.set_english_key_order(true).unwrap();
+    e.set_english_reversal_guard(true).unwrap();
+    e
+}
+fn raw(e: &mut Engine, keys: &str) -> Output {
+    let mut last = None;
+    for c in keys.chars() {
+        last = Some(match c {
+            ' ' => press(e, KeyKind::Space),
+            c if c.is_ascii_uppercase() => e.key(Key::ch(c, MOD_SHIFT)).unwrap(),
+            c => e.key(Key::ch(c, 0)).unwrap(),
+        });
+    }
+    last.unwrap()
+}
+
+/// §2.3 step 4: with bit 5 alone, Space does not take a syllable one of whose columns was overwritten while typing (the English words below: `line` is ㄠ ㄛ ㄙ ㄍ),
+/// so they revert to English (`revert_missing`); a word typed in column order that the table reads (`go`) is taken; a tone key takes either (`v u o 3` is
+/// ㄒㄧㄟˇ); with the bit off the same keys are English; Shift+letter English is English whatever the flags say.
+#[test]
+fn bit_5_alone_leaves_multi_key_lowercase_english_to_english() {
+    for word in ["line", "live", "steam", "wifi", "sony", "mac", "bug", "max", "hello", "paper"] {
+        let mut e = english_engine(ONE);
+        let o = raw(&mut e, &format!("{word} "));
+        assert!(o.preedit.to_lowercase().starts_with(word) && !o.preedit.chars().any(|c| c as u32 >= 0x3400), "{word}: stays English, got {}", o.preedit);
+    }
+    let mut e = english_engine(ONE);
+    let o = raw(&mut e, "go ");
+    assert!(is_han(&o.preedit), "go: no column was overwritten, so the one-symbol rule takes it: {}", o.preedit);
+    let mut off = english_engine(0);
+    assert!(raw(&mut off, "go ").preedit.starts_with("go"), "off: English");
+    // A tone key: the Threads case.
+    let mut e = english_engine(ONE);
+    let o = raw(&mut e, "vuo3");
+    assert!(is_han(&o.preedit) && e.syllables() == [SLIP], "{}", o.preedit);
+    let mut off = english_engine(0);
+    assert_eq!(raw(&mut off, "vuo3").preedit, "vuo3", "off: the (c) revert to English, as before");
+    for flags in [ONE, ONE | FUZZY_ADJACENT, FUZZY_ALL] {
+        let mut e = english_engine(flags);
+        assert_eq!(raw(&mut e, "Go ").preedit.trim_end(), "Go", "flags {flags}");
+    }
+}
+
+// ---- switching the flags with a composition open (docs/contracts/typo-one-sym.md §2.4 item 3) ----
+
+fn composed(layout: Layout, flags: u32, typed: &[&str]) -> (Engine, String) {
+    let mut e = engine(layout, flags, false);
+    e.set_prediction(false).unwrap();
+    let shown = type_syls_in(&mut e, layout, typed).preedit;
+    assert!(is_han(&shown), "premise: accepted, got {shown}");
+    (e, shown)
+}
+/// Sets the flags, which must not fail nor change the text; then types a syllable and sends the composition.
+fn switch(e: &mut Engine, flags: u32, shown: &str, what: &str) {
+    let o = e.set_fuzzy(flags).unwrap_or_else(|err| panic!("{what}: set_fuzzy({flags}) failed: {err:?}"));
+    assert_eq!(o.preedit, shown, "{what}: the text is as it was");
+}
+fn finish(e: &mut Engine, layout: Layout, what: &str) {
+    let o = type_syls_in(e, layout, &["ㄉㄠˋ"]);
+    assert!(is_han(&o.preedit), "{what}: typing goes on: {}", o.preedit);
+    let commit = e.key(Key::new(KeyKind::Enter)).unwrap_or_else(|err| panic!("{what}: Enter failed: {err:?}")).commit;
+    assert!(is_han(&commit), "{what}: {commit}");
+}
+
+/// §4.1 (2): ㄐㄝ (only the adjacent table has it) and ㄅㄩ (read as 憋, a reading the one-symbol table lacks), accepted by bit 4 or bits 4 and 5, then bit 5 is turned
+/// on without bit 4 (16 -> 32, 48 -> 32, 16 -> 0 -> 32): the text does not change, no Error, and the composition goes on. 16 -> 0 alone keeps the syllables.
+#[test]
+fn turning_bit_5_on_alone_keeps_what_the_adjacent_table_read() {
+    premises();
+    for (syl, flags_from) in [(ONLY_ADJ, 16), (UNKNOWN, 16), (ONLY_ADJ, 48), (UNKNOWN, 48)] {
+        let what = format!("{syl} {flags_from} -> 32");
+        let (mut e, shown) = composed(Layout::Standard, flags_from, &[syl]);
+        switch(&mut e, 32, &shown, &what);
+        assert!(shared().lex.has_syllable(&e.syllables()[0]), "{what}: stored as a lexicon reading: {:?}", e.syllables());
+        finish(&mut e, Layout::Standard, &what);
+        if flags_from == 16 {
+            let what = format!("{syl} 16 -> 0 -> 32");
+            let (mut e, shown) = composed(Layout::Standard, 16, &[syl]);
+            switch(&mut e, 0, &shown, &what);
+            assert_eq!(e.syllables(), [syl], "{what}: 16 -> 0 keeps the syllable (accepted_syllable_survives_turning_bit_4_off)");
+            switch(&mut e, 32, &shown, &what);
+            assert!(shared().lex.has_syllable(&e.syllables()[0]), "{what}");
+            finish(&mut e, Layout::Standard, &what);
+        }
+    }
+    // 32 -> 33 (a sound bit joins, still bit 5 alone) is no switch of tables: the syllable stays as typed.
+    let (mut e, shown) = composed(Layout::Standard, 32, &[ONLY_ONE]);
+    switch(&mut e, 33, &shown, "32 -> 33");
+    assert_eq!(e.syllables(), [ONLY_ONE]);
+}
+
+/// §4.1 (3), standard and ETen: bit 5 turned off (32 -> 0, ETen 48 -> 16) stores what it read as the lexicon reading, so the text stays, the syllables only that table
+/// knew (ㄋㄟ) have a path, and the standard keyboard's neighbour table never shows through: no 憋 for ㄅㄩ, no 伈 for ㄒㄧㄟˇ in the window.
+#[test]
+fn turning_bit_5_off_keeps_the_text_and_never_leaks_the_adjacent_table() {
+    premises();
+    let typed = ["ㄨㄛˇ", SLIP, "ㄑㄩˋ"];
+    for (layout, from, to) in [(Layout::Standard, 32, 0), (Layout::Eten, 32, 0), (Layout::Eten, 48, 16), (Layout::Standard, 48, 0)] {
+        let what = format!("{} {from} -> {to}", lname(layout));
+        let (mut e, shown) = composed(layout, from, &typed);
+        assert_eq!(shown, "我想去", "{what}");
+        switch(&mut e, to, &shown, &what);
+        assert!(e.syllables().iter().all(|s| shared().lex.has_syllable(s)), "{what}: {:?}", e.syllables());
+        press(&mut e, KeyKind::Left);
+        let o = press(&mut e, KeyKind::Space);
+        let list = window_list(&mut e, o);
+        assert!(!list.iter().any(|w| w == "伈" || w == "憋"), "{what}: no standard-keyboard word: {list:?}");
+        press(&mut e, KeyKind::Esc);
+        finish(&mut e, layout, &what);
+    }
+    for (layout, from, to) in [(Layout::Eten, 32, 0), (Layout::Eten, 48, 16), (Layout::Standard, 32, 0)] {
+        let what = format!("{} {UNKNOWN} {from} -> {to}", lname(layout));
+        let (mut e, shown) = composed(layout, from, &[UNKNOWN]);
+        switch(&mut e, to, &shown, &what);
+        assert!(shown != "憋" || layout == Layout::Standard, "{what}");
+        let o = press(&mut e, KeyKind::Space);
+        let list = window_list(&mut e, o);
+        assert!(layout == Layout::Standard || !list.iter().any(|w| w == "憋"), "{what}: {list:?}");
+    }
+    // ㄋㄟ, which only the one-symbol table knows, is stored too: turning bit 5 off must not leave a syllable no decoder path covers.
+    let (mut e, shown) = composed(Layout::Standard, 32, &[ONLY_ONE]);
+    switch(&mut e, 0, &shown, "ㄋㄟ 32 -> 0");
+    assert!(shared().lex.has_syllable(&e.syllables()[0]));
+    finish(&mut e, Layout::Standard, "ㄋㄟ 32 -> 0");
+}
+
+// ---- the learning guard (docs/contracts/typo-one-sym.md §2.4 item 4) ----
+
+/// Re-picks the character of syllable `at` of an `n`-syllable composition: the first one-character word of its window other than the shown one.
+fn repick(e: &mut Engine, at: usize, n: usize, shown: &str) {
+    press(e, KeyKind::End);
+    for _ in 0..n - (at + 1) {
+        press(e, KeyKind::Left);
+    }
+    let cur: String = shown.chars().nth(at).unwrap().to_string();
+    let mut o = press(e, KeyKind::Space);
+    for _ in 0..o.total {
+        let w = o.candidates[o.selected.unwrap()].clone();
+        if w.chars().count() == 1 && w != cur {
+            press(e, KeyKind::Enter);
+            press(e, KeyKind::End);
+            return;
+        }
+        o = press(e, KeyKind::Right);
+    }
+    panic!("no other one-character word at {at}");
+}
+/// The learner's records (context, reading, word) after typing `typed`, re-picking the characters at `picks` (standard layout, no left context, so the first
+/// syllable's context is the sentence start) and sending the composition.
+fn learned(flags: u32, typed: &[&str], picks: &[usize]) -> Vec<(String, Vec<String>, String)> {
+    let mut e = engine(Layout::Standard, flags, true);
+    e.set_prediction(false).unwrap();
+    let shown = type_syls(&mut e, Layout::Standard, &typed.join(" ")).preedit;
+    assert_eq!(e.syllables(), typed, "premise: every syllable was accepted");
+    assert_eq!(shown.chars().count(), typed.len(), "premise: one character per syllable");
+    for &at in picks {
+        repick(&mut e, at, typed.len(), &shown);
+    }
+    press(&mut e, KeyKind::Enter);
+    e.learner().records().iter().map(|r| (r.context.clone(), r.reading.clone(), r.word.clone())).collect()
+}
+/// The three operations of the contract on a composition around syllable `x`: neighbouring one-character re-picks (a new-word run), a re-pick before `x` at the sentence start
+/// (the coarse `^>x` key), and a re-pick two syllables before `x` (the mid and fine keys).
+fn learn_all(flags: u32, x: &str) -> [Vec<(String, Vec<String>, String)>; 3] {
+    [learned(flags, &["ㄨㄛˇ", x, "ㄑㄩˋ"], &[0, 2]), learned(flags, &["ㄨㄛˇ", x], &[0]), learned(flags, &["ㄨㄛˇ", "ㄏㄠˇ", x], &[0])]
+}
+fn mentions(rs: &[(String, Vec<String>, String)], x: &str) -> bool {
+    rs.iter().any(|(c, r, _)| c.contains(x) || r.iter().any(|s| s == x))
+}
+
+/// §4.1 (4): with bit 5 on, a syllable only bit 5 accepted (here ㄋㄟ and ㄒㄧㄟˇ, never picked from the window) is in no record: not in a new word's reading
+/// (neighbouring one-character re-picks), not in the sentence-start keys (`^>x`, the mid key, the fine key).
+#[test]
+fn a_syllable_only_bit_5_accepted_is_never_learned() {
+    premises();
+    for x in [ONLY_ONE, SLIP] {
+        for flags in [ONE, ONE | FUZZY_ADJACENT] {
+            for (i, rs) in learn_all(flags, x).iter().enumerate() {
+                assert!(!mentions(rs, x), "flags {flags}, {x}, operation {i}: {rs:?}");
+            }
+        }
+    }
+    // A control: with a legal syllable in the same places, the same operations do record something (the guard is not "no learning at all").
+    for (i, rs) in learn_all(ONE, "ㄏㄠˇ").iter().enumerate() {
+        assert!(!rs.is_empty(), "operation {i}");
+    }
+}
+
+/// §4.1 (4a): with the flags 0 (and so no bit 5 position anywhere), a syllable the third-tone rule accepted that is no lexicon syllable is learned as ever: the new word,
+/// and the sentence-start keys (coarse, mid, fine). The same under 32, where the position table marks it unaccepted and the guard leaves it alone.
+#[test]
+fn a_sandhi_syllable_is_learned_as_before_with_the_flags_0_and_with_bit_5() {
+    let lex = &shared().lex;
+    let t = lex
+        .syllables()
+        .iter()
+        .filter(|s| s.ends_with('ˇ'))
+        .map(|s| s.replace('ˇ', "ˊ"))
+        .find(|s| !lex.has_syllable(s) && core::tone3::unaccepted(lex, s))
+        .expect("a second-tone syllable the third-tone rule accepts that no lexicon reading has");
+    let zero = learn_all(0, &t);
+    assert!(mentions(&zero[0], &t) && mentions(&zero[1], &t) && mentions(&zero[2], &t), "{t}: the three operations learn it as before: {zero:?}");
+    assert_eq!(learn_all(ONE, &t), zero, "{t}: bit 5 does not touch a sandhi syllable's learning");
+}
+
+/// §4.1 (4b): with the flags 16, ㄐㄝ (accepted by bit 4, no lexicon syllable) is learned as ever, in the same three operations. Bit 4 alone has no bit 5 position.
+#[test]
+fn an_adjacent_key_syllable_is_learned_as_before_with_the_flags_16() {
+    premises();
+    let rs = learn_all(16, ONLY_ADJ);
+    assert!(mentions(&rs[0], ONLY_ADJ) && mentions(&rs[1], ONLY_ADJ) && mentions(&rs[2], ONLY_ADJ), "learned as before: {rs:?}");
+    assert_eq!(learn_all(0b1_0001, ONLY_ADJ), learn_all(0b1_0001, ONLY_ADJ), "deterministic");
+}
+
+/// docs/contracts/typo-one-sym.md §2.4 item 4 and docs/spec/decoder.md §7: a word read through a one-symbol alternative is given under the lexicon reading it was found
+/// under (`path_readings_with_fuzzy`), so a manual word the n-gram's first choice holds that way is protected by the rerank mask; without bit 5 the typed syllable
+/// is given, as `path_readings` always did; and the sound bits (0-3) never reach it.
+#[test]
+fn path_readings_with_fuzzy_follows_the_flags() {
+    premises();
+    let lex = &shared().lex;
+    let typed: Vec<String> = ["ㄨㄛˇ", SLIP, "ㄑㄩˋ"].iter().map(|s| s.to_string()).collect();
+    let words = [("我", 1), ("想", 1), ("去", 1)];
+    let want: Vec<String> = ["ㄨㄛˇ", "ㄒㄧㄤˇ", "ㄑㄩˋ"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(lex.path_readings_with_fuzzy(&typed, words, &[], ONE), want);
+    assert_eq!(lex.path_readings_with_fuzzy(&typed, words, &[], ONE | FUZZY_ADJACENT), want, "both bits: the one-symbol reading is the second source");
+    assert_eq!(lex.path_readings_with_fuzzy(&typed, words, &[], 0), typed, "no bit 5: not the one-symbol table");
+    assert_eq!(lex.path_readings_with_fuzzy(&typed, words, &[], FUZZY_ADJACENT), typed);
+    assert_eq!(lex.path_readings(&typed, words, &[]), typed, "the three-argument form is flags 0");
+    // The sound bits are masked: with ㄓ/ㄗ on, 知 for a typed ㄗ is still given under the typed syllable.
+    let z = vec!["ㄗ".to_string()];
+    assert_eq!(lex.path_readings_with_fuzzy(&z, [("知", 1)], &[], 0b0010), z);
+    assert_eq!(lex.path_readings_with_fuzzy(&z, [("知", 1)], &[], 0b0010 | ONE), z);
+}
+
+/// docs/contracts/typo-one-sym.md §4.1: the probe sentences (`fixtures/typo-one-sym-probe.tsv`, with the Threads case first: `v u o 3` for ㄒㄧㄤˇ) all come out as written with bit 5 on,
+/// by the engine with the macOS defaults of English mixing; with the bit off the slip is refused or reverts and the text is not the sentence.
+#[test]
+fn typo_one_sym_probe_hits_with_bit_5_and_not_without() {
+    let text = std::fs::read_to_string(root().join("core/tests/fixtures/typo-one-sym-probe.tsv")).unwrap();
+    let mut rows = 0;
+    for line in text.lines().filter(|l| !l.starts_with('#') && !l.is_empty()) {
+        let f: Vec<&str> = line.split('\t').collect();
+        assert_eq!(f.len(), 3, "{line}");
+        let syls: Vec<&str> = f[1].split(' ').collect();
+        let run = |flags: u32| {
+            let mut e = english_engine(flags);
+            e.set_prediction(false).unwrap();
+            e.set_left_context(f[0]);
+            type_syls_in(&mut e, Layout::Standard, &syls).preedit
+        };
+        assert_eq!(run(ONE), f[2], "{line}");
+        assert_ne!(run(0), f[2], "{line}: without the bit the slip is no sentence");
+        rows += 1;
+    }
+    assert!(rows >= 6, "{rows} rows");
 }

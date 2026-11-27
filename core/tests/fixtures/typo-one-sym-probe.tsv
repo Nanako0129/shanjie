@@ -1,0 +1,8 @@
+# TYPO-ONE-SYM probe (docs/contracts/typo-one-sym.md §4.1): sentences written for this test (CC0). Columns: left context, typed syllables (one of them a slip of one
+# symbol that no lexicon syllable has), the text the engine shows with the one-symbol bit on. core/tests/engine_fuzzy.rs `typo_one_sym_probe_hits_with_bit_5_and_not_without`.
+	ㄨㄛˇ ㄒㄧㄟˇ ㄑㄩˋ	我想去
+	ㄊㄚ ㄏㄣˇ ㄒㄧㄟˇ ㄕㄥ	他很小聲
+	ㄑㄧㄥˇ ㄒㄧㄟˇ ㄒㄧㄚˋ ㄌㄞˊ	請寫下來
+	ㄧㄥˊ ㄇㄨˋ ㄒㄧㄟˇ ㄕˋ	螢幕顯示
+	ㄊㄚ ㄍㄤ ㄕㄨㄟˋ ㄒㄧㄟˇ	他剛睡醒
+今天	ㄨㄛˇ ㄒㄧㄟˇ ㄏㄜ ㄎㄚ ㄈㄟ	我想喝咖啡

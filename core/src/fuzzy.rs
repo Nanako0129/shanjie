@@ -7,20 +7,27 @@
 //!   same keyboard row (symbol keys of the standard layout only) and re-composing the keys through the composer's columns
 //!   (docs/spec/keys-and-composition.md §3.1: a key fills its own column, a second key of the same column replaces) shows some reading; the table maps
 //!   that shown reading to the lexicon syllables it may have come from.
+//! * one symbol (bit 5, docs/contracts/typo-one-sym.md §2.2): replace one symbol of a lexicon syllable by any other symbol of the same column
+//!   (initial, medial or final; tone kept, no column added or dropped); a result that is no lexicon syllable maps to the syllables it may have come from.
 
 use crate::engine::Layout;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-/// Bits of the fuzzy flags (`shanjie_engine_set_fuzzy`, `--fuzzy`): 0-3 the sound pairs, 4 adjacent-key slips.
+/// Bits of the fuzzy flags (`shanjie_engine_set_fuzzy`, `--fuzzy`): 0-3 the sound pairs, 4 adjacent-key slips, 5 one-symbol slips.
 pub const FUZZY_PAIRS: [(char, char); 4] = [('ㄣ', 'ㄥ'), ('ㄓ', 'ㄗ'), ('ㄔ', 'ㄘ'), ('ㄕ', 'ㄙ')];
 pub const FUZZY_SOUND: u32 = 0b1111;
 pub const FUZZY_ADJACENT: u32 = 1 << 4;
-pub const FUZZY_ALL: u32 = FUZZY_SOUND | FUZZY_ADJACENT;
+pub const FUZZY_ONE_SYM: u32 = 1 << 5;
+pub const FUZZY_ALL: u32 = FUZZY_SOUND | FUZZY_ADJACENT | FUZZY_ONE_SYM;
 /// Score taken off a word read through one tolerant syllable (log10, as the demotion deltas). The sound pairs' value is 2.5, the
 /// cell docs/spec/decoder.md §6.1 chose with the shipping setting (the research's 1 was chosen with no word pack,
 /// no small model and no Kneser-Ney, and let a tolerant common word cover the typed reading); the adjacent-key value is the research's.
 pub const DELTA_SOUND: f64 = 2.5;
 pub const DELTA_ADJACENT: f64 = 2.0;
+/// One-symbol slips: as the sound pairs (a wider net than the adjacent keys, so no cheaper than them).
+pub const DELTA_ONE_SYM: f64 = 2.5;
+/// Words kept from the one-symbol readings of a one-syllable span (a multi-syllable span keeps `PER_KEY`): an unknown syllable alone has up to 25 readings.
+pub const ONE_SYM_SINGLE_TOTAL: usize = 24;
 
 /// Keyboard rows (docs/spec/decoder.md §6.2): a key's neighbours are the keys left and right in its row.
 const ROWS: [&str; 4] = ["1234567890-=", "qwertyuiop[]", "asdfghjkl;'", "zxcvbnm,./"];
@@ -71,13 +78,15 @@ fn normal(syl: &str, pairs: u32) -> String {
         .collect()
 }
 
-/// The two tables. Syllables are the lexicon's interned ids.
+/// The tables. Syllables are the lexicon's interned ids.
 pub struct Tolerance {
     /// Index = the enabled pairs (1..=15): syllable id -> the other syllables that read the same, sorted by name. Only syllables
     /// with at least one alternative are present.
     sound: Vec<HashMap<u32, Box<[u32]>>>,
     /// Shown reading -> lexicon syllables it may have been typed from, sorted by name.
     adjacent: HashMap<String, Box<[u32]>>,
+    /// Unknown syllable -> lexicon syllables one symbol of which, replaced by another of its column, shows it, sorted by name.
+    one_sym: HashMap<String, Box<[u32]>>,
 }
 
 impl Tolerance {
@@ -119,7 +128,24 @@ impl Tolerance {
                 }
             }
         }
-        Tolerance { sound, adjacent: shown.into_iter().map(|(s, ids)| (s, by_name(ids))).collect() }
+        // One symbol replaced by any other of its column. A result the lexicon has is no unknown syllable and gets no entry.
+        let all: HashSet<&str> = names.iter().map(String::as_str).collect();
+        let symbols: Vec<char> = ROWS.iter().flat_map(|r| r.chars()).filter_map(|k| Layout::Standard.symbol_of(k).map(|x| x.1)).collect();
+        let mut one: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+        for (id, n) in names.iter().enumerate().filter(|(id, _)| single.contains(&(*id as u32))) {
+            let (keys, tone) = split(n);
+            for i in 0..keys.len() {
+                for &alt in symbols.iter().filter(|&&a| a != keys[i] && column(a) == column(keys[i])) {
+                    let mut k = keys.clone();
+                    k[i] = alt;
+                    let s = compose(&k) + &tone;
+                    if !all.contains(s.as_str()) {
+                        one.entry(s).or_default().insert(id as u32);
+                    }
+                }
+            }
+        }
+        Tolerance { sound, adjacent: shown.into_iter().map(|(s, ids)| (s, by_name(ids))).collect(), one_sym: one.into_iter().map(|(s, ids)| (s, by_name(ids))).collect() }
     }
 
     /// Alternatives of syllable `id` with the pairs in `flags` (bits 0-3) enabled.
@@ -130,6 +156,11 @@ impl Tolerance {
     /// Lexicon syllables a shown reading may have been typed from.
     pub(crate) fn adjacent(&self, shown: &str) -> &[u32] {
         self.adjacent.get(shown).map_or(&[], |b| b)
+    }
+
+    /// Lexicon syllables an unknown reading may have come from by one symbol replaced within its column.
+    pub(crate) fn one_sym(&self, shown: &str) -> &[u32] {
+        self.one_sym.get(shown).map_or(&[], |b| b)
     }
 }
 
@@ -197,7 +228,7 @@ mod tests {
         let name = |r: &[u32]| r.iter().map(|&i| l.syl_names[i as usize].as_str()).collect::<Vec<_>>().join("-");
         let readings = |v: &[&str], flags: u32| {
             let syls = s(v);
-            l.tolerant_readings(&l.ids(&syls), &syls, flags, &[]).iter().map(|r| name(r)).collect::<Vec<_>>()
+            l.tolerant_readings(&l.ids(&syls), &syls, flags, &[], false).iter().map(|r| name(r)).collect::<Vec<_>>()
         };
         // ㄅㄩ is not a lexicon syllable (ㄅㄝ typed with ㄝ as its neighbour ㄩ); ㄗ beside it is legal and stays, even with every flag on.
         assert_eq!(readings(&["ㄅㄩ", "ㄗ"], FUZZY_ALL), ["ㄅㄝ-ㄗ"]);
@@ -206,5 +237,56 @@ mod tests {
         assert_eq!(readings(&["ㄗ", "ㄇㄣ"], 0b10), ["ㄓ-ㄇㄣ"]);
         assert_eq!(readings(&["ㄗ", "ㄇㄣ"], 0), Vec::<String>::new());
         assert_eq!(readings(&["ㄗ", "ㄇㄣ"], FUZZY_ADJACENT), Vec::<String>::new(), "bit 4 alone tolerates no known syllable");
+    }
+
+    /// docs/contracts/typo-one-sym.md §2.2 (the same examples as `test_one_sym_replaces_a_symbol_within_its_column` in reference/proto/test_fuzzy_ref.py):
+    /// one symbol of a lexicon syllable replaced by any other of its column, the tone kept and no column added or dropped; only a result the lexicon lacks
+    /// has an entry; only syllables with a one-syllable entry are alternatives.
+    #[test]
+    fn one_symbol_replaces_within_the_column() {
+        let l = lex(&["ㄒㄧㄚˇ", "ㄒㄧㄤˇ", "ㄒㄧㄝˇ", "ㄒㄧㄠˇ", "ㄒㄧㄡˇ", "ㄒㄧㄢˇ", "ㄒㄧㄣˇ", "ㄒㄧㄥˇ", "ㄅㄧ", "ㄅㄨ", "ㄅㄚ", "ㄉㄚ"]);
+        let mut eight = vec!["ㄒㄧㄚˇ", "ㄒㄧㄤˇ", "ㄒㄧㄝˇ", "ㄒㄧㄠˇ", "ㄒㄧㄡˇ", "ㄒㄧㄢˇ", "ㄒㄧㄣˇ", "ㄒㄧㄥˇ"];
+        eight.sort();
+        assert_eq!(l.one_sym_alts("ㄒㄧㄟˇ"), eight, "eight lexicon syllables, sorted by name");
+        assert_eq!(l.one_sym_alts("ㄅㄩ"), ["ㄅㄧ", "ㄅㄨ"], "the medial column only; no final is added");
+        assert!(l.one_sym_alts("ㄒㄧㄤˇ").is_empty(), "a syllable the lexicon has gets no entry");
+        assert!(l.one_sym_alts("ㄅㄧㄚ").is_empty(), "no column is added");
+        assert_eq!(l.one_sym_alts("ㄆㄚ"), ["ㄅㄚ", "ㄉㄚ"], "any other initial, not just a neighbour");
+        // A syllable of a pack word only (no one-syllable entry) is no alternative: the decoder reads an unknown syllable alone through the alternatives' entries.
+        let packed = Lexicon::parse("ㄅㄚ-ㄅㄚ 爸爸 -1.0\nㄉㄚ 大 -1.0\n").unwrap();
+        assert_eq!(packed.one_sym_alts("ㄆㄚ"), ["ㄉㄚ"]);
+    }
+
+    /// The flags a decode reads under one table or the other (`Lexicon::tolerant_readings`): without bit 5 (0, 16, any sound bits) only the adjacent table, and
+    /// never the one-symbol one; bit 5 alone only the one-symbol one; both bits the adjacent one first and, as the second source, the one-symbol syllables it does not hold.
+    #[test]
+    fn the_flags_choose_the_table_an_unknown_syllable_is_read_through() {
+        // ㄅㄩ: adjacent ㄅㄧㄝ (ㄝ typed as its neighbour ㄩ), one-symbol ㄅㄧ and ㄅㄨ.
+        let l = lex(&["ㄅㄧㄝ", "ㄅㄧ", "ㄅㄨ", "ㄅㄚ"]);
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let name = |r: &[u32]| r.iter().map(|&i| l.syl_names[i as usize].as_str()).collect::<Vec<_>>().join("-");
+        let syls = s(&["ㄅㄩ"]);
+        let read = |flags: u32, extra: bool| l.tolerant_readings(&l.ids(&syls), &syls, flags, &[], extra).iter().map(|r| name(r)).collect::<Vec<_>>();
+        for flags in [0, FUZZY_ADJACENT, FUZZY_SOUND] {
+            assert_eq!(read(flags, false), ["ㄅㄧㄝ"], "flags {flags}: adjacent only, never one_sym");
+            assert!(read(flags, true).is_empty(), "flags {flags}: no second source");
+        }
+        assert_eq!(read(FUZZY_ONE_SYM, false), ["ㄅㄧ", "ㄅㄨ"], "bit 5 alone: one_sym only");
+        assert!(read(FUZZY_ONE_SYM, true).is_empty());
+        assert_eq!(read(FUZZY_ONE_SYM | FUZZY_ADJACENT, false), ["ㄅㄧㄝ"], "both: adjacent first");
+        assert_eq!(read(FUZZY_ONE_SYM | FUZZY_ADJACENT, true), ["ㄅㄧ", "ㄅㄨ"], "both: then the one-symbol ones the adjacent table does not hold");
+    }
+
+    /// With both bits a syllable both tables hold is read once, through the adjacent table; the second source has only the rest. ㄋㄚ is no lexicon
+    /// syllable: ㄇㄚ typed with ㄇ as its neighbour ㄋ (adjacent, and one-symbol too), ㄅㄚ by another initial (one-symbol only).
+    #[test]
+    fn a_syllable_both_tables_hold_is_read_through_the_adjacent_one_only() {
+        let l = lex(&["ㄇㄚ", "ㄅㄚ"]);
+        let syls = vec!["ㄋㄚ".to_string()];
+        let name = |r: Vec<Vec<u32>>| r.iter().map(|r| l.syl_names[r[0] as usize].clone()).collect::<Vec<_>>();
+        let both = FUZZY_ONE_SYM | FUZZY_ADJACENT;
+        assert_eq!(name(l.tolerant_readings(&l.ids(&syls), &syls, both, &[], false)), ["ㄇㄚ"]);
+        assert_eq!(name(l.tolerant_readings(&l.ids(&syls), &syls, both, &[], true)), ["ㄅㄚ"]);
+        assert_eq!(name(l.tolerant_readings(&l.ids(&syls), &syls, FUZZY_ONE_SYM, &[], false)), ["ㄅㄚ", "ㄇㄚ"], "bit 5 alone has both, by name");
     }
 }

@@ -520,7 +520,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 delta_sound = val()?.parse::<f64>().ok().filter(|d| d.is_finite() && *d > 0.0).ok_or("--fuzzy-delta-sound takes a number above 0")?;
                 delta_given = true;
             }
-            "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
+            "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-63")?),
             "--no-recur" => recur = false,
             "--no-pool-recur" => pool_recur = false,
             "--pool-mask-diff" => pool_mask_diff = Some(val()?),
@@ -832,7 +832,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let key = key.as_str();
             // The manual mask, once, in the decoder's order with its first path as the base (the engine's `Stretch::masked`; docs/spec/decoder.md §7):
             // `manual_mask` matches the manual words against the readings that path used.
-            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3)), &t3) };
+            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings_with_fuzzy(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3)), &t3, fuzzy.unwrap_or(0)) };
             let masked0 = manual_mask(&used, &top0, lex.manual());
             // docs/spec/semantic-rerank.md §3.1.1: the pool weight and the order it gives (`lm::pool_order`, the engine's function); `view` holds the
             // pool positions in the order the rerank sees them (the pool's own when the weight does not apply).
@@ -840,7 +840,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let reordered = pool_order(&ng0, &bonus, &masked0);
             if want_mask_diff && pool_on {
                 out.mask_diff = mask_differs(&reordered, pool_order(&ng0, &bonus, &[]).is_some(), &masked0, &top0, || {
-                    lex.path_readings(syls, scored[pool[reordered.as_ref().map_or(0, |r| r.0[0])]].1.iter().map(|w| (w.0, w.3)), &t3)
+                    lex.path_readings_with_fuzzy(syls, scored[pool[reordered.as_ref().map_or(0, |r| r.0[0])]].1.iter().map(|w| (w.0, w.3)), &t3, fuzzy.unwrap_or(0))
                 }, lex.manual());
             }
             let (view, ng): (Vec<usize>, Vec<f64>) = match &reordered {

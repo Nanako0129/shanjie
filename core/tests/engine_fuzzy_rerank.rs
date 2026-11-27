@@ -200,3 +200,20 @@ fn without_a_sound_bit_the_pool_is_the_first_eight() {
     }
 }
 
+
+/// docs/contracts/typo-one-sym.md §2.4 item 2: a word read through a one-symbol alternative of an unknown syllable is no fuzzy word (like the adjacent-key one: it
+/// is a slip, not a rescue), so the stretch goes to the small model: a job, the pool's paths have no fuzzy word, and `fuzzy_skips` stays 0, with bit 5 alone and with both bits.
+#[test]
+fn a_one_symbol_first_path_is_reranked_and_not_skipped() {
+    let syls = ["ㄨㄛˇ", "ㄒㄧㄟˇ", "ㄑㄩˋ"];
+    for flags in [core::fuzzy::FUZZY_ONE_SYM, core::fuzzy::FUZZY_ONE_SYM | core::fuzzy::FUZZY_ADJACENT] {
+        let nb = nbest(&syls, flags);
+        assert!(!nb[0].1 && nb.len() >= 2, "flags {flags}: premise: the n-gram first path (我想去) has no fuzzy word, with others behind it");
+        assert!(nb.iter().all(|p| !p.1), "flags {flags}: no path of the n-best has a fuzzy word");
+        let mut e = engine(flags);
+        type_syls(&mut e, &syls);
+        let job = e.take_rerank_job().expect("a job for the stretch");
+        assert_eq!(e.fuzzy_skips(), 0, "flags {flags}");
+        assert!(job.candidates()[0].len() >= 2, "flags {flags}: the small model has paths to choose among");
+    }
+}
