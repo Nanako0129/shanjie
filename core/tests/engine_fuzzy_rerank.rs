@@ -201,7 +201,7 @@ fn without_a_sound_bit_the_pool_is_the_first_eight() {
 }
 
 
-/// docs/contracts/typo-one-sym.md §2.4 item 2: a word read through a one-symbol alternative of an unknown syllable is no fuzzy word (like the adjacent-key one: it
+/// docs/spec/decoder.md §6.3: a word read through a one-symbol alternative of an unknown syllable is no fuzzy word (like the adjacent-key one: it
 /// is a slip, not a rescue), so the stretch goes to the small model: a job, the pool's paths have no fuzzy word, and `fuzzy_skips` stays 0, with bit 5 alone and with both bits.
 #[test]
 fn a_one_symbol_first_path_is_reranked_and_not_skipped() {
@@ -218,7 +218,7 @@ fn a_one_symbol_first_path_is_reranked_and_not_skipped() {
     }
 }
 
-/// docs/contracts/typo-one-sym.md §2.4 item 4 and docs/spec/decoder.md §7: a manual word the n-gram's first path reads through a one-symbol alternative is protected from the rerank
+/// docs/spec/learning.md §4.5 and docs/spec/decoder.md §7: a manual word the n-gram's first path reads through a one-symbol alternative is protected from the rerank
 /// like one typed right (`path_readings_with_fuzzy` hands the mask the lexicon reading, not the typed syllable). 米雅歌 (the manual word of engine_rerank.rs, ㄇㄧˇ ㄧㄚˇ ㄍㄜ) with the
 /// middle syllable typed as an unknown one-symbol slip of ㄧㄚˇ, bit 5 alone, formal, standard strength, the shipping n-gram and small model: it stays 米雅歌 through the rerank. The same
 /// engine on a copy of the lexicon whose manual rows are tagged `slang` (no manual word in the mask) takes it out for another reading: the premise, and the check that fails without the mask.

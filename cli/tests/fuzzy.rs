@@ -125,7 +125,7 @@ fn fuzzy_delta_sound_is_validated() {
     assert!(lm("|知道|ㄗ ㄉㄠˋ\n", &["--fuzzy", "2", "--fuzzy-delta-sound", "2"]).status.success());
 }
 
-/// docs/contracts/typo-one-sym.md §2.4 item 2 and §4.1 (1): ㄋㄟ is a syllable only the one-symbol table has an alternative for. With the flags 0, 15, 16 and 31 (no bit 5) the
+/// docs/spec/decoder.md §6.3: ㄋㄟ is a syllable only the one-symbol table has an alternative for. With the flags 0, 15, 16 and 31 (no bit 5) the
 /// decoder never reads that table: no path, the row counts wrong with an empty dump, as before bit 5 existed. With 32, 48 and 63 the row has candidates (非 is one), and the single
 /// syllable keeps the larger cap of one syllable alone (24 words, `fuzzy::ONE_SYM_SINGLE_TOTAL`, against 12 for a span of several).
 #[test]

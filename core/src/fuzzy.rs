@@ -7,7 +7,7 @@
 //!   same keyboard row (symbol keys of the standard layout only) and re-composing the keys through the composer's columns
 //!   (docs/spec/keys-and-composition.md §3.1: a key fills its own column, a second key of the same column replaces) shows some reading; the table maps
 //!   that shown reading to the lexicon syllables it may have come from.
-//! * one symbol (bit 5, docs/contracts/typo-one-sym.md §2.2): replace one symbol of a lexicon syllable by any other symbol of the same column
+//! * one symbol (bit 5, docs/spec/decoder.md §6.2): replace one symbol of a lexicon syllable by any other symbol of the same column
 //!   (initial, medial or final; tone kept, no column added or dropped); a result that is no lexicon syllable maps to the syllables it may have come from.
 
 use crate::engine::Layout;
@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(readings(&["ㄗ", "ㄇㄣ"], FUZZY_ADJACENT), Vec::<String>::new(), "bit 4 alone tolerates no known syllable");
     }
 
-    /// docs/contracts/typo-one-sym.md §2.2 (the same examples as `test_one_sym_replaces_a_symbol_within_its_column` in reference/proto/test_fuzzy_ref.py):
+    /// docs/spec/decoder.md §6.2 (the same examples as `test_one_sym_replaces_a_symbol_within_its_column` in reference/proto/test_fuzzy_ref.py):
     /// one symbol of a lexicon syllable replaced by any other of its column, the tone kept and no column added or dropped; only a result the lexicon lacks
     /// has an entry; only syllables with a one-syllable entry are alternatives.
     #[test]

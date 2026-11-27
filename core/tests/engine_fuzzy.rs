@@ -121,7 +121,7 @@ fn all_off_and_adjacent_only_replay_the_python_golden() {
 
 /// docs/spec/decoder.md §6.4, a measurement (run with `--ignored --nocapture` in release on the Linux box): per-key latency of the dev302 replay,
 /// all on (63, bit 5 included) against all off. The bound is a p95 ratio of at most 2. With `SHANJIE_LATENCY_ROWS` (a rows file, `前文|句子|讀音`) the same
-/// is measured on those rows too (docs/contracts/typo-one-sym.md §4.1: the synthetic one-symbol typos, whose damaged syllable the flags 0 refuse).
+/// is measured on those rows too (docs/spec/decoder.md §6.4: the synthetic one-symbol typos, whose damaged syllable the flags 0 refuse).
 #[test]
 #[ignore]
 fn per_key_latency_all_on_against_all_off() {
@@ -628,7 +628,7 @@ fn a_pack_only_syllable_without_a_single_entry_is_not_an_alternative() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ---------- one symbol (bit 5, docs/contracts/typo-one-sym.md) ----------
+// ---------- one symbol (bit 5, docs/spec/decoder.md §6) ----------
 
 const ONE: u32 = FUZZY_ONE_SYM;
 fn lname(l: Layout) -> &'static str {
@@ -650,7 +650,7 @@ fn premises() {
     assert!(!lex.one_sym_alts(UNKNOWN).contains(&"ㄅㄧㄝ") && lex.adjacent_alts(UNKNOWN).contains(&"ㄅㄧㄝ"), "premise: {UNKNOWN} is read as ㄅㄧㄝ (憋) by the adjacent table only");
 }
 
-/// docs/contracts/typo-one-sym.md §2.3 step 4, §2.4: with bit 5 (alone) a syllable the lexicon lacks is accepted on both layouts and the composition shows the word
+/// docs/spec/keys-and-composition.md §3.3, §2.4: with bit 5 (alone) a syllable the lexicon lacks is accepted on both layouts and the composition shows the word
 /// read through the one-symbol alternatives (想 for ㄒㄧㄟˇ, between 我 and 去); with the bit off it is refused as before; choosing a window word rewrites the
 /// span to the lexicon reading.
 #[test]
@@ -693,7 +693,7 @@ fn one_sym_needs_a_model() {
     assert!(e.syllables().is_empty());
 }
 
-/// docs/contracts/typo-one-sym.md §2.4 item 2 and §4.1 (1): `shanjie-eval --fuzzy 0` and `--fuzzy 16` never read the one-symbol table (the decoder
+/// docs/spec/decoder.md §6.3: `shanjie-eval --fuzzy 0` and `--fuzzy 16` never read the one-symbol table (the decoder
 /// has no path through ㄋㄟ, which only that table knows), `--fuzzy 32` does; and the penalties: a word read through the one-symbol table is
 /// `DELTA_ONE_SYM` (2.5) below the lexicon's reading, through the adjacent table `DELTA_ADJACENT` (2), with both bits on as with either alone.
 #[test]
@@ -723,7 +723,7 @@ fn the_flags_choose_the_table_and_its_penalty() {
     assert!(core::fuzzy::DELTA_ONE_SYM > core::fuzzy::DELTA_ADJACENT, "the adjacent-key reading ranks above the wider net");
 }
 
-/// docs/contracts/typo-one-sym.md §2.4 item 1: the ETen layout reads no adjacent key, so a flags value with bit 4 is bit 5 alone there (`effective_fuzzy_for`),
+/// docs/spec/decoder.md §6.1: the ETen layout reads no adjacent key, so a flags value with bit 4 is bit 5 alone there (`effective_fuzzy_for`),
 /// and nothing of the standard keyboard shows through: the window of an accepted ㄅㄩ has no 憋 (a word of the adjacent reading ㄅㄧㄝ), and the standard
 /// layout with the same flags has it.
 #[test]
@@ -743,7 +743,7 @@ fn eten_reads_bit_5_without_the_adjacent_table() {
     assert!(!eten.is_empty() && !eten.iter().any(|w| w == "憋"), "ETen: {eten:?}");
 }
 
-// ---- the English guard (docs/contracts/typo-one-sym.md §2.3 step 4) ----
+// ---- the English guard (docs/spec/keys-and-composition.md §3.3) ----
 
 /// The engine with the macOS defaults of English mixing (§4.1: english on, overwrite off, key order on, reversal guard on) and the flags.
 fn english_engine(flags: u32) -> Engine {
@@ -793,7 +793,7 @@ fn bit_5_alone_leaves_multi_key_lowercase_english_to_english() {
     }
 }
 
-// ---- switching the flags with a composition open (docs/contracts/typo-one-sym.md §2.4 item 3) ----
+// ---- switching the flags with a composition open (docs/spec/decoder.md §6.4) ----
 
 fn composed(layout: Layout, flags: u32, typed: &[&str]) -> (Engine, String) {
     let mut e = engine(layout, flags, false);
@@ -876,7 +876,7 @@ fn turning_bit_5_off_keeps_the_text_and_never_leaks_the_adjacent_table() {
     finish(&mut e, Layout::Standard, "ㄋㄟ 32 -> 0");
 }
 
-// ---- the learning guard (docs/contracts/typo-one-sym.md §2.4 item 4) ----
+// ---- the learning guard (docs/spec/learning.md §4.5) ----
 
 /// Re-picks the character of syllable `at` of an `n`-syllable composition: the first one-character word of its window other than the shown one.
 fn repick(e: &mut Engine, at: usize, n: usize, shown: &str) {
@@ -964,7 +964,7 @@ fn an_adjacent_key_syllable_is_learned_as_before_with_the_flags_16() {
     assert_eq!(learn_all(0b1_0001, ONLY_ADJ), learn_all(0b1_0001, ONLY_ADJ), "deterministic");
 }
 
-/// docs/contracts/typo-one-sym.md §2.4 item 4 and docs/spec/decoder.md §7: a word read through a one-symbol alternative is given under the lexicon reading it was found
+/// docs/spec/learning.md §4.5 and docs/spec/decoder.md §7: a word read through a one-symbol alternative is given under the lexicon reading it was found
 /// under (`path_readings_with_fuzzy`), so a manual word the n-gram's first choice holds that way is protected by the rerank mask; without bit 5 the typed syllable
 /// is given, as `path_readings` always did; and the sound bits (0-3) never reach it.
 #[test]
@@ -985,7 +985,7 @@ fn path_readings_with_fuzzy_follows_the_flags() {
     assert_eq!(lex.path_readings_with_fuzzy(&z, [("知", 1)], &[], 0b0010 | ONE), z);
 }
 
-/// docs/contracts/typo-one-sym.md §4.1: the probe sentences (`fixtures/typo-one-sym-probe.tsv`, with the Threads case first: `v u o 3` for ㄒㄧㄤˇ) all come out as written with bit 5 on,
+/// docs/spec/decoder.md §6.4: the probe sentences (`fixtures/typo-one-sym-probe.tsv`, with the Threads case first: `v u o 3` for ㄒㄧㄤˇ) all come out as written with bit 5 on,
 /// by the engine with the macOS defaults of English mixing; with the bit off the slip is refused or reverts and the text is not the sentence.
 #[test]
 fn typo_one_sym_probe_hits_with_bit_5_and_not_without() {
@@ -1008,7 +1008,7 @@ fn typo_one_sym_probe_hits_with_bit_5_and_not_without() {
     assert!(rows >= 6, "{rows} rows");
 }
 
-// ---- misfires (docs/contracts/typo-one-sym.md §4.1 "正常打字與小寫英文誤觸量測") ----
+// ---- misfires (docs/spec/keys-and-composition.md §3.3) ----
 
 /// The 1,000 most frequent all-lowercase-letter English words of `data/lexicon/english.tsv` (the `E` rows: word, count).
 fn top_english(n: usize) -> Vec<String> {

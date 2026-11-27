@@ -634,12 +634,12 @@ impl Lexicon {
     }
 
     /// One symbol (bit 5): the lexicon syllables that show as the unknown `shown` when one symbol of them is replaced by another of its column
-    /// (docs/contracts/typo-one-sym.md §2.2), sorted by name. Empty for a syllable the lexicon has.
+    /// (docs/spec/decoder.md §6.2), sorted by name. Empty for a syllable the lexicon has.
     pub fn one_sym_alts(&self, shown: &str) -> Vec<&str> {
         self.tol().one_sym(shown).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
     }
 
-    /// The lexicon syllables an unknown syllable `syl` is read through under `flags` (docs/contracts/typo-one-sym.md §2.4 item 2): without bit 5 only
+    /// The lexicon syllables an unknown syllable `syl` is read through under `flags` (docs/spec/decoder.md §6.3): without bit 5 only
     /// the adjacent-key table (the table of every flags value before bit 5 existed: never `one_sym`); bit 5 alone only the one-symbol table; both bits the
     /// adjacent table first and, with `extra`, the one-symbol syllables the adjacent table does not hold (the second source, a larger penalty).
     fn unknown_alts(&self, syl: &str, flags: u32, extra: bool) -> Vec<u32> {
@@ -660,7 +660,7 @@ impl Lexicon {
     /// `t3` is the span's slice of the sandhi position table (docs/spec/decoder.md §6.6; empty for none): an unknown syllable the table marks unaccepted (or an
     /// unaccepted tail) was accepted by the sandhi rule, not as a slip, so it has no adjacent reading here, whatever the adjacent bit says: it is read as Xˇ only.
     ///
-    /// Bit 5 (docs/contracts/typo-one-sym.md §2.4): see `unknown_alts`; `extra` asks for the second source of a span read through both bits.
+    /// Bit 5 (docs/spec/decoder.md §6.4): see `unknown_alts`; `extra` asks for the second source of a span read through both bits.
     pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32, t3: &[tone3::Pos], extra: bool) -> Vec<Vec<u32>> {
         let mut out = Vec::new();
         let mut put = |j: usize, alts: &[u32]| {
@@ -818,7 +818,7 @@ impl Lexicon {
         let entry = |p: usize| (self.word(p), self.ents[p].score);
         let name = |r: &[u32]| r.iter().map(|&i| self.syl_names[i as usize].clone()).collect::<Vec<String>>();
         let (readings, words) = self.tolerant_pick(&ids, key, flags, t3, usize::MAX, usize::MAX, entry);
-        // Both bit 4 and bit 5: the adjacent-key words are listed first, then the one-symbol words they do not hold (docs/contracts/typo-one-sym.md §2.4.4).
+        // Both bit 4 and bit 5: the adjacent-key words are listed first, then the one-symbol words they do not hold (docs/spec/decoder.md §6.4).
         let taken: HashSet<&str> = words.iter().map(|w| w.0).collect();
         let (extra_readings, extra_words) = self.tolerant_pick_extra(&ids, key, flags, t3, usize::MAX, usize::MAX, entry, &taken);
         let mut out: Vec<(&str, Vec<String>)> = words.into_iter().map(|(w, _, _, a)| (w, name(&readings[a].1))).collect();
@@ -847,7 +847,7 @@ impl Lexicon {
         self.path_readings_with_fuzzy(syls, words, t3, 0)
     }
 
-    /// `path_readings` with the flags the path was decoded under (docs/contracts/typo-one-sym.md §2.4.4): bit 5 reads an unknown syllable through the
+    /// `path_readings` with the flags the path was decoded under (docs/spec/decoder.md §6.5): bit 5 reads an unknown syllable through the
     /// one-symbol table, bits 4 and 5 through both. The sound bits (0-3) are masked out, so they never reach the readings (and the manual-word mask).
     pub fn path_readings_with_fuzzy<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>, t3: &[tone3::Pos], flags: u32) -> Vec<String> {
         let flags = flags & (fuzzy::FUZZY_ADJACENT | fuzzy::FUZZY_ONE_SYM);

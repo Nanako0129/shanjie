@@ -1605,7 +1605,7 @@ impl CappedLexicon {
         };
         if fuzzy & crate::fuzzy::FUZZY_SOUND != 0 || ids.contains(&u32::MAX) {
             let unknown = ids.contains(&u32::MAX);
-            // docs/contracts/typo-one-sym.md §2.4 item 2: bit 5 alone reads an unknown syllable through the one-symbol table only (its own penalty, and
+            // docs/spec/decoder.md §6.3: bit 5 alone reads an unknown syllable through the one-symbol table only (its own penalty, and
             // the larger cap for one syllable alone); without bit 5 only through the adjacent table (every flags value before bit 5); both bits: the
             // adjacent table first, then (below) the one-symbol readings it does not hold.
             let one_only = fuzzy & crate::fuzzy::FUZZY_ONE_SYM != 0 && fuzzy & crate::fuzzy::FUZZY_ADJACENT == 0;
@@ -1649,7 +1649,7 @@ impl CappedLexicon {
 /// word may also be read through one syllable replaced by its fuzzy-sound alternative, scored `delta_sound` lower (the engine and the app
 /// always pass `fuzzy::DELTA_SOUND`; another value is for the evaluation CLI, docs/spec/decoder.md §6.1). A syllable the lexicon does not have is
 /// read through its adjacent-key alternatives (`fuzzy::DELTA_ADJACENT` lower), whatever bits 0-4 say: the switch only decides
-/// whether such a syllable is accepted when typed. Bit 5 (docs/contracts/typo-one-sym.md) changes which table: with it alone the one-symbol
+/// whether such a syllable is accepted when typed. Bit 5 (docs/spec/decoder.md §6) changes which table: with it alone the one-symbol
 /// alternatives (`fuzzy::DELTA_ONE_SYM` lower, up to `fuzzy::ONE_SYM_SINGLE_TOTAL` words for a syllable alone), with it and bit 4 the adjacent ones first
 /// and the one-symbol ones they do not hold after them. Without bit 5 the one-symbol table is never read. With `fuzzy` 0 and only known syllables the
 /// arithmetic is exactly that of `decode_segment_learned` before this existed.

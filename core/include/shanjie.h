@@ -327,7 +327,7 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 //   (an English run is text), so the snapshot is the output before the call. Call it after every engine creation, like set_english.
 int32_t shanjie_engine_set_english_overwrite(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // fuzzy input (docs/spec/decoder.md §6): set_fuzzy flags are bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ, in that order)
-//   bit 4 the adjacent-key slips and bit 5 the one-symbol slips (docs/contracts/typo-one-sym.md); any other bit returns 2 with the state unchanged. Default 0 at engine creation, and 0 changes
+//   bit 4 the adjacent-key slips and bit 5 the one-symbol slips (docs/spec/decoder.md §6); any other bit returns 2 with the state unchanged. Default 0 at engine creation, and 0 changes
 //   nothing. The codes and the snapshot (handled 1, commit "") are those of set_english; the composition is recomputed, so the
 //   snapshot shows it. A sound pair also reads a word through one syllable replaced by the other of the pair (a lower score); the
 //   rerank never chooses such a word: a stretch whose n-gram first has one is not reranked, the others offer the model only paths without one.

@@ -536,7 +536,7 @@ impl Layout {
     }
 }
 
-/// The fuzzy flags the decoder, the window and the learning guard read (docs/contracts/typo-one-sym.md §2.4 item 1): the Eten layout has no standard
+/// The fuzzy flags the decoder, the window and the learning guard read (docs/spec/decoder.md §6.1): the Eten layout has no standard
 /// keyboard rows, so it never reads the adjacent-key bit; every other bit, and the standard layout, as set.
 pub fn effective_fuzzy_for(layout: Layout, flags: u32) -> u32 {
     if layout == Layout::Eten { flags & !FUZZY_ADJACENT } else { flags }
@@ -2034,7 +2034,7 @@ impl Engine {
             }
             let today = self.today();
             let uses = if new_on { self.new_word_uses(today) } else { Vec::new() };
-            // docs/contracts/typo-one-sym.md §2.4 item 4: a syllable only bit 5 accepted is never in a record, a key or a reading.
+            // docs/spec/learning.md §4.5: a syllable only bit 5 accepted is never in a record, a key or a reading.
             let unk = self.bit5_unknown();
             let u = |i: usize| unk.get(i).copied().unwrap_or(false);
             let plans: Vec<_> = self
@@ -2158,7 +2158,7 @@ impl Engine {
         if picked.is_empty() {
             return out;
         }
-        // docs/contracts/typo-one-sym.md §2.4 item 4: a syllable only bit 5 accepted breaks the run, so it is no part of a new word's reading.
+        // docs/spec/learning.md §4.5: a syllable only bit 5 accepted breaks the run, so it is no part of a new word's reading.
         let unk = self.bit5_unknown();
         let mut run: Vec<(usize, char)> = Vec::new();
         let mut flush = |run: &mut Vec<(usize, char)>| {
@@ -2465,7 +2465,7 @@ impl Engine {
     }
 
     /// Fuzzy input (docs/spec/decoder.md §6): `flags` bits 0-3 are the sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ), bit 4 the
-    /// adjacent-key slips, bit 5 the one-symbol slips (docs/contracts/typo-one-sym.md); default 0, and 0 changes nothing. Bits 4 and 5 only decide whether
+    /// adjacent-key slips, bit 5 the one-symbol slips (docs/spec/decoder.md §6); default 0, and 0 changes nothing. Bits 4 and 5 only decide whether
     /// `finish_syllable` accepts a syllable the lexicon lacks; a syllable already accepted is decoded whatever the flags say, except that bit 5 changes
     /// which table reads it: when the flags change so that the table reading an accepted syllable changes (bit 5 turned off, or turned on without
     /// bit 4), every such syllable of the composition (not under a fixed word) is first stored as the lexicon reading it is shown as now, so the
@@ -2495,7 +2495,7 @@ impl Engine {
         effective_fuzzy_for(self.layout, self.fuzzy)
     }
 
-    /// The learning guard's positions (docs/contracts/typo-one-sym.md §2.4 item 4.0): the syllables of the composition that stand there only because bit 5
+    /// The learning guard's positions (docs/spec/learning.md §4.5): the syllables of the composition that stand there only because bit 5
     /// accepted them, i.e. no lexicon syllable, no punctuation or English token, no sandhi or neutral one (the position table marks those unaccepted). Never one
     /// the user chose from the window (that rewrites the syllable to the lexicon reading). All false without bit 5, so with the flags 0 and 16 nothing of learning changes.
     fn bit5_unknown(&self) -> Vec<bool> {
@@ -5168,7 +5168,7 @@ impl Engine {
             && !self.lex.adjacent_alts(syl).is_empty()
     }
 
-    /// Fuzzy input, bit 5 (docs/contracts/typo-one-sym.md §2.3 step 4): a syllable the lexicon lacks is accepted when one symbol of some lexicon syllable,
+    /// Fuzzy input, bit 5 (docs/spec/keys-and-composition.md §3.3): a syllable the lexicon lacks is accepted when one symbol of some lexicon syllable,
     /// replaced by another of its column, shows it. Needs a language model; both layouts (no keyboard row is read). With English mixing on, Space does not
     /// take a syllable at least one of whose columns was overwritten while typing (`line`, `steam`, `wifi`): that reverts to English (`revert_missing`).
     /// A tone key does, as a syllable the lexicon lacks always did.
@@ -5682,7 +5682,7 @@ impl Engine {
         }
         let syl = |i: usize| self.syls.get(i).map(String::as_str);
         let (a, b, c) = (syl(end), syl(end + 1), syl(end + 2));
-        // docs/contracts/typo-one-sym.md §2.4 item 4: no key names a syllable only bit 5 accepted.
+        // docs/spec/learning.md §4.5: no key names a syllable only bit 5 accepted.
         let unk = self.bit5_unknown();
         let u = |i: usize| unk.get(i).copied().unwrap_or(false);
         if u(end) {
