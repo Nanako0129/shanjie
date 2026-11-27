@@ -262,3 +262,62 @@ fn a_non_finite_col_falls_back_to_the_levels_header_triple() {
     assert_eq!(picks_by_level(&tl, &[-10.0, -12.5], &["你好", "不"], &words, &co), [0, 1, 0], "list A");
     assert_eq!(picks_by_level(&tl, &[-10.0, -10.5], &["你好", "我們"], &words, &co), [0, 0, 1], "list B");
 }
+
+/// docs/spec/semantic-rerank.md §4.2, §9: `rerank_colloquial` skips the forward pass and returns `(0, None)` when `ng[0] - ng[1] >= eff_tau`
+/// and SINIT `b` is all zero (`eff_tau` is `cell.tau` when all `col` are finite, or `plain.tau` on non-finite `col`); SINIT `b != 0` never
+/// skips, and `rerank_colloquial_with_ll` always computes `ll` with the same pick.
+#[test]
+fn rerank_colloquial_confident_skip_and_with_ll() {
+    use core::lm::{Profile, SinitLayer};
+    use core::tinylm::Learning;
+
+    let tl = toy_v3();
+    let level = RerankLevel::Conservative;
+    let cell = colloquial::cell(level);
+    let plain = tl.params(Profile::Chat, level);
+    assert_eq!((cell.1, plain.1), (2.0, 3.0), "premise: cell.tau < plain.tau");
+
+    let cands = ["你好", "我們"];
+    let co_finite = colloq("skip-finite", &[], &["a"], None);
+    let words_finite = vec![vec!["a"], vec!["a"]];
+    assert!(words_finite.iter().all(|w| co_finite.col(w).is_finite()));
+
+    // Finite col uses cell.tau = 2.0.
+    assert_eq!(
+        tl.rerank_colloquial(&[-10.0, -12.0], &cands, &words_finite, "", &co_finite, level, &[], &Default::default()).unwrap(),
+        (0, None)
+    );
+    assert!(
+        tl.rerank_colloquial(&[-10.0, -11.9], &cands, &words_finite, "", &co_finite, level, &[], &Default::default()).unwrap().1.is_some()
+    );
+
+    // Non-finite col falls back to plain.tau = 3.0: does not skip at gap 2.5, skips at gap 3.0.
+    let co_inf = Colloquial::load(&table_file("skip-inf", tiny_d(0.0)), "", "".as_bytes(), None).unwrap();
+    let words_nonfinite = vec![vec!["a"], vec!["zzz"]];
+    assert!(co_inf.col(&words_nonfinite[1]).is_infinite());
+    assert!(
+        tl.rerank_colloquial(&[-10.0, -12.5], &cands, &words_nonfinite, "", &co_inf, level, &[], &Default::default()).unwrap().1.is_some(),
+        "cell.tau <= gap < plain.tau must not skip on non-finite col"
+    );
+    assert_eq!(
+        tl.rerank_colloquial(&[-10.0, -13.0], &cands, &words_nonfinite, "", &co_inf, level, &[], &Default::default()).unwrap(),
+        (0, None)
+    );
+
+    // SINIT b != 0 never skips even when confident.
+    for layer in [SinitLayer::Fine, SinitLayer::Mid, SinitLayer::Coarse] {
+        for b in [vec![0.5, 0.0], vec![0.0, 0.5]] {
+            let learn = Learning { layer, b, scale: 1.0 };
+            assert!(
+                tl.rerank_colloquial(&[-10.0, -15.0], &cands, &words_finite, "", &co_finite, level, &[], &learn).unwrap().1.is_some(),
+                "{layer:?}: SINIT must not skip"
+            );
+        }
+    }
+
+    // rerank_colloquial_with_ll forces ll even on confident spans with identical pick 0.
+    let (pick, ll) = tl.rerank_colloquial_with_ll(&[-10.0, -12.0], &cands, &words_finite, "", &co_finite, level, &[], &Default::default()).unwrap();
+    let want_ll = tl.ll_many(&cands.iter().map(|c| ("", *c)).collect::<Vec<_>>()).unwrap();
+    assert_eq!(pick, 0);
+    assert_eq!(ll, Some(want_ll));
+}

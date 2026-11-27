@@ -2957,3 +2957,86 @@ fn sinit_user_reported_row_105_is_learned_once_in_formal() {
 fn sinit_semantic_row_wei_ni_zai_ma_is_learned_once_in_chat() {
     sinit_learned_once(lm::Profile::Chat, "ㄨㄟˋ ㄋㄧˇ ㄗㄞˋ ㄇㄚ", "為你在嗎", "喂", "喂你在嗎");
 }
+
+/// docs/spec/semantic-rerank.md §3.3, §6.3: SINIT stretches (`b[0..n]` not all zero, whether `b[0] > 0` or `b[i] > 0`, across `Fine`,
+/// `Mid`, and `Coarse`) with `ng[0] - ng[1] >= tau` never skip the TinyLM forward pass, preserving non-empty `sinit_diag()` as well as
+/// exact `picks()` and `sinit_overturned()`.
+#[test]
+#[cfg(unix)] // learning_open fails on Windows for now (docs/spec/windows-tip.md §2.5)
+fn sinit_confident_stretches_do_not_skip_and_keep_sinit_diag() {
+    use core::tinylm::{Learning, RerankLevel, TinyLm, TOPK};
+
+    chat_only();
+    let tl = TinyLm::load(&root().join("data/lm/tinylm.sjtl")).unwrap();
+    let params = tl.params(lm::Profile::Chat, RerankLevel::Standard);
+    const L: &str = "ㄓㄠˋ 趙 -1.0\nㄓㄠˋ 照 -6.0\nㄐㄧㄢˋ 建 -1.0\nㄧˋ 議 -1.0\n";
+
+    // 1. Live teach (`pick` + `Enter`) on confident `L` (`ng[0] - ng[1] >= tau`) with `b[i] > 0` on the Fine layer.
+    {
+        let mut e = tiny_rerank(L);
+        e.set_newword(false);
+        assert_eq!(type_settled(&mut e, R16), "趙建議", "precondition: default is 趙建議");
+        pick(&mut e, 3, 1, "照");
+        assert_eq!(e.key(k(KeyKind::Enter)).unwrap().commit, "照建議", "precondition: re-pick took");
+        e.set_eps_sinit(100.0);
+        type_syls(&mut e, R16);
+        let job = e.take_rerank_job().expect("a job");
+        let ng = job.ng_scores();
+        let b = job.sinit_weights();
+        let cands = job.candidates();
+        assert!(ng[0][0] - ng[0][1] >= params.1, "premise: confident margin {} >= {}", ng[0][0] - ng[0][1], params.1);
+        let at = b[0].iter().position(|&x| x > 0.0).expect("taught candidate");
+        assert!(at > 0 && b[0][0] == 0.0);
+        let c_refs: Vec<&str> = cands[0].iter().take(TOPK).map(String::as_str).collect();
+        let learn = Learning { layer: lm::SinitLayer::Fine, b: b[0].clone(), scale: 100.0 };
+        let (want_pick, want_ll) = tl.rerank_with_ll(&ng[0], &c_refs, "", params, &[], &learn).unwrap();
+        let want_ll = want_ll.unwrap();
+        let res = job.run();
+        assert_eq!(res.picks(), vec![want_pick]);
+        assert_eq!(res.picks(), vec![at], "Fine SINIT overturns even when confident");
+        assert_eq!(res.sinit_overturned(), 0);
+        assert_eq!(res.sinit_diag(), vec![(ng[0][0] - ng[0][at], params.0 * (want_ll[0] - want_ll[at]))]);
+    }
+
+    // 2. Explicit Fine/Mid/Coarse records for both `b[0] > 0` (anchor 趙) and `b[i] > 0` (照) on `L`.
+    let layers = [
+        ("fine", lm::SinitLayer::Fine, "^>ㄐㄧㄢˋ\u{1f}ㄧˋ\u{1f}$"),
+        ("mid", lm::SinitLayer::Mid, "^>ㄐㄧㄢˋ\u{1f}ㄧˋ"),
+        ("coarse", lm::SinitLayer::Coarse, "^>ㄐㄧㄢˋ"),
+    ];
+    for (lname, layer, key) in layers {
+        for (which, word) in [("b0", "趙"), ("bi", "照")] {
+            let mut e = tiny_rerank(L);
+            e.set_newword(false);
+            let dir = tmp_dir(&format!("sinit-confident-{lname}-{which}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(file_of(&dir), format!("{}\n{key}\tㄓㄠˋ\t{word}\t1.0\t{DAY}\n", core::learn_store::HEADER)).unwrap();
+            e.learning_open(&dir).unwrap();
+            type_syls(&mut e, R16);
+            let job = e.take_rerank_job().expect("a job");
+            let ng = job.ng_scores();
+            let b = job.sinit_weights();
+            let cands = job.candidates();
+            assert!(ng[0][0] - ng[0][1] >= params.1, "{lname}/{which}: confident margin");
+            let idx = b[0].iter().position(|&x| x > 0.0).expect("SINIT weight present");
+            if which == "b0" {
+                assert_eq!(idx, 0);
+            } else {
+                assert!(idx > 0 && b[0][0] == 0.0);
+            }
+            let c_refs: Vec<&str> = cands[0].iter().take(TOPK).map(String::as_str).collect();
+            let learn = Learning { layer, b: b[0].clone(), scale: 1.0 };
+            let (want_pick, want_ll) = tl.rerank_with_ll(&ng[0], &c_refs, "", params, &[], &learn).unwrap();
+            let want_ll = want_ll.unwrap();
+            let res = job.run();
+            assert_eq!(res.picks(), vec![want_pick], "{lname}/{which}: picks match rerank_with_ll");
+            assert_eq!(res.sinit_overturned(), usize::from(b[0][0] > 0.0 && b[0][want_pick] == 0.0), "{lname}/{which}: overturned");
+            assert_eq!(
+                res.sinit_diag(),
+                vec![(ng[0][0] - ng[0][idx], params.0 * (want_ll[0] - want_ll[idx]))],
+                "{lname}/{which}: sinit_diag preserved"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}

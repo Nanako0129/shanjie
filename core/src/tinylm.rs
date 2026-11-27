@@ -894,20 +894,44 @@ impl TinyLm {
     /// k = `key_for` of the text before the stretch: for versions 1 to 4 the engine's context key (`learn::context_key`; its
     /// `SENTINEL`, no Han character before the cursor, is the empty k as in tinylm.row_key), for a model declaring `left_len` the last
     /// L characters as they are ("^" included; docs/spec/semantic-rerank.md §5.2), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
-    /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
+    /// candidates and not a confident span: ng[0] - ng[1] >= tau with no learning bias skips the forward pass and returns (0, None),
+    /// docs/spec/semantic-rerank.md §3.3), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
     /// `masked` (same order as `cands`; empty, or a missing entry, is false) marks the candidates that cannot be chosen: the caller's
     /// `manual_mask`, made once with the decoder's first candidate as the base (docs/spec/decoder.md §7); the threshold and the scores still use the
     /// whole list.
     pub fn rerank(
         &self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64), masked: &[bool], learn: &Learning,
     ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
+        self.rerank_inner(ng, cands, key, params, masked, learn, true)
+    }
+
+    /// Like [`TinyLm::rerank`], but never skips the forward pass on confident spans so callers such as `--tinylm-scores` always get `ll`.
+    pub fn rerank_with_ll(
+        &self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64), masked: &[bool], learn: &Learning,
+    ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
+        self.rerank_inner(ng, cands, key, params, masked, learn, false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn rerank_inner(
+        &self, ng: &[f64], cands: &[&str], key: &str, params: (f64, f64, f64), masked: &[bool], learn: &Learning, skip_confident: bool,
+    ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         // The header's check, for every caller: a NaN alpha or a negative delta from outside the file must not reach `pick`.
         if !valid_params(params) {
             return Err(TinyLmError::Format);
         }
         let n = cands.len().min(ng.len()).min(TOPK);
-        let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
+        if n < 2 {
+            return Ok((0, None));
+        }
+        if cands[..n].iter().any(|c| c.chars().count() > self.ctx - 1) {
+            return Err(TinyLmError::TooLong);
+        }
         let (alpha, tau, delta) = params;
+        if skip_confident && ng[0] - ng[1] >= tau && !learn.b.iter().take(n).any(|&x| x != 0.0) {
+            return Ok((0, None));
+        }
+        let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
         let term = learn.term(&ll);
         Ok((pick_masked(&ng[..n], &ll, alpha, tau, delta, masked, &term), Some(ll)))
     }
@@ -934,12 +958,40 @@ impl TinyLm {
         &self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial, level: RerankLevel,
         masked: &[bool], learn: &Learning,
     ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
+        self.rerank_colloquial_inner(ng, cands, words, key, co, level, masked, learn, true)
+    }
+
+    /// Like [`TinyLm::rerank_colloquial`], but never skips the forward pass on confident spans so callers such as `--tinylm-scores` always get `ll`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rerank_colloquial_with_ll(
+        &self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial, level: RerankLevel,
+        masked: &[bool], learn: &Learning,
+    ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
+        self.rerank_colloquial_inner(ng, cands, words, key, co, level, masked, learn, false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn rerank_colloquial_inner(
+        &self, ng: &[f64], cands: &[&str], words: &[Vec<&str>], key: &str, co: &Colloquial, level: RerankLevel,
+        masked: &[bool], learn: &Learning, skip_confident: bool,
+    ) -> Result<(usize, Option<Vec<f64>>), TinyLmError> {
         let n = cands.len().min(ng.len()).min(words.len()).min(TOPK);
-        let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
+        if n < 2 {
+            return Ok((0, None));
+        }
+        if cands[..n].iter().any(|c| c.chars().count() > self.ctx - 1) {
+            return Err(TinyLmError::TooLong);
+        }
         let col: Vec<f64> = words[..n].iter().map(|w| co.col(w)).collect();
         let plain = self.params(Profile::Chat, level);
+        let cell = colloquial::cell(level);
+        let eff_tau = if col.iter().all(|c| c.is_finite()) { cell.1 } else { plain.1 };
+        if skip_confident && ng[0] - ng[1] >= eff_tau && !learn.b.iter().take(n).any(|&x| x != 0.0) {
+            return Ok((0, None));
+        }
+        let Some(ll) = self.rerank_ll(&cands[..n], key)? else { return Ok((0, None)) };
         let term = learn.term(&ll);
-        Ok((colloquial::guarded_pick(&ng[..n], &ll, &col, colloquial::cell(level), plain, masked, &term), Some(ll)))
+        Ok((colloquial::guarded_pick(&ng[..n], &ll, &col, cell, plain, masked, &term), Some(ll)))
     }
 
     /// LL of each (k, c): the sum over the characters of c of log10 P(c_i | [BOS] + k + c_<i), as `tinylm.ll_many`
@@ -1710,5 +1762,175 @@ mod tests {
         assert_eq!(Backend::DEFAULT, Backend::Accelerate);
         #[cfg(not(target_vendor = "apple"))]
         assert_eq!(Backend::DEFAULT, Backend::Plain);
+    }
+
+    fn test_cands(n: usize) -> Vec<String> {
+        (0..n).map(|i| (0..4).map(|j| char::from_u32(0x4e00 + ((i * 7 + j * 3) % 110) as u32).unwrap()).collect()).collect()
+    }
+
+    #[test]
+    fn rerank_confident_skip_and_with_ll_equivalence() {
+        let m = TinyLm::parse(&random_file(false)).unwrap();
+        let owned = test_cands(4);
+        let cands: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let chat = m.alpha_tau_delta(Profile::Chat); // (0.7, 2.0, 0.0)
+        let ng = [0.0, -2.5, -3.0, -4.0];
+        let key = "\u{4e01}\u{4e02}";
+
+        assert_eq!(m.rerank(&ng, &cands, key, chat, &[], &Default::default()).unwrap(), (0, None));
+        let (chosen, ll) = m.rerank_with_ll(&ng, &cands, key, chat, &[], &Default::default()).unwrap();
+        let ll = ll.expect("rerank_with_ll must always score ll when n >= 2");
+        assert_eq!(chosen, 0);
+        assert_eq!(ll, m.ll_many(&cands.iter().map(|c| (key, *c)).collect::<Vec<_>>()).unwrap());
+    }
+
+    #[test]
+    fn rerank_confident_skip_boundary() {
+        let m = TinyLm::parse(&random_file(false)).unwrap();
+        let owned = test_cands(3);
+        let cands: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let chat = m.alpha_tau_delta(Profile::Chat); // tau = 2.0
+        let tau = chat.1;
+
+        assert_eq!(m.rerank(&[0.0, -tau, -5.0], &cands, "", chat, &[], &Default::default()).unwrap(), (0, None));
+        let just_below = [0.0, -(tau - 1e-9), -5.0];
+        let (_, ll) = m.rerank(&just_below, &cands, "", chat, &[], &Default::default()).unwrap();
+        assert!(ll.is_some(), "ng[0] - ng[1] == tau - 1e-9 must run forward pass");
+    }
+
+    #[test]
+    fn rerank_too_long_and_format_checked_before_skip() {
+        let m = TinyLm::parse(&random_file(false)).unwrap();
+        let long = "\u{4e00}".repeat(m.ctx);
+        let short = "\u{4e00}\u{4e01}";
+        let chat = m.alpha_tau_delta(Profile::Chat);
+        let mut ng_confident = [0.0; 10];
+        for (i, v) in ng_confident.iter_mut().enumerate().skip(1) {
+            *v = -5.0 * i as f64;
+        }
+
+        // TooLong on candidate 0 or candidate 1 even when confident and no SINIT.
+        assert_eq!(m.rerank(&ng_confident[..2], &[&long, short], "", chat, &[], &Default::default()).unwrap_err(), TinyLmError::TooLong);
+        assert_eq!(m.rerank(&ng_confident[..2], &[short, &long], "", chat, &[], &Default::default()).unwrap_err(), TinyLmError::TooLong);
+
+        // Candidate past TOPK (index TOPK) is outside `cands[..n]`, so it does not trigger TooLong and skips normally.
+        let mut nine = vec![short; TOPK + 1];
+        nine[TOPK] = &long;
+        assert_eq!(m.rerank(&ng_confident, &nine, "", chat, &[], &Default::default()).unwrap(), (0, None));
+
+        // Invalid params still return Format even when confident.
+        for bad in [(f64::NAN, 2.0, 0.0), (f64::INFINITY, 2.0, 0.0), (0.7, f64::NAN, 0.0), (0.7, 2.0, -0.25), (0.7, 2.0, f64::NAN), (0.7, 2.0, MAX_DELTA + 1.0)] {
+            assert_eq!(m.rerank(&ng_confident[..2], &[short, short], "", bad, &[], &Default::default()).unwrap_err(), TinyLmError::Format);
+        }
+    }
+
+    #[test]
+    fn rerank_nan_ng_and_inf_tau_do_not_skip() {
+        let m = TinyLm::parse(&random_file(false)).unwrap();
+        let owned = test_cands(2);
+        let cands: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let chat = m.alpha_tau_delta(Profile::Chat);
+
+        assert!(m.rerank(&[f64::NAN, -5.0], &cands, "", chat, &[], &Default::default()).unwrap().1.is_some());
+        assert!(m.rerank(&[0.0, f64::NAN], &cands, "", chat, &[], &Default::default()).unwrap().1.is_some());
+        assert!(m.rerank(&[0.0, -10.0], &cands, "", (0.7, f64::INFINITY, 0.0), &[], &Default::default()).unwrap().1.is_some());
+    }
+
+    #[test]
+    fn rerank_sinit_nonzero_b_does_not_skip() {
+        let m = TinyLm::parse(&random_file(false)).unwrap();
+        let owned = test_cands(3);
+        let cands: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let chat = m.alpha_tau_delta(Profile::Chat);
+        let ng = [0.0, -5.0, -6.0];
+
+        for layer in [SinitLayer::Fine, SinitLayer::Mid, SinitLayer::Coarse] {
+            for b in [vec![1.0, 0.0, 0.0], vec![0.0, 1.0, 0.0], vec![0.0, 0.0, f64::NAN]] {
+                let learn = Learning { layer, scale: 1.0, b };
+                assert!(m.rerank(&ng, &cands, "", chat, &[], &learn).unwrap().1.is_some(), "{layer:?} must not skip with non-zero b");
+            }
+        }
+
+        // Non-zero entry past `n` (cands.len()) is outside `b[..n]`, so it still skips.
+        let learn_past_n = Learning { layer: SinitLayer::Fine, scale: 1.0, b: vec![0.0, 0.0, 0.0, 1.0] };
+        assert_eq!(m.rerank(&ng, &cands, "", chat, &[], &learn_past_n).unwrap(), (0, None));
+    }
+
+    #[test]
+    fn rerank_masked_second_candidate_does_not_change_skip() {
+        let m = TinyLm::parse(&random_file(false)).unwrap();
+        let owned = test_cands(3);
+        let cands: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let chat = m.alpha_tau_delta(Profile::Chat);
+
+        assert_eq!(m.rerank(&[0.0, -2.5, -3.0], &cands, "", chat, &[false, true, false], &Default::default()).unwrap(), (0, None));
+        assert!(m.rerank(&[0.0, -1.5, -3.0], &cands, "", chat, &[false, true, false], &Default::default()).unwrap().1.is_some());
+    }
+
+    #[test]
+    fn rerank_colloquial_skip_eff_tau_too_long_sinit_and_with_ll() {
+        let dir = std::env::temp_dir().join(format!("shanjie-tinylm-colloq-skip-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sjlm = dir.join("tiny.sjlm");
+        let mut bytes = b"SJLM0001".to_vec();
+        bytes.extend(4u32.to_le_bytes());
+        bytes.extend(10u64.to_le_bytes());
+        bytes.extend(4u64.to_le_bytes());
+        bytes.extend(0.0f64.to_le_bytes()); // d = 0 -> unknown word at start gives -inf col
+        for w in ["<s>", "</s>", "a", "b"] {
+            bytes.extend((w.len() as u16).to_le_bytes());
+            bytes.extend(w.as_bytes());
+        }
+        for u in [0u64, 0, 6, 4] {
+            bytes.extend(u.to_le_bytes());
+        }
+        bytes.extend(2u32.to_le_bytes());
+        for c in [0u32, 2] {
+            bytes.extend(c.to_le_bytes());
+        }
+        for t in [5u64, 4] {
+            bytes.extend(t.to_le_bytes());
+        }
+        for o in [0u32, 2, 3] {
+            bytes.extend(o.to_le_bytes());
+        }
+        bytes.extend(3u32.to_le_bytes());
+        for n in [2u32, 3, 1] {
+            bytes.extend(n.to_le_bytes());
+        }
+        for c in [3u32, 2, 2] {
+            bytes.extend(c.to_le_bytes());
+        }
+        std::fs::write(&sjlm, &bytes).unwrap();
+        let co = Colloquial::load(&sjlm, "", &b""[..], None).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut m = TinyLm::parse(&random_file(false)).unwrap();
+        // Make plain.tau (4.0) differ from colloquial::cell(Standard).1 (2.0).
+        m.chat[RerankLevel::Standard as usize].1 = 4.0;
+        let owned = test_cands(2);
+        let cands: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let words_finite = [vec!["a"], vec!["b"]];
+        let words_nonfinite = [vec!["a"], vec!["unk"]];
+
+        // Finite col uses cell.tau = 2.0.
+        assert_eq!(m.rerank_colloquial(&[0.0, -2.0], &cands, &words_finite, "", &co, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None));
+        assert!(m.rerank_colloquial(&[0.0, -(2.0 - 1e-9)], &cands, &words_finite, "", &co, RerankLevel::Standard, &[], &Default::default()).unwrap().1.is_some());
+
+        // Non-finite col falls back to plain.tau = 4.0.
+        assert!(m.rerank_colloquial(&[0.0, -2.5], &cands, &words_nonfinite, "", &co, RerankLevel::Standard, &[], &Default::default()).unwrap().1.is_some());
+        assert_eq!(m.rerank_colloquial(&[0.0, -4.0], &cands, &words_nonfinite, "", &co, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None));
+
+        // rerank_colloquial_with_ll forces ll even when confident.
+        let (chosen, ll) = m.rerank_colloquial_with_ll(&[0.0, -2.5], &cands, &words_finite, "", &co, RerankLevel::Standard, &[], &Default::default()).unwrap();
+        assert_eq!(chosen, 0);
+        assert!(ll.is_some());
+
+        // n < 2 returns (0, None); TooLong checked before skip; SINIT prevents skip.
+        assert_eq!(m.rerank_colloquial(&[0.0, -5.0], &cands, &words_finite[..1], "", &co, RerankLevel::Standard, &[], &Default::default()).unwrap(), (0, None));
+        let long = "\u{4e00}".repeat(m.ctx);
+        assert_eq!(m.rerank_colloquial(&[0.0, -10.0], &[cands[0], &long], &words_finite, "", &co, RerankLevel::Standard, &[], &Default::default()).unwrap_err(), TinyLmError::TooLong);
+        let learn = Learning { layer: SinitLayer::Fine, scale: 1.0, b: vec![0.0, 1.0] };
+        assert!(m.rerank_colloquial(&[0.0, -5.0], &cands, &words_finite, "", &co, RerankLevel::Standard, &[], &learn).unwrap().1.is_some());
     }
 }

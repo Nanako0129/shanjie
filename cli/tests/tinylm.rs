@@ -526,3 +526,146 @@ fn a_boundary_model_keys_cli_rows_with_key_for_len() {
     assert!(sep_rows >= 1, "the rows must reach a key with [SEP]");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// Verifies that `stderr` has a `tinylm: rerank n=...` line matching both `tools/bench.py`'s `RERANK` regex and
+/// `scripts/ci/latency_gate.py`'s `RERANK` regex, returning `(n, rows_kept_first)`.
+fn parse_and_assert_rerank_stderr_line(stderr: &str) -> (usize, usize) {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let float_chars = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit() || b == b'.');
+    let rss_val = |s: &str| s == "None" || (s.starts_with("Some(") && s.ends_with(')') && digits(&s[5..s.len() - 1]));
+
+    let line = stderr
+        .lines()
+        .find(|l| l.starts_with("tinylm: rerank n="))
+        .unwrap_or_else(|| panic!("missing `tinylm: rerank n=...` line in stderr:\n{stderr}"));
+
+    let rest = line.strip_prefix("tinylm: rerank n=").unwrap();
+    let (n_str, rest) = rest.split_once(" p50=").unwrap_or_else(|| panic!("bad p50 in {line:?}"));
+    assert!(digits(n_str), "bad n in {line:?}");
+    let (p50_str, rest) = rest.split_once(" ms p95=").unwrap_or_else(|| panic!("bad p95 in {line:?}"));
+    assert!(float_chars(p50_str), "bad p50 float in {line:?}");
+    let (p95_str, rest) = rest
+        .split_once(" ms; rows kept first (candidate over the context) ")
+        .unwrap_or_else(|| panic!("bad rows kept first in {line:?}"));
+    assert!(float_chars(p95_str), "bad p95 float in {line:?}");
+    let (long_str, rest) = rest.split_once("; load ").unwrap_or_else(|| panic!("bad load in {line:?}"));
+    assert!(digits(long_str), "bad long count in {line:?}");
+    let (load_str, rest) = rest.split_once(" ms, rss ").unwrap_or_else(|| panic!("bad rss in {line:?}"));
+    assert!(digits(load_str), "bad load ms in {line:?}");
+    let (rss_a, rest) = rest.split_once(" -> ").unwrap_or_else(|| panic!("bad rss arrow in {line:?}"));
+    assert!(rss_val(rss_a), "bad rss_before in {line:?}");
+    let (rss_b, _tail) = rest.split_once(" KiB").unwrap_or_else(|| panic!("bad KiB in {line:?}"));
+    assert!(rss_val(rss_b), "bad rss_after in {line:?}");
+    (n_str.parse().unwrap(), long_str.parse().unwrap())
+}
+
+/// docs/spec/semantic-rerank.md §9: `--tinylm-scores` forces full `"ll"` output on confident rows (`ng[0] - ng[1] >= tau`) without
+/// printing `tinylm: rerank skipped=`; normal mode skips those confident rows (excluding `n < 2` and `TooLong`), prints a separate
+/// `tinylm: rerank skipped=<N>` line, and keeps `tinylm: rerank n=...` compatible with both `latency_gate.py` and `tools/bench.py`.
+#[test]
+fn scores_keeps_ll_on_confident_rows_and_normal_mode_reports_skipped() {
+    let lm = lm_path();
+    let (dir, sjtl) = tmp_with_sjtl("skip-cli", Path::new(&lm));
+    let tau = core::tinylm::TinyLm::load(Path::new(&sjtl)).unwrap().alpha_tau_delta(core::lm::Profile::Chat).1;
+
+    let rows = dir.join("rows.txt");
+    let src = std::fs::read_to_string(root().join("eval/dev/homophones.txt")).unwrap();
+    let mut text_rows: Vec<String> = src.lines().filter(|l| l.split('|').count() == 3).take(40).map(String::from).collect();
+    // Add an n < 2 row (single lexicon candidate) and a TooLong row (> 63 chars).
+    text_rows.push("|蔔|ㄅㄛ˙".to_string());
+    text_rows.push(format!("|{}|{}", "你好".repeat(32), vec!["ㄋㄧˇ ㄏㄠˇ"; 32].join(" ")));
+    std::fs::write(&rows, text_rows.join("\n") + "\n").unwrap();
+
+    let scores_file = dir.join("scores.jsonl");
+    let o_scores = run(&[
+        "--lm", &lm,
+        "--profile", "chat",
+        "--rows", rows.to_str().unwrap(),
+        "--tinylm", &sjtl,
+        "--tinylm-scores", scores_file.to_str().unwrap(),
+        "--threads", "1",
+    ]);
+    assert!(o_scores.status.success(), "{}", text(&o_scores.stderr));
+    assert!(
+        !text(&o_scores.stderr).contains("tinylm: rerank skipped="),
+        "scores mode must not print skipped line: {}",
+        text(&o_scores.stderr)
+    );
+
+    let mut confident_rows = 0usize;
+    let mut non_confident_rows = 0usize;
+    let mut n_lt_2_rows = 0usize;
+    let mut too_long_rows = 0usize;
+    for line in std::fs::read_to_string(&scores_file).unwrap().lines() {
+        let ng = list_of(line, "ng");
+        let has_ll = line.contains("\"ll\": [");
+        if ng.len() < 2 {
+            assert!(!has_ll, "n < 2 must have no ll: {line}");
+            n_lt_2_rows += 1;
+        } else if !has_ll {
+            too_long_rows += 1;
+        } else {
+            let ll = list_of(line, "ll");
+            assert_eq!(ll.len(), ng.len().min(8), "confident and non-confident rows keep full ll: {line}");
+            if ng[0] - ng[1] >= tau {
+                confident_rows += 1;
+            } else {
+                non_confident_rows += 1;
+            }
+        }
+    }
+    assert!(confident_rows > 0, "need at least one confident row");
+    assert!(non_confident_rows > 0, "need at least one non-confident row");
+    assert!(n_lt_2_rows >= 1, "need at least one n < 2 row");
+    assert!(too_long_rows >= 1, "need at least one TooLong row");
+
+    let o_norm = run(&[
+        "--lm", &lm,
+        "--profile", "chat",
+        "--rows", rows.to_str().unwrap(),
+        "--tinylm", &sjtl,
+        "--threads", "1",
+    ]);
+    assert!(o_norm.status.success(), "{}", text(&o_norm.stderr));
+    assert_eq!(o_norm.stdout, o_scores.stdout, "normal mode summary matches --tinylm-scores");
+    let stderr = text(&o_norm.stderr);
+    let want_skip_line = format!("tinylm: rerank skipped={confident_rows}");
+    assert!(
+        stderr.lines().any(|l| l == want_skip_line),
+        "expected standalone `{want_skip_line}` in stderr:\n{stderr}"
+    );
+    let (n, long_kept) = parse_and_assert_rerank_stderr_line(&stderr);
+    assert_eq!(n, non_confident_rows, "latency n must count only non-skipped evaluated rows");
+    assert_eq!(long_kept, too_long_rows, "TooLong count must be preserved");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// docs/spec/semantic-rerank.md §9: when all multi-candidate non-TooLong rows are skipped (`rerank.is_empty()`), normal mode exits 0,
+/// still prints `tinylm: rerank skipped=<N>`, and does not print an empty `tinylm: rerank n=0` line.
+#[test]
+fn all_confident_rows_exit_zero_and_print_skipped_without_empty_latency_line() {
+    let lm = lm_path();
+    let (dir, sjtl) = tmp_with_sjtl("all-skip", Path::new(&lm));
+    let mut b = std::fs::read(&sjtl).unwrap();
+    for at in [44, 60] {
+        b[at..at + 8].copy_from_slice(&0.0f64.to_le_bytes());
+    }
+    let tau0_sjtl = dir.join("tau0.sjtl");
+    std::fs::write(&tau0_sjtl, b).unwrap();
+
+    let rows = dir.join("rows.txt");
+    std::fs::write(&rows, "|你好|ㄋㄧˇ ㄏㄠˇ\n|我們|ㄨㄛˇ ㄇㄣˊ\n|今天|ㄐㄧㄣ ㄊㄧㄢ\n").unwrap();
+
+    let o = run(&[
+        "--lm", &lm,
+        "--profile", "chat",
+        "--rows", rows.to_str().unwrap(),
+        "--tinylm", tau0_sjtl.to_str().unwrap(),
+        "--threads", "1",
+    ]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let stderr = text(&o.stderr);
+    assert!(stderr.lines().any(|l| l == "tinylm: rerank skipped=3"), "stderr:\n{stderr}");
+    assert!(!stderr.contains("tinylm: rerank n="), "must not print empty latency line:\n{stderr}");
+    std::fs::remove_dir_all(dir).unwrap();
+}

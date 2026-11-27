@@ -251,3 +251,65 @@ fn the_job_keeps_the_decoders_order() {
     assert!(s.windows(2).all(|w| w[0] >= w[1]), "the order sorts ng + bonus");
     assert_eq!(job.sinit_weights()[0].len(), cands[0].len());
 }
+
+/// docs/spec/semantic-rerank.md §3.1.1, §3.3: when `pool_order` reorders `s.order[0] != 0` and post-reorder `ng'[0] - ng'[1] >= eff_tau`
+/// with no SINIT, `RerankJob::run` skips the TinyLM forward pass (`TinyLm::rerank` returns `(0, None)`) yet still maps `view[0]` back to
+/// `s.order[0]` and `Engine::apply_rerank` applies the recurrence winner.
+#[test]
+fn confident_skip_still_applies_reordered_pool_winner() {
+    use core::tinylm::{RerankLevel, TinyLm};
+
+    // Copy the shipping model and set formal standard `tau = 0.5` (offset 60) so post-reorder `ng'[0] - ng'[1] (~0.888) >= tau`
+    // while the decoder's first candidate before `pool_order` remains `神秘也錯字`.
+    struct TmpFile(PathBuf);
+    impl Drop for TmpFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let tmp_path = std::env::temp_dir().join(format!("shanjie-pool-recur-tau05-{}.sjtl", std::process::id()));
+    let mut bytes = std::fs::read(data("tinylm.sjtl")).unwrap();
+    bytes[60..68].copy_from_slice(&0.5f64.to_le_bytes());
+    std::fs::write(&tmp_path, bytes).unwrap();
+    let _guard = TmpFile(tmp_path.clone());
+
+    let mut e = engine(Profile::Formal, true);
+    e.load_tinylm(&tmp_path).unwrap();
+    e.set_left_context(LEFT);
+    let mut job = None;
+    let mut preedit = String::new();
+    for k in READING.split(' ').flat_map(keys_of) {
+        preedit = e.key(k).unwrap().preedit;
+        job = e.take_rerank_job().or(job);
+    }
+    assert_eq!(preedit, BASE_NO_TINYLM[1], "premise: decoder first is 神秘也錯字 before apply_rerank");
+    let job = job.expect("a job");
+    let (cands, ng, order, bonus, sinit) = (job.candidates(), job.ng_scores(), job.pool_order(), job.pool_bonus(), job.sinit_weights());
+    assert_eq!(cands.len(), 1);
+    let winner = order[0][0];
+    assert_ne!(winner, 0, "premise: pool_order lifts a non-0 candidate to view[0]");
+    assert_eq!(cands[0][winner], "神祕也錯字");
+    assert!(sinit[0].iter().all(|&b| b == 0.0), "premise: no SINIT");
+
+    let ng_reordered: Vec<f64> = order[0].iter().map(|&i| ng[0][i] + bonus[0][i]).collect();
+    let tl = TinyLm::load(&tmp_path).unwrap();
+    let params = tl.params(Profile::Formal, RerankLevel::Standard);
+    assert_eq!(params.1, 0.5);
+    assert!(
+        ng_reordered[0] - ng_reordered[1] >= params.1,
+        "premise: post-reorder margin {} >= tau {}",
+        ng_reordered[0] - ng_reordered[1],
+        params.1
+    );
+
+    let res = job.run();
+    let cands_reordered: Vec<&str> = order[0].iter().map(|&i| cands[0][i].as_str()).collect();
+    assert_eq!(
+        tl.rerank(&ng_reordered, &cands_reordered, &res.keys()[0], params, &[], &Default::default()).unwrap(),
+        (0, None),
+        "TinyLm::rerank skips the forward pass on the reordered confident stretch"
+    );
+    assert_eq!(res.picks(), vec![winner]);
+    let applied = e.apply_rerank(res).unwrap().expect("apply_rerank changes preedit to view[0]");
+    assert_eq!(applied.preedit, "神祕也錯字");
+}
