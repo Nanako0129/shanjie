@@ -180,19 +180,20 @@
 
 ## 3. 名單層 `names-add.tsv`
 
-常開的專有名詞層（公司、品牌、學校、店家、餐廳、飯店、軟體、創作者與節目名）。載入規則見 §1.1；標籤 `names`（主流程）、`creator`、`store`（檔尾追加）。`tools/build_names.py` 產生；`names-add.tsv`、`names-sources.tsv`、`names.json` 以 CC BY-SA 4.0 散布，`names-manual.tsv`、`names-readings.tsv`、`names-creators.tsv`、`names-stores.tsv` 是 CC0 的建置輸入，不隨 App 內附。名單層另有一份英文寫法 `names-english.txt`（CC0，本專案自寫，編進核心；規則見 `docs/spec/english-mixed.md` §4.4）。
+常開的專有名詞層（公司、品牌、車站、醫院與大型醫療院所、商場影城夜市藝文場館、地名重劃區與山岳步道、學校、店家、餐廳、飯店、軟體、創作者與節目名）。載入規則見 §1.1；標籤 `names`（主流程）、`creator`、`store`（檔尾追加）。`tools/build_names.py` 產生；`names-add.tsv`、`names-sources.tsv`、`names.json`、`names-collisions.tsv`、`names-kept-c.tsv` 以 CC BY-SA 4.0 散布（後兩者為建置輸入，不隨 App 內附），`names-manual.tsv`、`names-readings.tsv`、`names-creators.tsv`、`names-stores.tsv` 是 CC0 的建置輸入，不隨 App 內附。名單層另有一份英文寫法 `names-english.txt`（CC0，本專案自寫，編進核心；規則見 `docs/spec/english-mixed.md` §4.4）。
 
 ### 3.1 檔案與載入
 
 | 檔 | 內容 |
 |---|---|
 | `names-add.tsv` | 疊加層格式；先 `names` 列，再 `creator` 列，再 `store` 列 |
-| `names-sources.tsv` | 每個詞的來源：`word`、`source_kind`、`sources`、`qid`、`note`（`POLY` 表示含多音字） |
-| `names.json` | 版號 `nsi<NSI commit 前 8 碼>-moe<學年度>-<names-add.tsv 雜湊前 8 碼>`、各來源詞數、各過濾丟掉的數量、未處置的同音衝突讀音數、每個檔的 SHA-256 |
+| `names-sources.tsv` | 每個詞的來源：`word`、`source_kind`（`nsi`、`nsi-wikipedia`、`category`、`school`、`school-abbr`、`opendata`、`hospital-abbr`、`manual`、`creator`、`store`）、`sources`、`qid`、`note`（`POLY` 表示含多音字） |
+| `names.json` | 版號 `nsi<NSI commit 前 8 碼>-moe<學年度>-<names-add.tsv 雜湊前 8 碼>`、各來源詞數、各過濾丟掉的數量（含 `reserved_for_creator_store`）、`opendata` 清單（47 檔雜湊、列數、`emitted` 產出詞數與 `nhi_as_of`）、`skipped_subcategories`（被排除的維基子分類）、`kept_c`（受 `names-kept-c.tsv` 豁免之不重複 `(讀音, 詞)` 對數）、未處置的同音衝突讀音數、每個檔的 SHA-256 |
 | `names-manual.tsv` | 人工補的名字：詞、備註、選填讀音 |
 | `names-readings.tsv` | 人工核對過的整名讀音：名字、讀音（音節數要等於字數） |
 | `names-collisions.tsv` | 同音衝突的處置（人工維護的輸入，建置只讀不改） |
-| `names-creators.tsv`、`names-stores.tsv` | 創作者與店家名字的來源檔（§3.5） |
+| `names-kept-c.tsv` | 讓名單詞排第一的已出貨名字清單（10 個既出貨 `names` 詞，免於類型 `(c)` 自動剔除；建置輸入，不隨 App 內附，CC BY-SA 4.0，見 §3.4） |
+| `names-creators.tsv`、`names-stores.tsv` | 創作者（166 詞）與店家名字（231 詞）的來源檔（§3.5） |
 | `names-english.txt` | 名單層的英文寫法：一行一個寫法（`[A-Za-z]{3,32}`、至少一個大寫字母，`#` 開頭的行與空行略過），和 `data/english-extra.txt` 合成一張正式寫法表，小寫不得重複。編進核心，不由 `tools/build_names.py` 產生、不隨資料夾載入、不受 `--no-names` 影響 |
 
 - 引擎一律載入 `names-add.tsv`（缺檔是載入失敗）；評測 CLI 的 `--no-names` 才把它拿掉。名單層的詞照 §1.4 封頂；名單層的分數已含 `NAMES_BONUS`，載入端不另外加。
@@ -201,13 +202,19 @@
 
 來源與規則（`names-add.tsv` 的 `names` 列）：
 
-1. **name-suggestion-index（NSI）**，BSD-3-Clause，釘一個 commit（`NSI_COMMIT`；`--nsi-commit` 可覆寫）。類別固定 17 個：`amenity/` 的 cafe、restaurant、fast_food、bank、fuel、pharmacy，`shop/` 的 convenience、supermarket、department_store、mall、electronics、mobile_phone、clothes、cosmetics、bakery、tea、beverages。台灣品牌 = `locationSet.include` 有 `tw` 且 `exclude` 沒有 `tw`（`001` 全球不算）。取名字依序 `name:zh-Hant`、`name:zh-TW`、`name:zh`、`brand:zh-Hant`、`brand:zh`、`name`、`brand`，取第一個「全部是漢字、沒有簡體專用字」的值；沒有可用的名字就略過。
-2. **Wikidata（CC0）＋中文維基**：NSI 的 `brand:wikidata` 有中文維基 sitelink 時，也收該條目在 `variant=zh-tw` 下的顯示標題（去掉消歧義括號）；中文維基分類（`Category:台灣手搖茶飲品牌`、`台灣餐飲公司`、`台灣公司`、`台灣電子商務網站`、`臺灣的大學`，各取分類內條目與一層子分類；不存在的分類記在 `names.json` 的 `categories`、不自動換名）。所有維基標題一律取 zh-tw 的顯示標題。分類來源的名字去掉公司後綴（股份有限公司、有限公司、公司、集團，長的先試，剩下不到兩個字就不去）；分類來源裡結尾是「列表」的條目不是名字。
+1. **name-suggestion-index（NSI）**，BSD-3-Clause，釘一個 commit（`NSI_COMMIT`；`--nsi-commit` 可覆寫）。類別固定 32 個，皆於 `/data/brands/` 白名單內：`amenity/`（9）的 cafe、restaurant、fast_food、bank、fuel、pharmacy、ice_cream、parcel_locker、cinema，`office/`（2）的 insurance、estate_agent，`shop/`（20）的 convenience、supermarket、department_store、mall、electronics、mobile_phone、clothes、cosmetics、bakery、tea、beverages、optician、furniture、sports、variety_store、books、pet、car、motorcycle、telecommunication，`tourism/`（1）的 hotel。台灣品牌 = `locationSet.include` 有 `tw` 且 `exclude` 沒有 `tw`（`001` 全球不算）。取名字依序 `name:zh-Hant`、`name:zh-TW`、`name:zh`、`brand:zh-Hant`、`brand:zh`、`name`、`brand`，取第一個「全部是漢字、沒有簡體專用字」的值；沒有可用的名字就略過。
+2. **Wikidata（CC0）＋中文維基**：NSI 的 `brand:wikidata` 有中文維基 sitelink 時，也收該條目在 `variant=zh-tw` 下的顯示標題（去掉消歧義括號）。中文維基分類（`WIKI_CATEGORIES`）依分類指定展開深度：既有 3 類（`Category:台灣手搖茶飲品牌`、`Category:台灣餐飲公司`、`Category:台灣公司`）維持 `depth=1`（取直屬頁與一層子分類，並移除已不存在的 `Category:台灣電子商務網站`、`Category:臺灣的大學`）；新增 27 類全採 `depth=0`（只抓直屬頁，不展開子分類）：企業與通路 8 類（`Category:臺灣電子商務`、`Category:臺灣網路書店`、`Category:台灣新聞網站`、`Category:台灣零售商`、`Category:臺灣電信業公司`、`Category:台灣航空公司`、`Category:台灣房屋仲介業`、`Category:臺灣物流公司`）、商場與場館 11 類（`Category:台灣購物中心`、`Category:台灣百貨公司`、`Category:台灣暢貨中心`、`Category:台灣連鎖電影院`、`Category:台灣電影院`、`Category:台灣夜市`、`Category:台灣表演藝術場地`、`Category:台灣音樂廳`、`Category:台灣文化藝術中心`、`Category:中華民國文化部指定文化園區`、`Category:台灣當代藝術館`）、山岳步道與地名 8 類（`Category:台灣百岳`、`Category:台灣小百岳`、`Category:台灣古道`、`Category:臺灣國家步道`、`Category:臺灣區域步道`、`Category:台灣重劃區`、`Category:市地重劃區`、`Category:臺灣老街`）。任何 `depth=1` 分類強制套用 `EXCLUDED_SUBCATS`（明列 `Category:臺灣醫院院長` 等）與傳記／職稱子分類關鍵字過濾 `BIO_SUBCAT_RE`（`院長|人物|創辦人|董事長|總裁|執行長|館長|校長|校友|員工|企業家|政治人物|藝人|歌手|演員|導演|作家`），被跳過之子分類全數記錄於 `names.json` 的 `skipped_subcategories`；不存在的分類記在 `names.json` 的 `categories`、不自動換名。所有維基標題一律取 zh-tw 的顯示標題；分類來源的名字去掉公司後綴（股份有限公司、有限公司、公司、集團，長的先試，剩下不到兩個字就不去）；分類來源裡結尾是「列表」的條目不是名字。
 3. **教育部統計處學校名錄**（政府資料開放授權條款第 1 版）：大專校院與一般高級中等學校兩個 CSV，只取「學年度」是數字且等於該檔最大學年度的列；學校簡稱（政大、清大）只收中文維基有重定向到該校條目、且比全名短、是全名的子序列（台、臺視為同字）的標題。
-4. **手動補** `names-manual.tsv`。
-5. 所有名字要全部是漢字、2–10 字，含英文、數字、符號的整個不收（不截取漢字部分），含簡體專用字的不收。
+4. **本地預解政府開放資料歸檔與醫院簡稱重定向**：透過 `--open-data-dir DIR`（預設 `$SHANJIE_CACHE/names-src`）與固定註冊表 `OPEN_DATA_SPECS` 讀取五大非人名類別共 **47 份政府開放資料集**（橫跨 30 個提供機關／23 個開放資料主機，政府資料開放授權條款第 1 版）。`build()` 一律直接讀取本地已預先核對之檔案（讀檔前逐檔校驗 `SHA256SUMS`，不符或短缺即中止，不於執行期線上抓取或解壓 `.rar`/`.zip`，僅國土測繪 `73225`/`73226`/`73230`/`73233` 依標準庫 `zipfile` 讀本地 `.zip` 內 `.dbf`），並將每檔雜湊、列數與固定截止日 `NHI_AS_OF = "20261127"` 寫入 `names.json` 的 `opendata` 欄：
+   - 台灣軌道運輸車站（11 檔：`33425`、`73225`、`73226`、`73230`、`73233`、`131734`、`121140`、`128394`、`144164`、`88233`、`102184`）：過濾含 `出口`／`出入口` 列、剝離路線前綴與編號尾綴（`131734` 先剝除外層單引號 `'` 再自 `'{中文,English}'` 取中文段）、清除 CSV 雙重及欄內 BOM，由臺鐵與捷運純漢字站名衍生 `<站名>站`／`<站名>車站`／`捷運<站名>站`，輕軌站保留原純漢字站名。
+   - 台灣醫院與大型醫療院所（5 檔：`39280`、`39281`、`39282`、`6271`、`136354`）：健保署三檔以固定常數 `NHI_AS_OF = "20261127"` 過濾有效合約列（不讀系統時鐘）；剝除 BOT 委託尾綴、`及其...`、`附設民眾診療服務處...`、法人及宗教前綴，並映射 `^衛生福利部(.+醫院)$` → `部立\1`。另對正規化後醫院全名（不先套 10 字截斷）批次呼叫 `resolve_titles` 與 `redirects_of()`，依 `is_abbreviation` 收錄 2–10 純漢字非簡體通用簡稱（`source_kind` 標 `hospital-abbr`，絕不爬醫院分類子樹）。
+   - 台灣企業、金融保險與券商（9 檔：`18419`、`25036`、`28568`、`28567`、`20765`、`11545`、`6041`、`28775`、`7186`）：上市／上櫃／興櫃／公開發行收 `公司名稱`（拒收含 Big5 拆字佔位如 `(牛牛牛)` 之異常列，套 `strip_company`）與 `公司簡稱`（去尾端 `*`、`股份`、`-KY` 等，限 `≥ 3` 純漢字）；`6041` 僅取 `機構代號 == ""` 總機構；`28775` 金控衍生 `<簡稱>金控`；`7186` 剝除括號備註並對應 `人壽保險事業` → `人壽`、`產物保險` → `產險`。
+   - 台灣百貨商場、影城、夜市與藝文場館（13 檔：`6242`、`6244`、`22213`、`164242`、`164266`、`38257`、`7777`、`6848`、`121594`、`25965`、`85028`、`53634`、`47005`）：五都夜市依實測編碼讀取（`121594` 採 `cp950`，其餘採 `utf-8-sig` 並清除多餘 BOM），剝除括號與 `攤販集中區`／`攤販臨時集中場` 後一律要求以 `夜市` 結尾；`7777` 全國景點僅取結尾符合專名場館與步道後綴集合之 2–10 純漢字條目。
+   - 台灣在地地名、重劃區與山岳步道（9 檔：`71520`、`37675`、`9963`、`9968`、`140066`、`125432`、`123714`、`46397`、`53421`）：`9968` XML（`cp950`）先跳脫裸 `&`；`140066` 依頓號分割；剔除含 `?` 損毀列；重劃區去除換行、期別尾綴與前綴行政區名，保留 2–10 純漢字短稱。
+5. **手動補** `names-manual.tsv`。
+6. **統一字形過濾與既有 `creator`/`store` 保護**：所有名字要全部是漢字、2–10 字，含英文、數字、符號的整個不收（不截取漢字部分），含簡體專用字的不收。主流程同時讀取 `names-creators.tsv` 與 `names-stores.tsv`（可注入參數）：既有 `creator`/`store` 字串不重複進 `names` 段，且新候選詞若與既有已出貨 `creator`/`store` 讀音相同，自動讓位不加入 `names` 段（記錄於 `dropped["reserved_for_creator_store"]`），確保既有 166 筆 `creator` 與 231 筆 `store` 零流失、零被擋。
 
-不收已在基底、`overlay-add.tsv`、`sandhi-add.tsv`、動漫詞包（以及存在時的迷因詞包）任何讀音下的字串；建置最後再檢查輸出與這些檔的詞集合交集為空（`check_disjoint`），不為空就中止。`python3 tools/build_names.py --check` 與 `make test-python` 對已提交的檔做同一件檢查。
+不收已在基底（`mcbpmf-data.txt`）、`overlay-add.tsv`、`sandhi-add.tsv`、以及 5 個詞包（`acg-add.tsv`、`it-add.tsv`、`meme-add.tsv`、`beauty-add.tsv`、`quotes-add.tsv`）任何讀音下的字串；`known_words()`、`check_disjoint()`、`check_committed()` 與 `append_creators()` 完整涵蓋這 **9 份詞庫／詞包詞檔**（`names-add.tsv` 與其餘 8 份檔交集為空），不為空就中止。`python3 tools/build_names.py --check` 與 `make test-python` 對已提交的檔做同一件檢查。`build()` 並將 `open_data_specs`、`open_data_dir`、`creators_tsv`、`stores_tsv`、`kept_c_tsv`、`it_add`、`beauty_add`、`quotes_add` 設計為可注入參數（`open_data_dir=None` 且 `open_data_specs=()` 時不碰磁碟快取），使無本地歸檔的 CI 環境亦可隔離測試。
 
 ### 3.3 讀音與分數
 
@@ -220,17 +227,18 @@
 `build_names.py` 自己提供 `decode`：評測 CLI 加 `--no-names`（沒有名單的基準）與 `--extra-overlay`（候選名單），語言模型用 `data/lm` 的出貨模型，聊天與書面都解碼；不修改 `build_acg_pack.py`。
 
 - 類型 (c)：名字把既有詞庫的詞擠下第一名，不收（既有詞勝）；丟掉之後別的詞可能改變，重跑到沒有 (c) 為止（上限 `LEXICON_RULE_ROUNDS` = 5 輪，超過報錯）。
-- 類型 (a)：名單內同音，要在 `names-collisions.tsv` 有處置（欄位：讀音、保留的詞、排除的詞、理由；排除欄寫 `+詞` 表示兩個都留，`+` 後面是另一個留下的詞；同讀音的先後照列出現的順序，保留的詞在前）。
+  - `data/lexicon/names-kept-c.tsv`（仿 `data/packs/acg-kept-c.tsv`，CC BY-SA 4.0，建置輸入不隨 App 內附）：三欄以 Tab 分隔（`讀音\t名字詞\t被擠下的詞庫詞`），讀音採空白分隔音節以對齊 `acg-kept-c.tsv` 與 `detect_collisions` 鍵格式。載入時嚴格檢查三欄格式、音節數等於名字詞字數且 `(讀音, 名字詞)` 不重複，不符即中止。僅收已出貨之 10 筆名單詞（`卜蜂`、`臺中一中`、`臺南大學`、`臺灣電視`、`投高`、`南僑`、`歌林`、`國巨`、`爭鮮`、`映泰`），在 `(c)` 迴圈內對符合 `(讀音, 詞)` 之項目豁免自動剔除；後段彙整未處置清單 `col` 時僅略過 `e[1] == "c"` 且 `(r, w)` 屬於 `kept_c` 之項目，同一讀音上任何類型 `(a)` 或 `with_pack` 衝突仍完整保留檢查不遮蔽；`names.json["kept_c"]` 記錄實際觸發並豁免之不重複 `(讀音, 詞)` 對數。未列於 `names-kept-c.tsv` 的新詞一旦觸發類型 `(c)` 仍一律自動剔除。
+- 類型 (a)：名單內同音，要在 `names-collisions.tsv` 有處置（欄位：讀音、保留的詞、排除的詞、理由；排除欄寫 `+詞` 表示兩個都留，`+` 後面是另一個留下的詞；同讀音的先後照列出現的順序，保留的詞在前）。涉及基底同音且會拆斷既有較長已出貨詞之衝突（如舊學校重定向 `大里高中` 撞基底 `大理高中`），於 `names-collisions.tsv` 明列排除。
 - 名字與動漫詞包的詞同音（詞包預設開）：名字把詞包詞擠下第一名時一律當未處置的 (a)；處置列可以把詞包詞排在最前面、名字用 `+` 留著，這時名字在那個讀音的分數最多是「詞包詞的分數 − `TIE`」（`below_pack`）。
 - 未處置的列寫到 `build/names/collisions.txt`；`names.json` 的 `unresolved_collision_readings` 要是 0 才合併。
 - 其他報告：`unreadable.txt`、`check-readings.txt`。
 
 ### 3.5 創作者與店家名字（`--append-creators`，檔尾追加）
 
-- 來源檔 `names-creators.tsv`（實況主、YouTuber、VTuber、節目與頻道名，含台灣以外中文圈的名人；標籤 `creator`）與 `names-stores.tsv`（店家、餐廳、飯店、企業、軟體；標籤 `store`）：欄位為詞、讀音（音節以空白分隔）、備註，可選的第四欄加分；`#` 開頭與空行略過；CRLF 照 LF 讀。
+- 來源檔 `names-creators.tsv`（實況主、YouTuber、VTuber、節目與頻道名，含台灣以外中文圈的名人，166 詞；標籤 `creator`）與 `names-stores.tsv`（店家、餐廳、飯店、企業、軟體，231 詞，含前批跨 6 個月熱詞檢出併入之 `凱渥`、`威京集團`；標籤 `store`）：欄位為詞、讀音（音節以空白分隔）、備註，可選的第四欄加分；`#` 開頭與空行略過；CRLF 照 LF 讀。
 - 追加模式不重建既有名單：`names-add.tsv`／`names-sources.tsv` 去掉 `creator`、`store` 列後逐位元組保留，檔尾依序接 creator、store 的列（`names` → `creator` → `store`）；重跑換掉的是這兩種標籤的列；兩個來源檔都不存在或沒有資料列時什麼都不碰；`names.json` 的 `sources` 分別計兩種標籤。完整重建（不帶 `--append-creators`、`--out` 是詞庫資料夾）也會接著追加。追加不連網、不讀快取。
-- 每列要：詞是 2–10 個漢字、字數在分數表裡、不在 `taken`（基底、疊加層、名單其他列、詞包、前面的列）；讀音音節數等於字數，每個音節都是基底裡那個字的讀音（輕聲音節允許該字同音節的任何聲調）；同一個（詞, 讀音）重複中止。同一個詞可以有不同讀音的好幾列（只限同標籤）；店家不能用 creator 已有的詞（換讀音也不行）。不符就中止並指出路徑與行號。
-- 被擋掉（印到 stderr、不中止）：詞已在迷因詞包；讀音等於 `names` 既有列的讀音；店家的讀音等於 creator 列的讀音。
+- 每列要：詞是 2–10 個漢字、字數在分數表裡、不在 `taken`（基底、`overlay-add.tsv`、`sandhi-add.tsv`、名單其他列、全部 5 個詞包詞檔、前面的列）；讀音音節數等於字數，每個音節都是基底裡那個字的讀音（輕聲音節允許該字同音節的任何聲調）；同一個（詞, 讀音）重複中止。同一個詞可以有不同讀音的好幾列（只限同標籤）；店家不能用 creator 已有的詞（換讀音也不行）。不符就中止並指出路徑與行號。
+- 被擋掉（印到 stderr、不中止）：詞已在迷因詞包；讀音等於 `names` 既有列的讀音；店家的讀音等於 creator 列的讀音。經 §3.2 主流程對 `creator`/`store` 字串與讀音鍵預先讓位保護後，既有 166 筆 `creator` 與 231 筆 `store` 列在完整重建與追加時零筆被擋。
 - 分數 = 同字數的 `length_scores` + `NAMES_BONUS` + 加分 − 同標籤同讀音的名次 × `SLANG_BEHIND`（1.0）。檔案順序就是名次，工具不依備註的數字重排。加分必須是有限值、≥ 0，且只能放在同讀音的第一列。模型看過的詞被封頂，加分無效。含「一」「不」的詞照 `overlay_rows` 附變調列。
 - 收錄準則（來源檔的內容準則，工具不檢查）：名字取網友常打的中文寫法，純英文帳號與混字母的不收；台灣公開論壇的文章與推文用量（分區 ≥ 3、文章 ≥ 10，只取詞與計數）；同讀音的詞庫詞用量 ≥ 名字的不收；店家另外要出貨解碼器現在打錯、用量多於原本的第一名（例外：軟體名稱「善解」「善解輸入法」「唯音」「唯音輸入法」是本專案與合作輸入法的名稱，人工補、不看論壇用量，善解兩列原本就打得對，收進來是為了固定下來）；用量是子字串計數，被更長字串（全名、地名）灌水的短稱不收；名字字串來自外部語言模型的建議與人工補，只取名稱。
 - 驗證：`tools/test_build_names.py` 的 `AppendCreators`（既有列逐位元組不變且雜湊固定、同讀音的名次扣分、各種無效列、被擋列不中止、店家與 creator 的互斥、CRLF、第四欄加分、來源檔缺或空時完全不動）、`MainRebuild`。
@@ -241,9 +249,9 @@
 
 ### 3.7 抓取、重現與驗證
 
-- 抓取只連 `zh.wikipedia.org`、`www.wikidata.org` 的 `/w/api.php`，`raw.githubusercontent.com`（只限 NSI 那個 commit 的 `data/brands/` 路徑），`data.gov.tw` 與 `stats.moe.gov.tw` 的 CSV；其他網址與轉址到清單外都拒絕。限速、User-Agent、`maxlag` 沿用動漫詞包的 `Api`（每秒 ≤ 1 個請求）；一次建置請求 ≤ `MAX_REQUESTS`（3,000）、快取 ≤ `MAX_CACHE`（500,000,000 位元組），超過中止。`--offline` 只讀快取，缺檔中止。
-- 同一份快取離線建兩次，三個輸出檔逐位元組相同；建置前後 `names-collisions.tsv` 不變。
-- 測試（`make test-python`；`tools/test_build_names.py`，夾具由真實的 NSI 與名錄資料裁剪，不連網）：`Rules`（`locationSet`、取名順序、簡體判斷、名錄只取最大學年度、後綴、簡稱、各字數的分數）、`Fetching`（允許清單、轉址、請求與快取上限、離線）、`Build`（每個來源與過濾、四份檔任何讀音下的詞都不收、尾端交集檢查會中止、已提交的 `names-add.tsv` 與其他層沒有交集且分數有限、讀音表、(a)(c) 衝突與處置、兩次建置逐位元組相同、manifest）。
+- 抓取只連 `zh.wikipedia.org`、`www.wikidata.org` 的 `/w/api.php`，`raw.githubusercontent.com`（只限 NSI 那個 commit 的 `data/brands/` 路徑），`stats.moe.gov.tw` 的 CSV，以及 `OPEN_DATA_HOSTS` 註冊的 23 個台灣政府開放資料主機（`apiservice.mol.gov.tw`、`cloud.culture.tw`、`data.cip.gov.tw`、`data.kcg.gov.tw`、`data.moa.gov.tw`、`data.ntpc.gov.tw`、`data.tainan.gov.tw`、`data.taipei`、`file.moc.gov.tw`、`info.nhi.gov.tw`、`ins-info.ib.gov.tw`、`media.taiwan.net.tw`、`mopsfin.twse.com.tw`、`newdatacenter.taichung.gov.tw`、`ods.railway.gov.tw`、`opdadm.moi.gov.tw`、`opendata.tycg.gov.tw`、`stat.fsc.gov.tw`、`www.banking.gov.tw`、`www.ida.gov.tw`、`www.mnd.gov.tw`、`www.tgos.tw`、`www.twse.com.tw`；皆嚴格要求 `https`、無 port、無 userinfo）；其他網址與轉址到清單外都拒絕。限速、User-Agent、`maxlag` 沿用動漫詞包的 `Api`（每秒 ≤ 1 個請求），遇 `HTTP 429`/`503` 依 `Retry-After` 標頭禮貌休眠重試；維基標題查詢以每批 50 筆 `action=query`（`inprop=displaytitle|varianttitles`）為主，僅含 `Template:NoteTA` 或缺 `zh-tw` 標題之條目回退單頁 `action=parse`，批次鍵依排序標題決定以確保離線 100% 命中快取；一次建置請求 ≤ `MAX_REQUESTS`（3,500）、快取 ≤ `MAX_CACHE`（500,000,000 位元組，僅計入活抓快取目錄，不計入唯讀 `--open-data-dir`），超過中止。`--offline` 只讀快取；本地開放資料一律經 `--open-data-dir` 讀取預解檔並逐檔校驗 `SHA256SUMS`，缺檔或雜湊不符即中止。
+- 同一份快取離線建兩次，三個輸出檔逐位元組相同；建置前後 `names-collisions.tsv` 不變；`names.json` 中 `opendata` 全部 47 份資料集皆須滿足 `emitted > 0` 且 `kept_c == 10`。
+- 測試（`make test-python`；`tools/test_build_names.py`，夾具由真實的 NSI、名錄與 5 類開放資料裁剪，且 `build()` 支援注入參數於無快取的 CI 環境隔離執行）：`Rules`（`locationSet`、取名順序、簡體判斷、名錄只取最大學年度、後綴、簡稱、各字數的分數、5 類開放資料解析器與 `NHI_AS_OF` 固定截止日）、`Fetching`／`RateLimitRetry`／`TwTitlesBatch`（允許清單含 23 個 `OPEN_DATA_HOSTS`、轉址、請求與快取上限、`HTTP 429/503 Retry-After`、50 筆批次與 `NoteTA` 回退及離線重現、離線與 `SHA256SUMS` 校驗）、`KeptC`（`names-kept-c.tsv` 三欄與音節／重複列驗證、`(c)` 豁免與 `manifest["kept_c"]` 計數、同讀音類型 `(a)` 與 `with_pack` 衝突不被遮蔽）、`Build`（每個來源與過濾、傳記子分類排除、`hospital-abbr` 重定向、9 份詞庫／詞包詞檔任何讀音下的詞都不收、尾端交集檢查會中止、`creator`/`store` 讀音讓位保護、已提交的 `names-add.tsv` 與其他層沒有交集且分數有限、讀音表、(a)(c) 衝突與處置、兩次建置逐位元組相同、manifest）。
 - CI 的「Names lexicon builder」步驟跑整個 `tools/test_build_names.py`。
 
 ## 4. 詞包（各詞包共通）

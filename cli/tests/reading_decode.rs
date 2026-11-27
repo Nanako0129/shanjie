@@ -63,11 +63,12 @@ const FORMAL_TYPING76_DEFAULT: &str = "c6f729c37ffc6096151ab4acdbfd8f55457b6045c
 
 /// sha256 of the `--dump` file (all 64 candidates and their path scores) of the n-gram-only runs before the option existed.
 const DUMP_BEFORE: [(&str, &str, &str); 4] = [
-    // Both dev302 dumps remade when 部署 got its ㄕㄨˇ reading (docs/spec/lexicon-and-packs.md §2.9): only row 24 (他對部屬很好, typed ㄅㄨˋ ㄕㄨˇ) differs,
-    // where 部署 is now a candidate below the first; was 0ee1bb92… chat, aab77cf7… formal. Every first candidate is unchanged (部屬 stays first in row 24).
-    ("chat", "dev302", "f62110c0e2ad201ea33cbed2d20208dc74212ba9c2762001b7e4f5f83fafa622"),
+    // Both dev302 dumps remade when 部署 got its ㄕㄨˇ reading (docs/spec/lexicon-and-packs.md §2.9; was 0ee1bb92… chat, aab77cf7… formal)
+    // and again when names-next added 臺北車站 to data/lexicon/names-add.tsv (was f62110c0… chat, 6813a594… formal): only row 161
+    // (下一站是台北車站) differs, where candidates containing 臺北車站 entered below the first; every first candidate is unchanged.
+    ("chat", "dev302", "1c78649a9b4f5cd3eb3608caff2eec050c7165d97455141eaeb3f42a628a4394"),
     ("chat", "typing76", "cb58ab34d6319882e7e1b448236895bf75e9bbd5f503254109b14b2af92842d5"),
-    ("formal", "dev302", "6813a594f0203d9ff4d05174ef5fe6051a1735224d78f826479d7ea1413d01b3"),
+    ("formal", "dev302", "c78cc23d29274cd46cfb73cbffcc471a4d1e32a0b4d5a4f0ea1cadf301ddeff6"),
     // Remade when the overlay lost its whole-word Simplified forms (docs/spec/lexicon-and-packs.md §2.3): row 66 held a candidate with 想象 (was fb7dcfce…); every first candidate is unchanged.
     ("formal", "typing76", "8cefd23c0ad0fa750b0f11ea690e5910170b838a999c50714b0f99dd23d98b59"),
 ];

@@ -288,19 +288,68 @@ packs/meme-add.tsv: the optional meme and livestream slang word pack (words and 
   Wikipedia (CC BY-SA 4.0); the usage counts that admitted each word are in packs/meme-sources.tsv. Some candidate strings
   also came from model suggestions and from a public website that was used only as a source of candidate strings (no text, no definitions).
   Attribution: 迷因 Wiki contributors, PTT 鄉民百科 contributors (Fandom), Wikipedia contributors.
-names-add.tsv: common proper nouns (brands, shops, companies, schools), always
-  on. Built from three sources; the source of every word is listed in
+names-add.tsv: common proper nouns (brands, shops, companies, transit stations,
+  hospitals, venues, geographic places and trails, schools), always on. Built
+  from three groups of sources; the source of every word is listed in
   data/lexicon/names-sources.tsv of the project repository. Attribution, one
   per source:
-  (1) name-suggestion-index (https://github.com/osmlab/name-suggestion-index),
-      BSD-3-Clause. Its copyright notice and conditions are reproduced in full
-      at the end of this file and in name-suggestion-index-BSD-3-Clause.txt.
-      Neither the copyright holder nor its contributors endorse this product.
-  (2) Wikipedia contributors (CC BY-SA 4.0); Wikidata structured data is CC0.
-  (3) 教育部統計處〈大專校院名錄〉（資料集 6091）與〈一般高級中等學校名錄〉（資料集 6089），
-      2026 年 10 月取得，兩份名錄皆為 115 學年度（專案儲存庫 data/lexicon/names.json 的 moe 欄記有檔案與學年度）；此開放資料依政府資料開放授權條款
-      (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，
-      得利用之（https://data.gov.tw/license ）。
+  (1) name-suggestion-index (https://github.com/osmlab/name-suggestion-index ),
+      commit ac22bfd445b729b567070c1b0900be6d0c6ef924 (32 categories under
+      /data/brands/), BSD-3-Clause. Its copyright notice and conditions are
+      reproduced in full at the end of this file and in
+      name-suggestion-index-BSD-3-Clause.txt. Neither the copyright holder nor
+      its contributors endorse this product.
+  (2) Wikipedia contributors (CC BY-SA 4.0; category pages, article titles, and
+      hospital and school abbreviation redirects); Wikidata structured data is CC0.
+  (3) Government Open Data License v1 (政府資料開放授權條款第 1 版,
+      https://data.gov.tw/license ), used under its terms:
+      - 2026 年 10 月取得：教育部統計處〈大專校院名錄〉（資料集 6091）與〈一般高級中等學校名錄〉（資料集 6089），
+        兩份名錄皆為 115 學年度（專案儲存庫 data/lexicon/names.json 的 moe 欄記有檔案與學年度）。
+      - 2026 年 11 月取得之 47 份政府開放資料集（專案儲存庫 data/lexicon/names.json 的 opendata 欄記有各檔雜湊與列數，
+        共 30 個提供機關）：
+        * 國營臺灣鐵路股份有限公司：〈TRA official station registry／臺鐵車站基本資料〉（資料集 33425）
+        * 內政部國土測繪中心：〈THSR stations／高鐵車站地標〉（資料集 73225）、
+          〈TRA + Alishan Forest Railway stations／鐵路車站地標〉（資料集 73226）、
+          〈Danhai LRT + Ankeng LRT + Kaohsiung Circular LRT／輕軌捷運車站地標〉（資料集 73230）、
+          〈TRTC/NTMC/TYMetro/TMRT/KRTC/Maokong stations and exits／捷運車站地標〉（資料集 73233）
+        * 臺北大眾捷運股份有限公司：〈Taipei Metro BR/R/G/O/BL stations／臺北捷運車站基本資料〉（資料集 131734）
+        * 臺北市政府捷運工程局：〈Taipei Metro network point GeoJSON／臺北捷運路網車站點位〉（資料集 121140）
+        * 桃園市政府桃園捷運公司：〈Taoyuan Airport MRT stations／桃園機場捷運車站資料〉（資料集 128394）
+        * 臺中捷運股份有限公司：〈Taichung Metro Green Line stations／臺中捷運綠線車站資料〉（資料集 144164）
+        * 高雄市政府捷運工程局：〈Kaohsiung Metro Red/Orange Line stations／高雄捷運紅橘線車站資料〉（資料集 88233）、
+          〈Kaohsiung Circular LRT stations／高雄環狀輕軌車站資料〉（資料集 102184）
+        * 衛生福利部中央健康保險署：〈NHI contracted medical centers／健保特約醫學中心〉（資料集 39280）、
+          〈NHI contracted regional hospitals／健保特約區域醫院〉（資料集 39281）、
+          〈NHI contracted district hospitals／健保特約地區醫院〉（資料集 39282）
+        * 勞動部勞工保險局：〈衛生福利部評鑑合格之醫院名單／MOHW-accredited hospitals & teaching hospitals〉（資料集 6271）
+        * 國防部軍醫局：〈國軍醫院基本資料／Military hospitals directory〉（資料集 136354）
+        * 金融監督管理委員會：〈All FSC financial institutions／金融機構基本資料（總機構）〉（資料集 6041）
+        * 金融監督管理委員會證券期貨局：〈TWSE listed companies／上市公司基本資料〉（資料集 18419）、
+          〈TPEx OTC companies／上櫃公司基本資料〉（資料集 25036）、
+          〈TPEx emerging (興櫃) companies／興櫃公司基本資料〉（資料集 28568）、
+          〈FSC public reporting (公開發行) companies／公開發行公司基本資料〉（資料集 28567）、
+          〈64 securities firms with short names／證券商基本資料〉（資料集 20765）、
+          〈64 securities firm HQs／證券商總公司基本資料〉（資料集 11545）
+        * 金融監督管理委員會銀行局：〈14 unique FHCs／金融控股公司及直接投資之子公司〉（資料集 28775）
+        * 金融監督管理委員會保險局：〈52 insurers／保險公司基本資料〉（資料集 7186）
+        * 文化部：〈全國博物館名錄〉（資料集 6242）、〈全國地方文化館名錄〉（資料集 6244）
+        * 文化部影視及流行音樂產業局：〈2025年全國電影院位置資料〉（資料集 22213）
+        * 原住民族委員會：〈臺灣原住民族地方文化館〉（資料集 164242）、〈原住民族相關博物館〉（資料集 164266）
+        * 交通部觀光署：〈民營遊樂園基本資料〉（資料集 38257）、〈觀光資訊資料庫-景點〉（資料集 7777）
+        * 經濟部產業發展署：〈全國觀光工廠名錄〉（資料集 6848）
+        * 農業部林業及自然保育署：〈自然步道基本資料〉（資料集 71520）、〈所轄森林遊樂區基本資料〉（資料集 37675）
+        * 內政部國家公園署：〈國家公園內遊憩資訊-步道簡介〉（資料集 9963）、〈國家公園景點-遊憩據點〉（資料集 9968）
+        * 臺北市市場處：〈臺北市攤販集中場〉（資料集 121594）
+        * 桃園市政府經濟發展局：〈桃園市內觀光夜市〉（資料集 25965）
+        * 桃園市政府地政局：〈桃園市公辦市地重劃區〉（資料集 46397）
+        * 臺中市政府經濟發展局：〈臺中市列管夜市〉（資料集 85028）
+        * 臺南市政府：〈臺南市地名舊稱對照〉（資料集 140066）
+        * 臺南市政府經濟發展局：〈臺南市已取得設置許可夜市名冊〉（資料集 53634）
+        * 臺南市政府地政局：〈臺南市政府公辦市地重劃執行情形〉（資料集 53421）
+        * 高雄市政府經濟發展局：〈高雄市攤集場名冊〉（資料集 47005）
+        * 新北市政府地政局：〈新北市公辦市地重劃成果〉（資料集 125432）、〈新北市自辦市地重劃成果〉（資料集 123714）
+      上述開放資料依政府資料開放授權條款第 1 版 (Open Government Data License) 進行公眾釋出，
+      使用者於遵守本條款各項規定之前提下，得利用之（https://data.gov.tw/license ）。
 demote.tsv: written for this project; no third-party data.
 variant-order.tsv: written for this project and dedicated to the public domain (CC0 1.0); no third-party data. It is not part of the CC BY-SA list above.
 rerank-protect.tsv: written for this project and dedicated to the public domain (CC0 1.0); no third-party data. The words the semantic rerank may not

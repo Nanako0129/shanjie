@@ -134,6 +134,24 @@ class Fetching(unittest.TestCase):
             self.assertFalse(B.allowed(u, COMMIT), u)
         self.assertFalse(B.allowed(ok[2], ""), "no pinned commit: raw.githubusercontent.com is refused")
 
+    def test_open_data_hosts_allow_list_positive_and_negative(self):
+        self.assertEqual(len(B.OPEN_DATA_HOSTS), 23)
+        self.assertEqual(len(B.OPEN_DATA_SPECS), 47)
+        for host in B.OPEN_DATA_HOSTS:
+            self.assertTrue(B.allowed(f"https://{host}/dataset/file.json", COMMIT), host)
+            self.assertFalse(B.allowed(f"http://{host}/dataset/file.json", COMMIT), host)
+            self.assertFalse(B.allowed(f"https://{host}:8443/dataset/file.json", COMMIT), host)
+            self.assertFalse(B.allowed(f"https://user@{host}/dataset/file.json", COMMIT), host)
+        for spec in B.OPEN_DATA_SPECS:
+            self.assertTrue(B.allowed(spec.url, COMMIT), spec.dataset_id)
+        self.assertFalse(B.allowed("https://stats.moe.gov.tw/files/x.zip", COMMIT))
+        self.assertFalse(B.allowed("https://data.gov.tw/files/x.zip", COMMIT))
+        h = B._Redirect(COMMIT)
+        req = h.redirect_request(urllib.request.Request("https://data.taipei/a"), None, 302, "Found", {}, "https://info.nhi.gov.tw/api/x")
+        self.assertEqual(req.full_url, "https://info.nhi.gov.tw/api/x")
+        with self.assertRaises(SystemExit):
+            h.redirect_request(urllib.request.Request("https://data.taipei/a"), None, 302, "Found", {}, "https://stats.moe.gov.tw/files/x.zip")
+
     def test_urls_outside_the_allow_list_are_refused_before_any_request(self):
         api = self.api()
         with mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("network")):
@@ -219,6 +237,9 @@ CATEGORY = {   # category → (pages, subcategories); a category absent here doe
 REDIRECTS = {"國立政治大學": ["政大", "政治大學", "NCCU", "國立政治大學校長"], "國立臺灣大學": ["台大"]}
 
 
+NOTE_TA = {"库邦"}
+
+
 class FakeApi:
     """The parts of NamesApi that build() calls, answering from the fixtures above."""
 
@@ -242,7 +263,7 @@ class FakeApi:
         if a == "parse":
             self.calls.append(("parse", p["page"]))
             assert p["variant"] == "zh-tw", "every Wikipedia title is read as its zh-tw display title"
-            assert ("redirects" in p) == (p["page"] not in ("政大", "政治大學", "台大")), "an abbreviation page is parsed itself, not followed to the school"
+            assert ("redirects" in p) == (p["page"] not in ("政大", "政治大學", "台大", "高醫")), "an abbreviation page is parsed itself, not followed to the target"
             if p["page"] not in PARSE:
                 raise RuntimeError({"code": "missingtitle"})
             t, d, r = PARSE[p["page"]]
@@ -253,8 +274,21 @@ class FakeApi:
             if p["cmtype"] == "page" and len(ms) > 1 and "cmcontinue" not in p:       # the continue protocol: first answer is truncated
                 return {"continue": {"cmcontinue": "page|x", "continue": "-||"}, "query": {"categorymembers": ms[:1]}}
             return {"query": {"categorymembers": ms[1:] if "cmcontinue" in p else ms}}
+        if "inprop" in p:
+            self.calls.append(("query_titles", p["titles"], "redirects" in p))
+            pages = []
+            for title in p["titles"].split("|"):
+                if title not in PARSE:
+                    pages.append({"title": title, "missing": True})
+                else:
+                    t, d, r = PARSE[title]
+                    pg = {"title": t, "pageid": r, "revisions": [{"revid": r}], "varianttitles": {"zh-tw": t if title in NOTE_TA else d}}
+                    if "redirects" in p and title in NOTE_TA:
+                        pg["templates"] = [{"ns": 10, "title": "Template:NoteTA"}]
+                    pages.append(pg)
+            return {"query": {"pages": pages}}
         if p.get("prop") == "info":
-            return {"query": {"pages": [{"title": p["titles"], "pageid": 5} if p["titles"] in CATEGORY else {"title": p["titles"], "missing": True}]}}
+            return {"query": {"pages": [{"title": t, "pageid": 5} if t in CATEGORY else {"title": t, "missing": True} for t in p["titles"].split("|")]}}
         if p.get("prop") == "redirects":
             return {"query": {"pages": [dict({"title": t}, **({"redirects": [{"pageid": 9, "ns": 0, "title": r} for r in REDIRECTS[t]]} if t in REDIRECTS else {})) for t in p["titles"].split("|")]}}
         if "converttitles" in p:
@@ -295,6 +329,9 @@ class Build(unittest.TestCase):
     def build(self, have=(), readings_tsv="", collisions="", readings=None, decode=None, manual=None, api=None, decode_acg=None, acg_add=None, **kw):
         inputs = [manual or self.manual, self.write("readings.tsv", readings_tsv), self.write("collisions.tsv", collisions)]
         before = [get(p) for p in inputs]
+        kw.setdefault("creators_tsv", None)
+        kw.setdefault("stores_tsv", None)
+        kw.setdefault("kept_c_tsv", None)
         files, manifest, col, unread, ldrop, check = B.build(
             api or FakeApi(), COMMIT, manual_tsv=inputs[0], readings_tsv=inputs[1], collisions_tsv=inputs[2],
             have=have if isinstance(have, set) else set(have), decode=decode or identity_decode(), decode_acg=decode_acg or decode or identity_decode(), acg_add=acg_add or self.write("no-acg-add.tsv", ""), readings=readings or fake_readings(), nsi_categories=[("amenity", "cafe"), ("amenity", "restaurant"), ("amenity", "fast_food")],
@@ -543,12 +580,15 @@ class Build(unittest.TestCase):
         self.assertEqual(m["nsi_commit"], COMMIT)
         self.assertEqual(m["words"], len(self.words))
         self.assertEqual(m["rows"], len(self.files["names-add.tsv"].splitlines()))
-        self.assertEqual(set(m["sources"]), {"nsi", "nsi-wikipedia", "category", "school", "school-abbr", "manual"})
+        self.assertEqual(set(m["sources"]), {"nsi", "nsi-wikipedia", "category", "school", "school-abbr", "opendata", "hospital-abbr", "manual"})
+        self.assertEqual(m["nhi_as_of"], B.NHI_AS_OF)
+        self.assertEqual(m["skipped_subcategories"], [])
+        self.assertEqual(m["opendata"], {})
         self.assertIn("not_han_or_length", m["dropped"])
         self.assertEqual(m["unresolved_collision_readings"], 0)
 
 
-PRE_APPEND_NAMES_ADD_SHA256 = "77f70524fd1ddd62a29e63103439cde3c3b25f3d40d0b3a6b0300de955e1f010"   # names-add.tsv before any creator row (docs/spec/lexicon-and-packs.md §3.2–§3.4, §3.7)
+PRE_APPEND_NAMES_ADD_SHA256 = "cf154d284e8fc705ef8be8ba6e9dd5efc97c0b97edc8b00c5926c1cb49d5fb04"   # names-add.tsv before any creator row (docs/spec/lexicon-and-packs.md §3.2–§3.4, §3.7)
 
 
 class AppendCreators(unittest.TestCase):
@@ -849,6 +889,477 @@ class RealDecode(unittest.TestCase):
         pair = [("酷澎", ["ㄎㄨˋ", "ㄆㄥˊ"])]
         self.assertEqual(B.decode(pair, "chat"), ["酷朋"])
         self.assertEqual(B.decode(pair, "chat", d), ["酷澎"])
+
+
+class OpenData(unittest.TestCase):
+    OD_DIR = os.path.join(DATA, "opendata")
+
+    def _fixture_specs(self):
+        with open(os.path.join(self.OD_DIR, "SHA256SUMS"), encoding="utf-8") as f:
+            rels = {l.split()[1] for l in f if l.strip()}
+        return tuple(s for s in B.OPEN_DATA_SPECS if s.relpath in rels)
+
+    def test_cropped_fixtures_all_five_categories_and_filters(self):
+        specs = self._fixture_specs()
+        self.assertEqual(len(specs), 26)
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        manual = os.path.join(tmp, "manual.tsv")
+        readings = os.path.join(tmp, "readings.tsv")
+        collisions = os.path.join(tmp, "collisions.tsv")
+        acg = os.path.join(tmp, "acg.tsv")
+        for p in (manual, readings, collisions, acg):
+            put(p, "")
+        # Synthetic Wikipedia redirect for 13-char hospital name (>10 char cap) -> 高醫
+        old_parse = dict(PARSE)
+        old_red = dict(REDIRECTS)
+        PARSE["高醫"] = ("高醫", "高醫", 801)
+        REDIRECTS["高雄醫學大學附設中和紀念醫院"] = ["高醫", "高醫院長"]
+        try:
+            with tiny_simplified():
+                files, manifest, col, unread, ldrop, check = B.build(
+                    FakeApi(), COMMIT, manual_tsv=manual, readings_tsv=readings, collisions_tsv=collisions,
+                    have=set(), decode=identity_decode(), decode_acg=identity_decode(), acg_add=acg,
+                    readings=fake_readings(), nsi_categories=[], wiki_categories=[], moe_files={},
+                    open_data_specs=specs, open_data_dir=self.OD_DIR, creators_tsv=None, stores_tsv=None,
+                    kept_c_tsv=None, hospital_redirects=True,
+                )
+        finally:
+            PARSE.clear()
+            PARSE.update(old_parse)
+            REDIRECTS.clear()
+            REDIRECTS.update(old_red)
+
+        words = {l.split("\t")[1] for l in files["names-add.tsv"].splitlines()}
+        srcs = {}
+        for l in files["names-sources.tsv"].splitlines()[1:]:
+            p = l.split("\t")
+            srcs.setdefault(p[0], {})[p[1]] = p[2]
+
+        expected_emitted = {
+            "崎頂站", "菁桐站", "東澳站", "動物園站", "捷運動物園站", "葫洲站", "捷運葫洲站", "輕軌機廠",
+            "中和站", "捷運中和站", "泰山貴和站", "古亭站", "捷運古亭站",
+            "部立苗栗醫院", "聖馬爾定醫院", "義大癌治療醫院", "佳里奇美醫院", "員榮醫院",
+            "邁達特", "奇鋐科技", "犇亞證券", "華南金控", "新光人壽", "遠雄人壽", "兆豐產險", "臺灣銀行",
+            "淡水禮萊國賓影城", "毓繡美術館", "佳里傳統夜市", "亞典蛋糕密碼館", "綠舞日式主題園區",
+            "艋舺夜市", "中華路觀光夜市",
+            "草漯", "小檜溪", "九份子", "長勝營區", "林美石磐步道", "錐麓古道", "錐麓斷崖", "林口新市鎮", "月港", "月津",
+            "高醫",
+        }
+        self.assertLessEqual(expected_emitted, words)
+        self.assertEqual(srcs["高醫"]["hospital-abbr"], "zhwiki:高醫->高雄醫學大學附設中和紀念醫院@801")
+        # Filtering assertions
+        for exact_bad in ("奇鋐", "久尹股份", "高醫院長", "廣州街", "普通老街小攤", "牛牛牛亞", "臺灣銀行城中分行"):
+            self.assertNotIn(exact_bad, words)
+        for substr_bad in ("三民高中", "臺北", "大同醫院", "牛牛牛", "手信坊", "蘆洲灰"):
+            self.assertFalse(any(substr_bad in w for w in words), f"unexpected {substr_bad!r} in {words}")
+        self.assertEqual(manifest["nhi_as_of"], B.NHI_AS_OF)
+        self.assertEqual(len(manifest["opendata"]), 26)
+        self.assertGreater(manifest["opendata"]["131734"]["emitted"], 0)
+        self.assertGreater(manifest["opendata"]["53421"]["emitted"], 0)
+        self.assertEqual(manifest["sources"]["opendata"], len(words) - 1)  # minus 高醫 (hospital-abbr only)
+        self.assertEqual(manifest["sources"]["hospital-abbr"], 1)
+
+    def test_trtc_131734_and_tainan_53421_verbatim_fixtures(self):
+        specs = tuple(s for s in B.OPEN_DATA_SPECS if s.dataset_id in ("131734", "53421"))
+        with tiny_simplified():
+            meta, records, _ = B.load_open_data(self.OD_DIR, specs)
+        by_id = {s.dataset_id: set(names) for s, names in records}
+        self.assertGreater(meta["131734"]["emitted"], 0)
+        self.assertLessEqual({"動物園站", "捷運動物園站", "大湖公園站", "捷運大湖公園站", "葫洲站", "捷運葫洲站"}, by_id["131734"])
+        self.assertGreater(meta["53421"]["emitted"], 0)
+        self.assertEqual(by_id["53421"], {"九份子", "長勝營區"})
+
+    def test_mops_short_name_strips_suffixes_and_requires_three_han(self):
+        spec = next(s for s in B.OPEN_DATA_SPECS if s.dataset_id == "28567")
+        csv_bytes = (
+            "\ufeff公司名稱,公司簡稱\n"
+            "AB Corp,久尹股份\n"
+            "AB Corp,太景*-KY\n"
+            "AB Corp,詠勝昌*\n"
+            "AB Corp,慧康生技*-KY\n"
+            "AB Corp,華德動能-創\n"
+            "(牛牛牛)亞證券股份有限公司,牛牛牛亞\n"
+        ).encode("utf-8")
+        rows, names = spec.parser(csv_bytes, spec)
+        self.assertEqual(rows, 6)
+        self.assertEqual(names, ["詠勝昌", "慧康生技", "華德動能"])
+
+    def test_nhi_as_of_cutoff_is_clock_independent(self):
+        spec = next(s for s in B.OPEN_DATA_SPECS if s.dataset_id == "39281")
+        csv_bytes = (
+            "\ufeff醫事機構代碼,醫事機構名稱,終止合約或歇業日期\n"
+            "1,過去醫院,20241231\n"
+            "2,剛好醫院,20261127\n"
+            "3,未來醫院,20280229\n"
+            "4,無期限醫院,\n"
+        ).encode("utf-8")
+        with mock.patch("datetime.date") as mdate:
+            mdate.today.side_effect = AssertionError("must not read system clock")
+            rows, names = spec.parser(csv_bytes, spec)
+        self.assertEqual(rows, 4)
+        self.assertEqual(names, ["剛好醫院", "未來醫院", "無期限醫院"])
+
+    def test_sha256sums_verification_aborts_on_missing_or_mismatch(self):
+        spec = next(s for s in B.OPEN_DATA_SPECS if s.dataset_id == "6848")
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        # 1. Missing SHA256SUMS
+        with self.assertRaises(SystemExit):
+            B.load_open_data(d, (spec,))
+        # 2. Missing entry in SHA256SUMS
+        put(os.path.join(d, "SHA256SUMS"), "")
+        with self.assertRaises(SystemExit):
+            B.load_open_data(d, (spec,))
+        # 3. Missing data file
+        put(os.path.join(d, "SHA256SUMS"), f"{'0' * 64}  {spec.relpath}\n")
+        with self.assertRaises(SystemExit):
+            B.load_open_data(d, (spec,))
+        # 4. Hash mismatch
+        p = os.path.join(d, spec.relpath)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        put(p, "\ufeff序號,觀光工廠名稱\n1,亞典蛋糕密碼館\n")
+        with self.assertRaises(SystemExit):
+            B.load_open_data(d, (spec,))
+
+    def test_two_offline_runs_with_open_data_are_byte_identical(self):
+        specs = self._fixture_specs()
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        manual = os.path.join(tmp, "manual.tsv")
+        readings = os.path.join(tmp, "readings.tsv")
+        collisions = os.path.join(tmp, "collisions.tsv")
+        acg = os.path.join(tmp, "acg.tsv")
+        for p in (manual, readings, collisions, acg):
+            put(p, "")
+        with tiny_simplified():
+            f1, m1, *_ = B.build(FakeApi(), COMMIT, manual_tsv=manual, readings_tsv=readings, collisions_tsv=collisions,
+                                 have=set(), decode=identity_decode(), decode_acg=identity_decode(), acg_add=acg,
+                                 readings=fake_readings(), nsi_categories=[], wiki_categories=[], moe_files={},
+                                 open_data_specs=specs, open_data_dir=self.OD_DIR, creators_tsv=None, stores_tsv=None,
+                                 hospital_redirects=False)
+            f2, m2, *_ = B.build(FakeApi(), COMMIT, manual_tsv=manual, readings_tsv=readings, collisions_tsv=collisions,
+                                 have=set(), decode=identity_decode(), decode_acg=identity_decode(), acg_add=acg,
+                                 readings=fake_readings(), nsi_categories=[], wiki_categories=[], moe_files={},
+                                 open_data_specs=specs, open_data_dir=self.OD_DIR, creators_tsv=None, stores_tsv=None,
+                                 hospital_redirects=False)
+        self.assertEqual(f1, f2)
+        self.assertEqual(m1, m2)
+
+
+class WikiDepthAndBioFilter(unittest.TestCase):
+    def test_constants_match_contract(self):
+        self.assertEqual(B.MAX_REQUESTS, 3500)
+        self.assertEqual(len(B.NSI_CATEGORIES), 32)
+        self.assertEqual(len(B.WIKI_CATEGORIES), 30)
+        self.assertEqual(sum(1 for _, d in B.WIKI_CATEGORIES if d == 1), 3)
+        self.assertEqual(sum(1 for _, d in B.WIKI_CATEGORIES if d == 0), 27)
+        self.assertIn("Category:臺灣醫院院長", B.EXCLUDED_SUBCATS)
+
+    def test_depth1_skips_hospital_director_and_bio_subcats_and_depth0_does_not_expand(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        manual = os.path.join(tmp, "manual.tsv")
+        readings = os.path.join(tmp, "readings.tsv")
+        collisions = os.path.join(tmp, "collisions.tsv")
+        acg = os.path.join(tmp, "acg.tsv")
+        for p in (manual, readings, collisions, acg):
+            put(p, "")
+        old_cat, old_parse = dict(CATEGORY), dict(PARSE)
+        CATEGORY["Category:測試醫院母類"] = (["臺大醫院"], ["Category:臺灣醫院院長", "Category:台灣公司創辦人", "Category:一般醫院子類"])
+        CATEGORY["Category:臺灣醫院院長"] = (["張院長"], [])
+        CATEGORY["Category:台灣公司創辦人"] = (["王創辦人"], [])
+        CATEGORY["Category:一般醫院子類"] = (["榮總醫院"], [])
+        CATEGORY["Category:測試直屬類"] = (["林口步道"], ["Category:不應展開子類"])
+        CATEGORY["Category:不應展開子類"] = (["不應收詞"], [])
+        for t in ("臺大醫院", "張院長", "王創辦人", "榮總醫院", "林口步道", "不應收詞"):
+            PARSE[t] = (t, t, 500)
+        try:
+            with tiny_simplified():
+                files, manifest, *_ = B.build(
+                    FakeApi(), COMMIT, manual_tsv=manual, readings_tsv=readings, collisions_tsv=collisions,
+                    have=set(), decode=identity_decode(), decode_acg=identity_decode(), acg_add=acg,
+                    readings=fake_readings(), nsi_categories=[],
+                    wiki_categories=[("Category:測試醫院母類", 1), ("Category:測試直屬類", 0)],
+                    moe_files={}, creators_tsv=None, stores_tsv=None,
+                )
+        finally:
+            CATEGORY.clear()
+            CATEGORY.update(old_cat)
+            PARSE.clear()
+            PARSE.update(old_parse)
+        words = {l.split("\t")[1] for l in files["names-add.tsv"].splitlines()}
+        self.assertEqual(words, {"臺大醫院", "榮總醫院", "林口步道"})
+        self.assertEqual(manifest["skipped_subcategories"], ["Category:台灣公司創辦人", "Category:臺灣醫院院長"])
+        self.assertEqual(manifest["categories"]["Category:測試直屬類"]["subcategories"], 0)
+
+
+class CreatorStoreReservation(unittest.TestCase):
+    def test_existing_creator_store_words_and_readings_are_protected(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        manual = os.path.join(tmp, "manual.tsv")
+        readings = os.path.join(tmp, "readings.tsv")
+        collisions = os.path.join(tmp, "collisions.tsv")
+        acg = os.path.join(tmp, "acg.tsv")
+        creators = os.path.join(tmp, "creators.tsv")
+        stores = os.path.join(tmp, "stores.tsv")
+        put(manual, "凱渥\t備註\tㄎㄞˇ ㄨㄛˋ\n凱臥\t備註\tㄎㄞˇ ㄨㄛˋ\n統神\t備註\tㄊㄨㄥˇ ㄕㄣˊ\n保留\t備註\tㄅㄠˇ ㄌㄧㄡˊ\n")
+        put(creators, "統神\tㄊㄨㄥˇ ㄕㄣˊ\tnote\n")
+        put(stores, "凱渥\tㄎㄞˇ ㄨㄛˋ\tnote\n")
+        for p in (readings, collisions, acg):
+            put(p, "")
+        with tiny_simplified():
+            files, manifest, *_ = B.build(
+                FakeApi(), COMMIT, manual_tsv=manual, readings_tsv=readings, collisions_tsv=collisions,
+                have=set(), decode=identity_decode(), decode_acg=identity_decode(), acg_add=acg,
+                readings=fake_readings(), nsi_categories=[], wiki_categories=[], moe_files={},
+                creators_tsv=creators, stores_tsv=stores,
+            )
+        words = {l.split("\t")[1] for l in files["names-add.tsv"].splitlines()}
+        self.assertEqual(words, {"保留"})
+        self.assertEqual(manifest["dropped"]["reserved_for_creator_store"], 3)
+
+
+class NineFileDisjointness(unittest.TestCase):
+    def test_known_words_and_check_committed_cover_all_nine_files(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        put(os.path.join(d, "mcbpmf-data.txt"), "ㄅㄚ 八 -1.0\n")
+        put(os.path.join(d, "overlay-add.tsv"), "ㄇㄚˋ\t罵\t-5.0\twikt\n")
+        put(os.path.join(d, "sandhi-add.tsv"), "ㄅㄨˋ-ㄏㄠˇ\t不好\t-4.0\tsandhi\n")
+        put(os.path.join(d, "names-add.tsv"), "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-5.0\tnames\n")
+        for fn, w in (("acg-add.tsv", "叫胡"), ("it-add.tsv", "輝達"), ("meme-add.tsv", "早安"), ("beauty-add.tsv", "小紅書"), ("quotes-add.tsv", "真香")):
+            put(os.path.join(d, fn), f"ㄘㄜˋ-ㄕˋ\t{w}\t-5.0\tpack\n")
+        got = B.known_words(d, os.path.join(d, "acg-add.tsv"), os.path.join(d, "meme-add.tsv"))
+        self.assertEqual(got, {"八", "罵", "不好", "叫胡", "輝達", "早安", "小紅書", "真香"})
+        B.check_committed(d, os.path.join(d, "acg-add.tsv"), os.path.join(d, "meme-add.tsv"))
+        for conflict_fn in ("it-add.tsv", "beauty-add.tsv", "quotes-add.tsv"):
+            p = os.path.join(d, conflict_fn)
+            old = get(p)
+            put(p, old.decode() + "ㄎㄨˋ-ㄆㄥˊ\t酷澎\t-5.0\tpack\n")
+            with self.assertRaises(SystemExit, msg=conflict_fn):
+                B.check_committed(d, os.path.join(d, "acg-add.tsv"), os.path.join(d, "meme-add.tsv"))
+            with open(p, "wb") as f:
+                f.write(old)
+
+
+class RateLimitRetry(unittest.TestCase):
+    def api(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        return B.NamesApi(d, False, COMMIT)
+
+    def _http_err(self, code, retry_after=None):
+        import email.message
+        hdrs = email.message.Message()
+        if retry_after is not None:
+            hdrs["Retry-After"] = str(retry_after)
+        return B.urllib.error.HTTPError("https://zh.wikipedia.org/w/api.php", code, "Too Many Requests", hdrs, io.BytesIO(b""))
+
+    def test_http_429_and_503_sleep_retry_after_and_succeed(self):
+        class Ok:
+            def __init__(self, body):
+                self.body = body
+
+            def read(self):
+                return self.body
+
+        api = self.api()
+        sleeps = []
+        seq = [self._http_err(429, "19"), Ok(b'{"query": {"ok": 1}}')]
+        with mock.patch.object(B.time, "sleep", side_effect=sleeps.append), \
+                mock.patch.object(urllib.request, "urlopen", side_effect=seq) as op, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            got = api.wiki(action="query", titles="a")
+        self.assertEqual(got, {"query": {"ok": 1}})
+        self.assertEqual(op.call_count, 2)
+        self.assertIn(20, sleeps)
+        self.assertIn("HTTP 429", err.getvalue())
+        self.assertEqual(api.requests, 2)
+        # Cached now: third call hits cache with 0 network calls
+        with mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("network")):
+            self.assertEqual(api.wiki(action="query", titles="a"), {"query": {"ok": 1}})
+
+    def test_retry_after_clamping_and_text_retry(self):
+        class Ok:
+            def __init__(self, body):
+                self.body = body
+
+            def read(self):
+                return self.body
+
+        api = self.api()
+        sleeps = []
+        seq = [self._http_err(503, "2"), self._http_err(429, "300"), self._http_err(429, None), Ok(b"a,b\n1,2\n")]
+        with mock.patch.object(B.time, "sleep", side_effect=sleeps.append), \
+                mock.patch.object(urllib.request, "urlopen", side_effect=seq), \
+                contextlib.redirect_stderr(io.StringIO()):
+            got = api.text("https://stats.moe.gov.tw/files/opendata/u1_new.csv")
+        self.assertEqual(got, b"a,b\n1,2\n")
+        for expected in (6, 121, 16):
+            self.assertIn(expected, sleeps)
+
+    def test_non_retryable_http_error_raises_immediately(self):
+        api = self.api()
+        with mock.patch.object(B.time, "sleep"), \
+                mock.patch.object(urllib.request, "urlopen", side_effect=self._http_err(404)):
+            with self.assertRaises(B.urllib.error.HTTPError):
+                api.wiki(action="query", titles="missing")
+
+
+class TwTitlesBatch(unittest.TestCase):
+    def test_batch_reduces_parse_calls_handles_noteta_missing_and_follow_false(self):
+        api = FakeApi()
+        old_parse = dict(PARSE)
+        titles = [f"詞條{i:02d}" for i in range(60)]
+        for idx, t in enumerate(titles):
+            PARSE[t] = (t, f"{t}顯示", 1000 + idx)
+        try:
+            memo = {}
+            res = B.tw_titles_batch(api, titles + ["库邦", "不存在"], memo, follow=True)
+            self.assertEqual(res["库邦"], ("酷澎", "库邦", 203))
+            self.assertIsNone(res["不存在"])
+            self.assertEqual(res["詞條00"], ("詞條00顯示", "詞條00", 1000))
+            query_calls = [c for c in api.calls if c[0] == "query_titles"]
+            parse_calls = [c for c in api.calls if c[0] == "parse"]
+            self.assertEqual(len(query_calls), 2, "62 titles batched at 50/call -> 2 query calls")
+            self.assertTrue(all(c[2] is True for c in query_calls))
+            self.assertEqual(parse_calls, [("parse", "库邦")], "only NoteTA page falls back to action=parse")
+
+            api.calls.clear()
+            res2 = B.tw_titles_batch(api, ["台大", "政大"], memo, follow=False)
+            self.assertEqual(res2["台大"], ("臺大", "台大", 403))
+            self.assertEqual(res2["政大"], ("政大", "政大", 401))
+            q2 = [c for c in api.calls if c[0] == "query_titles"]
+            self.assertEqual(len(q2), 1)
+            self.assertFalse(q2[0][2], "follow=False must not pass redirects=1")
+        finally:
+            PARSE.clear()
+            PARSE.update(old_parse)
+
+    def test_batch_noteta_live_then_offline_reproducible_and_continue(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+
+        class Ok:
+            def __init__(self, obj):
+                self.body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+
+            def read(self):
+                return self.body
+
+        def fake_open(req, timeout=120):
+            url = req.full_url
+            if "action=parse" in url:
+                return Ok({"parse": {"title": "库邦", "revid": 203, "displaytitle": "酷澎"}})
+            return Ok({
+                "query": {
+                    "pages": [
+                        {"title": "一般詞", "pageid": 10, "revisions": [{"revid": 10}], "varianttitles": {"zh-tw": "一般詞"}},
+                        {"title": "库邦", "pageid": 203, "revisions": [{"revid": 203}], "varianttitles": {"zh-tw": "庫邦"}, "templates": [{"ns": 10, "title": "Template:NoteTA"}]},
+                    ]
+                }
+            })
+
+        live = B.NamesApi(d, offline=False, commit=COMMIT)
+        with mock.patch.object(B.time, "sleep"), mock.patch.object(urllib.request, "urlopen", side_effect=fake_open):
+            got_live = B.tw_titles_batch(live, ["一般詞", "库邦"], {}, follow=True)
+        self.assertEqual(got_live, {"一般詞": ("一般詞", "一般詞", 10), "库邦": ("酷澎", "库邦", 203)})
+
+        # Offline rerun on the exact same cache MUST hit 100% cache with 0 network calls even after NoteTA wrote a single-page parse cache file
+        offline = B.NamesApi(d, offline=True, commit=COMMIT)
+        with mock.patch.object(urllib.request, "urlopen", side_effect=AssertionError("network")):
+            got_off = B.tw_titles_batch(offline, ["一般詞", "库邦"], {}, follow=True)
+        self.assertEqual(got_off, got_live)
+
+        # Test normalized + redirect chain + continuation merging templates across pages
+        class ContApi:
+            def __init__(self):
+                self.parse_calls = []
+
+            def wiki(self, **kw):
+                if kw["action"] == "parse":
+                    self.parse_calls.append(kw["page"])
+                    return {"parse": {"title": "目標", "revid": 88, "displaytitle": "目標繁"}}
+                if "tlcontinue" not in kw:
+                    return {
+                        "continue": {"tlcontinue": "1|Template:NoteTA", "continue": "||"},
+                        "query": {
+                            "normalized": [{"from": "a_b", "to": "A b"}],
+                            "redirects": [{"from": "A b", "to": "目標"}],
+                            "pages": [{"title": "目標", "pageid": 88, "revisions": [{"revid": 88}], "varianttitles": {"zh-tw": "目標舊"}}],
+                        },
+                    }
+                return {
+                    "query": {
+                        "pages": [{"title": "目標", "pageid": 88, "templates": [{"ns": 10, "title": "Template:NoteTA"}]}]
+                    }
+                }
+
+        capi = ContApi()
+        memo2 = {}
+        got2 = B.tw_titles_batch(capi, ["a_b"], memo2, follow=True)
+        self.assertEqual(got2["a_b"], ("目標繁", "目標", 88))
+        self.assertEqual(capi.parse_calls, ["a_b"])
+
+
+class KeptC(unittest.TestCase):
+    def test_kept_c_exempts_type_c_across_profiles_preserves_type_a_and_drops_unlisted_c(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, tmp, True)
+        manual = os.path.join(tmp, "manual.tsv")
+        readings = os.path.join(tmp, "readings.tsv")
+        collisions = os.path.join(tmp, "collisions.tsv")
+        acg = os.path.join(tmp, "acg.tsv")
+        kept_c = os.path.join(tmp, "kept-c.tsv")
+        # 甲甲 and 乙乙 share reading ㄍㄨㄥˋ ㄔㄚˊ (displaces existing 供茶); 丙丙 shares ㄎㄞˇ ㄨㄛˋ (displaces 凱臥, NOT in kept-c)
+        put(manual, "甲甲\t備註\tㄍㄨㄥˋ ㄔㄚˊ\n乙乙\t備註\tㄍㄨㄥˋ ㄔㄚˊ\n丙丙\t備註\tㄎㄞˇ ㄨㄛˋ\n")
+        put(kept_c, "# 讀音\t保留\t被擠下\nㄍㄨㄥˋ ㄔㄚˊ\t甲甲\t供茶\n")
+        for p in (readings, collisions, acg):
+            put(p, "")
+
+        # Real detect_collisions uses chat & formal: make 甲甲 type (c) in BOTH chat & formal, 乙乙 type (a) on same reading, 丙丙 type (c)
+        def dec(pairs, profile, packs_dir=None):
+            if not packs_dir:
+                return [{"ㄍㄨㄥˋ ㄔㄚˊ": "供茶", "ㄎㄞˇ ㄨㄛˋ": "凱臥"}.get(" ".join(s), w) for w, s in pairs]
+            return ["甲甲" if " ".join(s) == "ㄍㄨㄥˋ ㄔㄚˊ" else w for w, s in pairs]
+
+        with tiny_simplified():
+            files, manifest, col, unread, ldrop, check = B.build(
+                FakeApi(), COMMIT, manual_tsv=manual, readings_tsv=readings, collisions_tsv=collisions,
+                have={"供茶", "凱臥"}, decode=dec, decode_acg=dec, acg_add=acg,
+                readings=fake_readings(), nsi_categories=[], wiki_categories=[], moe_files={},
+                creators_tsv=None, stores_tsv=None, kept_c_tsv=kept_c,
+            )
+        words = {l.split("\t")[1] for l in files["names-add.tsv"].splitlines()}
+        self.assertIn("甲甲", words, "exempted by kept-c")
+        self.assertNotIn("丙丙", words, "unlisted type (c) is still dropped")
+        self.assertEqual([x[1] for x in ldrop], ["丙丙"])
+        self.assertEqual(manifest["dropped"]["type_c_dropped"], 1)
+        self.assertEqual(manifest["kept_c"], 1, "counts distinct (reading, word) pairs, not chat+formal rows")
+        self.assertIn("ㄍㄨㄥˋ ㄔㄚˊ", col, "type (a) on the same reading must still be reported")
+        self.assertTrue(all(e[0] == "乙乙" and e[1] == "a" for e in col["ㄍㄨㄥˋ ㄔㄚˊ"]))
+
+    def test_read_kept_c_rejects_malformed_and_duplicate_rows(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        self.assertEqual(B.read_kept_c(None), set())
+        self.assertEqual(B.read_kept_c(os.path.join(d, "absent.tsv")), set())
+        bad_cases = {
+            "wrong columns": "ㄍㄨㄥˋ ㄔㄚˊ\t甲甲\n",
+            "hyphenated reading": "ㄍㄨㄥˋ-ㄔㄚˊ\t甲甲\t供茶\n",
+            "wrong syllable count": "ㄍㄨㄥˋ\t甲甲\t供茶\n",
+            "non-han word": "ㄍㄨㄥˋ ㄔㄚˊ\tAB\t供茶\n",
+            "empty displaced": "ㄍㄨㄥˋ ㄔㄚˊ\t甲甲\t \n",
+            "duplicate": "ㄍㄨㄥˋ ㄔㄚˊ\t甲甲\t供茶\nㄍㄨㄥˋ ㄔㄚˊ\t甲甲\t共查\n",
+        }
+        for label, text in bad_cases.items():
+            p = os.path.join(d, "bad.tsv")
+            put(p, text)
+            with self.subTest(label), self.assertRaises(SystemExit) as cm:
+                B.read_kept_c(p)
+            self.assertIn(p, str(cm.exception))
 
 
 if __name__ == "__main__":

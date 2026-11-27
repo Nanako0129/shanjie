@@ -1,0 +1,4 @@
+﻿SEQNO,StationID,StationName,StationPosition,StationAddress,BikeAllowOnHoliday,UpdateTime
+1,'BR01',"'{動物園,Taipei Zoo}'","'{121.579501,24.998205}'",'11656臺北市文山區新光路2段32號',0,20260902
+19,'BR20',"'{大湖公園,Dahu Park}'","'{121.602214,25.083805}'",'11477臺北市內湖區成功路5段11號',0,20260902
+20,'BR21',"'{葫洲,Huzhou}'","'{121.6071455,25.07271}'",'11486臺北市內湖區康寧路3段16號',0,20260902
