@@ -424,8 +424,12 @@ struct SettingsPageForm: View {
                     }
                     Toggle("鄰鍵打錯", isOn: Binding(get: { model.fuzzyFlags >> 4 & 1 == 1 }, set: { model.setFuzzy(bit: 4, $0) }))
                         .disabled(!model.fuzzyAdjacentEnabled)
+                    // Bit 5: works in both layouts, so no `.disabled` (docs/spec/decoder.md §6.2).
+                    Toggle("單一注音打錯", isOn: Binding(get: { model.fuzzyFlags >> 5 & 1 == 1 }, set: { model.setFuzzy(bit: 5, $0) }))
                     // docs/spec/decoder.md §6.6: on by default; a native checkbox like the others in the section (third-tone and colloquial sandhi, one switch).
                     Toggle(SettingsModel.tone3Title, isOn: Binding(get: { model.tone3 }, set: { model.setTone3($0) }))
+                    Text(SettingsModel.oneSymNote)
+                        .font(.caption).foregroundStyle(.secondary)
                     Text("鄰鍵打錯：打出詞庫沒有的讀音時，改用鍵盤上左右相鄰的鍵來猜；只適用標準鍵盤排列。開著時 go、cp、cup 這類字會被收成中文，不會變英文；要英文就按住 Shift 打，或把這個關掉。" + SettingsModel.tone3Note)
                         .font(.caption).foregroundStyle(.secondary)
                 }
