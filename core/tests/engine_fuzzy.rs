@@ -650,7 +650,7 @@ fn premises() {
     assert!(!lex.one_sym_alts(UNKNOWN).contains(&"ㄅㄧㄝ") && lex.adjacent_alts(UNKNOWN).contains(&"ㄅㄧㄝ"), "premise: {UNKNOWN} is read as ㄅㄧㄝ (憋) by the adjacent table only");
 }
 
-/// docs/spec/keys-and-composition.md §3.3, §2.4: with bit 5 (alone) a syllable the lexicon lacks is accepted on both layouts and the composition shows the word
+/// docs/spec/keys-and-composition.md §3.3 and docs/spec/decoder.md §6.4: with bit 5 (alone) a syllable the lexicon lacks is accepted on both layouts and the composition shows the word
 /// read through the one-symbol alternatives (想 for ㄒㄧㄟˇ, between 我 and 去); with the bit off it is refused as before; choosing a window word rewrites the
 /// span to the lexicon reading.
 #[test]
@@ -766,7 +766,7 @@ fn raw(e: &mut Engine, keys: &str) -> Output {
     last.unwrap()
 }
 
-/// §2.3 step 4: with bit 5 alone, Space does not take a syllable one of whose columns was overwritten while typing (the English words below: `line` is ㄠ ㄛ ㄙ ㄍ),
+/// docs/spec/english-mixed.md §3.4 and docs/spec/keys-and-composition.md §3.3: with bit 5 alone, Space does not take a syllable one of whose columns was overwritten while typing (the English words below: `line` is ㄠ ㄛ ㄙ ㄍ),
 /// so they revert to English (`revert_missing`); a word typed in column order that the table reads (`go`) is taken; a tone key takes either (`v u o 3` is
 /// ㄒㄧㄟˇ); with the bit off the same keys are English; Shift+letter English is English whatever the flags say.
 #[test]
@@ -814,7 +814,7 @@ fn finish(e: &mut Engine, layout: Layout, what: &str) {
     assert!(is_han(&commit), "{what}: {commit}");
 }
 
-/// §4.1 (2): ㄐㄝ (only the adjacent table has it) and ㄅㄩ (read as 憋, a reading the one-symbol table lacks), accepted by bit 4 or bits 4 and 5, then bit 5 is turned
+/// docs/spec/decoder.md §6.4 (switching the flags mid-composition): ㄐㄝ (only the adjacent table has it) and ㄅㄩ (read as 憋, a reading the one-symbol table lacks), accepted by bit 4 or bits 4 and 5, then bit 5 is turned
 /// on without bit 4 (16 -> 32, 48 -> 32, 16 -> 0 -> 32): the text does not change, no Error, and the composition goes on. 16 -> 0 alone keeps the syllables.
 #[test]
 fn turning_bit_5_on_alone_keeps_what_the_adjacent_table_read() {
@@ -841,7 +841,7 @@ fn turning_bit_5_on_alone_keeps_what_the_adjacent_table_read() {
     assert_eq!(e.syllables(), [ONLY_ONE]);
 }
 
-/// §4.1 (3), standard and ETen: bit 5 turned off (32 -> 0, ETen 48 -> 16) stores what it read as the lexicon reading, so the text stays, the syllables only that table
+/// docs/spec/decoder.md §6.4 (switching the flags mid-composition), standard and ETen: bit 5 turned off (32 -> 0, ETen 48 -> 16) stores what it read as the lexicon reading, so the text stays, the syllables only that table
 /// knew (ㄋㄟ) have a path, and the standard keyboard's neighbour table never shows through: no 憋 for ㄅㄩ, no 伈 for ㄒㄧㄟˇ in the window.
 #[test]
 fn turning_bit_5_off_keeps_the_text_and_never_leaks_the_adjacent_table() {
@@ -920,7 +920,7 @@ fn mentions(rs: &[(String, Vec<String>, String)], x: &str) -> bool {
     rs.iter().any(|(c, r, _)| c.contains(x) || r.iter().any(|s| s == x))
 }
 
-/// §4.1 (4): with bit 5 on, a syllable only bit 5 accepted (here ㄋㄟ and ㄒㄧㄟˇ, never picked from the window) is in no record: not in a new word's reading
+/// docs/spec/learning.md §4.5: with bit 5 on, a syllable only bit 5 accepted (here ㄋㄟ and ㄒㄧㄟˇ, never picked from the window) is in no record: not in a new word's reading
 /// (neighbouring one-character re-picks), not in the sentence-start keys (`^>x`, the mid key, the fine key).
 #[test]
 fn a_syllable_only_bit_5_accepted_is_never_learned() {
@@ -938,7 +938,7 @@ fn a_syllable_only_bit_5_accepted_is_never_learned() {
     }
 }
 
-/// §4.1 (4a): with the flags 0 (and so no bit 5 position anywhere), a syllable the third-tone rule accepted that is no lexicon syllable is learned as ever: the new word,
+/// docs/spec/learning.md §4.5: with the flags 0 (and so no bit 5 position anywhere), a syllable the third-tone rule accepted that is no lexicon syllable is learned as ever: the new word,
 /// and the sentence-start keys (coarse, mid, fine). The same under 32, where the position table marks it unaccepted and the guard leaves it alone.
 #[test]
 fn a_sandhi_syllable_is_learned_as_before_with_the_flags_0_and_with_bit_5() {
@@ -955,13 +955,13 @@ fn a_sandhi_syllable_is_learned_as_before_with_the_flags_0_and_with_bit_5() {
     assert_eq!(learn_all(ONE, &t), zero, "{t}: bit 5 does not touch a sandhi syllable's learning");
 }
 
-/// §4.1 (4b): with the flags 16, ㄐㄝ (accepted by bit 4, no lexicon syllable) is learned as ever, in the same three operations. Bit 4 alone has no bit 5 position.
+/// docs/spec/learning.md §4.5: with the flags 16, ㄐㄝ (accepted by bit 4, no lexicon syllable) is learned as ever, in the same three operations. Bit 4 alone has no bit 5 position.
 #[test]
 fn an_adjacent_key_syllable_is_learned_as_before_with_the_flags_16() {
     premises();
     let rs = learn_all(16, ONLY_ADJ);
     assert!(mentions(&rs[0], ONLY_ADJ) && mentions(&rs[1], ONLY_ADJ) && mentions(&rs[2], ONLY_ADJ), "learned as before: {rs:?}");
-    assert_eq!(learn_all(0b1_0001, ONLY_ADJ), learn_all(0b1_0001, ONLY_ADJ), "deterministic");
+    assert_eq!(learn_all(0b1_0001, ONLY_ADJ), rs, "a sound bit beside bit 4 changes nothing about what is learned");
 }
 
 /// docs/spec/learning.md §4.5 and docs/spec/decoder.md §7: a word read through a one-symbol alternative is given under the lexicon reading it was found
@@ -1035,8 +1035,8 @@ fn columns_of(word: &str) -> (usize, String) {
     (ow, cols.iter().flatten().collect())
 }
 
-/// §4.1 (2): of the 1,000 most frequent lowercase English words (the macOS defaults of English mixing, `word` and Space), those with an overwritten column (the
-/// contract's `n_ow > 0`) are never taken as Chinese with bit 5 alone, whatever the table could read; a word typed in column order whose syllable the lexicon lacks may be
+/// docs/spec/english-mixed.md §3.4: of the 1,000 most frequent lowercase English words (the macOS defaults of English mixing, `word` and Space), those with an overwritten column (some
+/// column typed over, `n_ow > 0`) are never taken as Chinese with bit 5 alone, whatever the table could read; a word typed in column order whose syllable the lexicon lacks may be
 /// (`go`): the count is printed (`--nocapture`). Words whose syllable the lexicon has are not this rule's: they decide as with the flags 0.
 #[test]
 fn bit_5_alone_takes_no_overwritten_english_word_of_the_thousand_most_frequent() {
@@ -1087,7 +1087,7 @@ fn shift_english_stays_english_with_bit_5() {
     }
 }
 
-/// §4.1 (1): clean Chinese typing (every syllable a lexicon syllable: dev302 and the typing test, keys as typed, the macOS defaults of English mixing) comes out of the engine
+/// docs/spec/decoder.md §6.1: clean Chinese typing (every syllable a lexicon syllable: dev302 and the typing test, keys as typed, the macOS defaults of English mixing) comes out of the engine
 /// exactly as it does with the flags 0, with bit 5 alone and with bits 4 and 5 (the sound bits change clean input by design, so they are not in this): no row differs.
 #[test]
 fn clean_chinese_typing_is_identical_with_bit_5() {

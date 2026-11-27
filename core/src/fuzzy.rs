@@ -158,6 +158,15 @@ impl Tolerance {
         self.adjacent.get(shown).map_or(&[], |b| b)
     }
 
+    /// (entries, SHA-256) of the whole one-symbol table as `unknown<TAB>alt1,alt2,...` lines, the lines sorted by UTF-8 bytes (the alternatives are
+    /// already in name order). `digest_one_sym` in reference/proto/test_fuzzy_ref.py computes the same text; both tests assert the same constant.
+    #[cfg(test)]
+    fn one_sym_digest(&self, names: &[String]) -> (usize, String) {
+        let mut lines: Vec<String> = self.one_sym.iter().map(|(k, v)| format!("{k}\t{}\n", v.iter().map(|&i| names[i as usize].as_str()).collect::<Vec<_>>().join(","))).collect();
+        lines.sort();
+        (lines.len(), crate::eval::sha256_hex(lines.concat().as_bytes()))
+    }
+
     /// Lexicon syllables an unknown reading may have come from by one symbol replaced within its column.
     pub(crate) fn one_sym(&self, shown: &str) -> &[u32] {
         self.one_sym.get(shown).map_or(&[], |b| b)
@@ -289,4 +298,17 @@ mod tests {
         assert_eq!(name(l.tolerant_readings(&l.ids(&syls), &syls, both, &[], true)), ["ㄅㄚ"]);
         assert_eq!(name(l.tolerant_readings(&l.ids(&syls), &syls, FUZZY_ONE_SYM, &[], false)), ["ㄅㄚ", "ㄇㄚ"], "bit 5 alone has both, by name");
     }
+
+    /// docs/spec/decoder.md §6.2: the one-symbol table of the shipped lexicon (base, overlay, sandhi and names rows, no packs), as a whole. The same
+    /// constant is asserted by `test_one_sym_table_of_the_shipped_lexicon_matches_the_rust_digest` in reference/proto/test_fuzzy_ref.py, which builds
+    /// the table with fuzzy_ref.py: that pair of tests is what keeps the two implementations equal row by row.
+    #[test]
+    fn one_symbol_table_of_the_shipped_lexicon_has_the_pinned_digest() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let lex = crate::engine::load_lexicon(&root.join("data/lexicon")).unwrap();
+        let (n, sha) = lex.tol().one_sym_digest(&lex.syl_names);
+        assert_eq!((n, sha.as_str()), ONE_SYM_DIGEST);
+    }
+
+    const ONE_SYM_DIGEST: (usize, &str) = (3413, "082a805f3e2011d948d2109b4260ec99fca2fe42acd1d8915f40518a4ae119ef");
 }
