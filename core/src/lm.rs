@@ -3,7 +3,7 @@
 //! R2: errors carry no content; nothing here formats input text.
 
 use crate::learn::{context_key, fine_key, mid_key, is_single, newword_score, record_key, Learner, Level, NEWWORD_MAX, NEWWORD_MIN, NEXT_PREFIX};
-use crate::trigram::{Mapped, Tri, TriBytes, TriCtx, TriMemo};
+use crate::trigram::{MapError, Mapped, MappedBytes, Tri, TriCtx, TriMemo};
 use crate::{Error, Lexicon, PER_KEY};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -87,11 +87,15 @@ fn kn_beta(kn: &Kn, profile: Option<Profile>) -> f64 {
     }
 }
 
-/// `beside`, then read whole (an existing path that cannot be read is an error).
-fn read_beside(model: &Path, name: &str) -> Result<Option<Vec<u8>>, ()> {
-    match beside(model, name)? {
-        Some(side) => std::fs::read(side).map(Some).map_err(|_| ()),
-        None => Ok(None),
+/// Maps `path` read-only, turning a 0-byte regular file into an empty `Mem` buffer so `parse_bytes*` reports `Format`
+/// (matching `std::fs::read`), while missing, non-regular, or unreadable paths remain `LmError::Io`.
+fn map_or_empty(path: &Path) -> Result<MappedBytes, LmError> {
+    // SAFETY: callers follow the read-only mmap contract (no in-place rewrite or truncation while mapped;
+    // build_lm.py, build_classes.py, kn_cont.py, build_trigram.py and install paths replace files by rename).
+    match unsafe { Mapped::open(path) } {
+        Ok(m) => Ok(MappedBytes::Map(m)),
+        Err(MapError::Empty) => Ok(MappedBytes::Mem(Vec::new())),
+        Err(MapError::Io) => Err(LmError::Io),
     }
 }
 
@@ -117,20 +121,73 @@ impl fmt::Display for LmError {
 }
 impl std::error::Error for LmError {}
 
+#[inline]
+fn le_u16(b: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes(b[at..at + 2].try_into().unwrap())
+}
+#[inline]
+fn le_u32(b: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
+}
+#[inline]
+fn le_u64(b: &[u8], at: usize) -> u64 {
+    u64::from_le_bytes(b[at..at + 8].try_into().unwrap())
+}
+#[inline]
+fn le_f64(b: &[u8], at: usize) -> f64 {
+    f64::from_le_bytes(b[at..at + 8].try_into().unwrap())
+}
+
+/// Read-only view over little-endian `u32` values in unaligned file bytes.
+#[derive(Clone, Copy)]
+pub struct LeU32Slice<'a>(&'a [u8]);
+
+impl<'a> LeU32Slice<'a> {
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len() / 4
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    #[inline]
+    pub fn get(&self, i: usize) -> Option<u32> {
+        self.0.as_chunks::<4>().0.get(i).copied().map(u32::from_le_bytes)
+    }
+
+    #[inline]
+    pub fn binary_search(&self, key: &u32) -> Result<usize, usize> {
+        // Delegate to std's branchless binary search over 4-byte chunks (unaligned LE load per probe).
+        self.0.as_chunks::<4>().0.binary_search_by_key(key, |&b| u32::from_le_bytes(b))
+    }
+
+    #[inline]
+    pub fn iter(&self) -> impl Iterator<Item = u32> + '_ {
+        self.0.as_chunks::<4>().0.iter().copied().map(u32::from_le_bytes)
+    }
+}
+
 /// Bigram model. Context `i` owns `nxt/cnt[off[i]..off[i+1]]`, ascending by next id.
+/// The file bytes are kept as a read-only mapping (`load_opts`) or `Vec<u8>` (`parse`), and multi-byte arrays are read in place.
 pub struct Lm {
+    raw: MappedBytes,
     n: u64,
     d: f64,
     p_eos: f64,
-    pool: Vec<u8>,
+    v: usize,
+    c: usize,
+    e: usize,
     voff: Vec<u32>,
-    uni: Vec<u64>,
-    ctx_id: Vec<u32>,
-    ctx_total: Vec<f64>,
+    uni_off: usize,
+    ctx_id_off: usize,
+    ctx_tot_off: usize,
+    off_off: usize,
+    nxt_off: usize,
+    cnt_off: usize,
     ctx_back: Vec<f64>,
-    off: Vec<u32>,
-    nxt: Vec<u32>,
-    cnt: Vec<u32>,
     /// S2k word-class term (classes.sjc); `None` only for the explicit class-less constructors.
     classes: Option<Classes>,
     /// SHA-256 (hex) of the model bytes, taken once in `parse`: classes.sjc and kn.sjkn are bound to it.
@@ -149,8 +206,8 @@ struct Kn {
     beta: f64,
     theta: u32,
     total: u64,
-    /// The whole file, the bytes `add_kn` checked; N is read in place (little-endian u32 at `KN_N + 4 * id`), so nothing is copied.
-    raw: Vec<u8>,
+    /// The whole file (a read-only memory map when loaded, or bytes in tests); N is read in place (little-endian u32 at `KN_N + 4 * id`), so nothing is copied.
+    raw: MappedBytes,
     /// SHA-256 of `raw` and `<its sha8>`, computed on first use.
     hashed: OnceLock<([u8; 32], String)>,
 }
@@ -167,19 +224,35 @@ impl Kn {
     }
 
     /// N' = N + 1 of word `id`.
+    #[inline]
     fn np1(&self, id: usize) -> u64 {
-        let at = KN_N + 4 * id;
-        u32::from_le_bytes([self.raw[at], self.raw[at + 1], self.raw[at + 2], self.raw[at + 3]]) as u64 + 1
+        le_u32(&self.raw, KN_N + 4 * id) as u64 + 1
     }
 }
 
-/// classes.sjc (format in tools/build_classes.py), indexed by model word id.
+/// classes.sjc (format in tools/build_classes.py), indexed by model word id and read in place from `raw`.
 struct Classes {
+    raw: MappedBytes,
     k3: usize,
     mu: f64,
-    cls: Vec<u16>,
-    emit: Vec<f64>,
-    pc: Vec<f64>,
+    cls_off: usize,
+    emit_off: usize,
+    pc_off: usize,
+}
+
+impl Classes {
+    #[inline]
+    fn cls(&self, id: usize) -> u16 {
+        le_u16(&self.raw, self.cls_off + 2 * id)
+    }
+    #[inline]
+    fn emit(&self, id: usize) -> f64 {
+        le_f64(&self.raw, self.emit_off + 8 * id)
+    }
+    #[inline]
+    fn pc(&self, cv: usize, cw: usize) -> f64 {
+        le_f64(&self.raw, self.pc_off + 8 * (cv * self.k3 + cw))
+    }
 }
 
 const CLASS_MAGIC: &[u8; 8] = b"SJCL0001";
@@ -257,16 +330,6 @@ impl<'a> Rd<'a> {
     fn f64(&mut self) -> Result<f64, LmError> {
         Ok(f64::from_le_bytes(self.arr()?))
     }
-    fn vec<T>(&mut self, n: usize, w: usize, f: impl Fn(&[u8]) -> T) -> Result<Vec<T>, LmError> {
-        let bytes = self.take(n.checked_mul(w).ok_or(LmError::Format)?)?;
-        Ok(bytes.chunks_exact(w).map(f).collect())
-    }
-    fn u32s(&mut self, n: usize) -> Result<Vec<u32>, LmError> {
-        self.vec(n, 4, |c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-    }
-    fn u64s(&mut self, n: usize) -> Result<Vec<u64>, LmError> {
-        self.vec(n, 8, |c| u64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))
-    }
 }
 
 impl Lm {
@@ -277,7 +340,22 @@ impl Lm {
 
     /// Cheap fingerprint of the loaded model (sizes of its tables), to tell two models apart.
     pub fn identity(&self) -> (u64, usize, usize) {
-        (self.n, self.voff.len(), self.nxt.len())
+        (self.n, self.voff.len(), self.e)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_mapped(&self) -> bool {
+        self.raw.is_mapped()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn classes_is_mapped(&self) -> Option<bool> {
+        self.classes.as_ref().map(|c| c.raw.is_mapped())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn kn_is_mapped(&self) -> Option<bool> {
+        self.kn.as_ref().map(|k| k.raw.is_mapped())
     }
 
     /// The model at `path` and the `classes.sjc` beside it (docs/spec/models.md §2.2). A missing or mismatching class
@@ -304,26 +382,28 @@ impl Lm {
     /// formal, `trigram-chat.sjt3` chat) that exists (a dangling symlink included) but cannot be read or does not match the model is
     /// `TriTable`; no such path is off.
     pub fn load_opts(path: &Path, classes: bool, kn: bool, tri: &[Profile]) -> Result<Lm, LmError> {
-        let model = std::fs::read(path).map_err(|_| LmError::Io)?;
+        let model = map_or_empty(path)?;
         let mut lm = if classes {
-            let c = std::fs::read(path.with_file_name("classes.sjc")).map_err(|_| LmError::Io)?;
-            Lm::parse_with_classes(&model, &c)?
+            let c = map_or_empty(&path.with_file_name("classes.sjc"))?;
+            Lm::parse_bytes_with_classes(model, c)?
         } else {
-            Lm::parse(&model)?
+            Lm::parse_bytes(model)?
         };
         if kn {
-            if let Some(side) = read_beside(path, "kn.sjkn").map_err(|_| LmError::KnSide)? {
-                lm.add_kn(&side)?;
+            if let Some(side) = beside(path, "kn.sjkn").map_err(|_| LmError::KnSide)? {
+                // SAFETY: same read-only mmap contract as the model and trigram tables; tools/kn_cont.py and install paths replace by rename.
+                let map = unsafe { Mapped::open(&side) }.map_err(|_| LmError::KnSide)?;
+                lm.add_kn_bytes(MappedBytes::Map(map))?;
             }
         }
         for &profile in tri {
-            // Mapped, not read: the formal table is 133.3 MB (docs/spec/decoder.md §3.5). The same "exists" test as `read_beside`.
+            // Mapped, not read: the formal table is 133.3 MB (docs/spec/decoder.md §3.5). The same "exists" test as `beside`.
             if let Some(side) = beside(path, tri_file(profile)).map_err(|_| LmError::TriTable)? {
                 // SAFETY: nothing rewrites this file in place while an `Lm` has it mapped. The App's Resources and a user's data/lm are
                 // replaced only by rename (scripts/install-ime.sh, the installer, the Homebrew cask), and tools/build_trigram.py writes a
                 // temp file and renames it onto the target.
-                let map = unsafe { Mapped::open(&side) }.map_err(|()| LmError::TriTable)?;
-                lm.add_tri_bytes(profile, TriBytes::Map(map))?;
+                let map = unsafe { Mapped::open(&side) }.map_err(|_| LmError::TriTable)?;
+                lm.add_tri_bytes(profile, MappedBytes::Map(map))?;
             }
         }
         Ok(lm)
@@ -334,18 +414,24 @@ impl Lm {
     /// header sum of N' between the largest N' and the sum of all N' over ids >= 2 (a correct file always is: the sum counts
     /// each variant class once). Turns the Kneser-Ney term on.
     pub fn add_kn(&mut self, side: &[u8]) -> Result<(), LmError> {
+        self.add_kn_bytes(MappedBytes::Mem(side.to_vec()))
+    }
+
+    fn add_kn_bytes(&mut self, side: MappedBytes) -> Result<(), LmError> {
         let bad = |_| LmError::KnSide;
-        let mut r = Rd(side);
+        let mut r = Rd(&side);
         if r.take(8).map_err(bad)? != KN_MAGIC {
             return Err(LmError::KnSide);
         }
         let v = r.u32().map_err(bad)? as usize;
         let want: String = r.take(32).map_err(bad)?.iter().map(|b| format!("{b:02x}")).collect();
         let (theta, beta, total) = (r.u32().map_err(bad)?, r.f64().map_err(bad)?, r.u64().map_err(bad)?);
-        if v != self.uni.len() || want != self.sha || !(0.0..=1.0).contains(&beta) || side.len() != KN_N + 4 * v {
+        let want_len = v.checked_mul(4).and_then(|n| KN_N.checked_add(n)).ok_or(LmError::KnSide)?;
+        if v != self.v || want != self.sha || !(0.0..=1.0).contains(&beta) || side.len() != want_len {
             return Err(LmError::KnSide);
         }
-        let kn = Kn { beta, theta, total, raw: side.to_vec(), hashed: OnceLock::new() };
+        drop(r);
+        let kn = Kn { beta, theta, total, raw: side, hashed: OnceLock::new() };
         let (mut max, mut sum) = (0u64, 0u128);
         for id in 2..v {
             let n = kn.np1(id);
@@ -377,11 +463,11 @@ impl Lm {
     /// V, the hash of the model this `Lm` was parsed from, D, exact length, and the order and range of every key, offset and next id.
     /// Turns the trigram level on for `profile` (the formal table is `trigram.sjt3`, the chat one `trigram-chat.sjt3`).
     pub fn add_tri_for(&mut self, profile: Profile, table: Vec<u8>) -> Result<(), LmError> {
-        self.add_tri_bytes(profile, TriBytes::Mem(table))
+        self.add_tri_bytes(profile, MappedBytes::Mem(table))
     }
 
-    fn add_tri_bytes(&mut self, profile: Profile, table: TriBytes) -> Result<(), LmError> {
-        let t = Some(Tri::parse(table, self.uni.len(), &self.sha)?);
+    fn add_tri_bytes(&mut self, profile: Profile, table: MappedBytes) -> Result<(), LmError> {
+        let t = Some(Tri::parse(table, self.v, &self.sha)?);
         match profile {
             Profile::Chat => self.tri_chat = t,
             Profile::Formal => self.tri_formal = t,
@@ -434,117 +520,179 @@ impl Lm {
 
     /// Model bytes plus classes.sjc bytes: magic, the model's SHA-256, the vocabulary size and the exact length must match.
     pub fn parse_with_classes(model: &[u8], classes: &[u8]) -> Result<Lm, LmError> {
-        let mut lm = Lm::parse(model)?;
-        let sha = lm.sha.clone();
-        let mut r = Rd(classes);
+        Lm::parse_bytes_with_classes(MappedBytes::Mem(model.to_vec()), MappedBytes::Mem(classes.to_vec()))
+    }
+
+    fn parse_bytes_with_classes(model: MappedBytes, classes: MappedBytes) -> Result<Lm, LmError> {
+        let mut lm = Lm::parse_bytes(model)?;
+        let total_len = classes.len();
+        let mut r = Rd(&classes);
         if r.take(8)? != CLASS_MAGIC {
             return Err(LmError::Format);
         }
         let want: String = r.take(32)?.iter().map(|b| format!("{b:02x}")).collect();
         let (k, mu, v) = (r.u32()? as usize, r.f64()?, r.u32()? as usize);
-        if want != sha || v != lm.uni.len() || !(0.0..=1.0).contains(&mu) {
+        if want != lm.sha || v != lm.v || !(0.0..=1.0).contains(&mu) {
             return Err(LmError::Format);
         }
         let k3 = k.checked_add(3).ok_or(LmError::Format)?;
-        let cls = r.vec(v, 2, |c| u16::from_le_bytes([c[0], c[1]]))?;
-        let emit = r.vec(v, 8, |c| f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))?;
-        let pc = r.vec(k3.checked_mul(k3).ok_or(LmError::Format)?, 8, |c| f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))?;
-        // The model hash binds the file to the model, not its numbers: a probability outside [0, 1] or a
-        // class id out of range is a malformed file, never a silently wrong ranking.
-        let prob_ok = |x: &f64| (0.0..=1.0).contains(x);
-        if !r.0.is_empty() || cls.iter().any(|&c| c != NO_CLASS && c as usize >= k3) || !emit.iter().all(prob_ok) || !pc.iter().all(prob_ok) {
+        let cls_off = total_len - r.0.len();
+        let emit_off = cls_off.checked_add(v.checked_mul(2).ok_or(LmError::Format)?).ok_or(LmError::Format)?;
+        let pc_off = emit_off.checked_add(v.checked_mul(8).ok_or(LmError::Format)?).ok_or(LmError::Format)?;
+        let pc_len = k3.checked_mul(k3).ok_or(LmError::Format)?;
+        let want_len = pc_off.checked_add(pc_len.checked_mul(8).ok_or(LmError::Format)?).ok_or(LmError::Format)?;
+        if total_len != want_len {
             return Err(LmError::Format);
         }
-        lm.classes = Some(Classes { k3, mu, cls, emit, pc });
+        drop(r);
+        let c = Classes { raw: classes, k3, mu, cls_off, emit_off, pc_off };
+        // The model hash binds the file to the model, not its numbers: a probability outside [0, 1] or a
+        // class id out of range is a malformed file, never a silently wrong ranking.
+        let prob_ok = |x: f64| (0.0..=1.0).contains(&x);
+        for id in 0..v {
+            let cid = c.cls(id);
+            if (cid != NO_CLASS && cid as usize >= k3) || !prob_ok(c.emit(id)) {
+                return Err(LmError::Format);
+            }
+        }
+        for j in 0..pc_len {
+            if !prob_ok(le_f64(&c.raw, c.pc_off + 8 * j)) {
+                return Err(LmError::Format);
+            }
+        }
+        lm.classes = Some(c);
         Ok(lm)
     }
 
     /// Format in tools/build_lm.py. Beyond magic, sizes and trailing bytes, the invariants the lookups
     /// rely on (sorted vocab and entries, offsets in range, ids below V) are checked so no index can panic.
     pub fn parse(bytes: &[u8]) -> Result<Lm, LmError> {
-        let mut r = Rd(bytes);
-        if r.take(8)? != b"SJLM0001" {
-            return Err(LmError::Format);
-        }
-        let v = r.u32()? as usize;
-        let (n, eos_total, d) = (r.u64()?, r.u64()?, r.f64()?);
-        if v < 2 || n == 0 || !d.is_finite() {
-            return Err(LmError::Format);
-        }
-        let mut pool = Vec::new();
-        let mut voff = Vec::with_capacity(v + 1);
-        voff.push(0u32);
-        for _ in 0..v {
-            let len = r.u16()? as usize;
-            let w = r.take(len)?;
-            std::str::from_utf8(w).map_err(|_| LmError::Format)?;
-            pool.extend_from_slice(w);
-            voff.push(u32::try_from(pool.len()).map_err(|_| LmError::Format)?);
-        }
-        let word = |i: usize| &pool[voff[i] as usize..voff[i + 1] as usize];
-        if word(0) != b"<s>" || word(1) != b"</s>" || (3..v).any(|i| word(i - 1) >= word(i)) {
-            return Err(LmError::Format);
-        }
-        let uni = r.u64s(v)?;
-        let c = r.u32()? as usize;
-        let ctx_id = r.u32s(c)?;
-        let ctx_tot = r.u64s(c)?;
-        let off = r.u32s(c.checked_add(1).ok_or(LmError::Format)?)?;
-        let e = r.u32()? as usize;
-        let nxt = r.u32s(e)?;
-        let cnt = r.u32s(e)?;
-        if !r.0.is_empty() {
-            return Err(LmError::Format);
-        }
+        Lm::parse_bytes(MappedBytes::Mem(bytes.to_vec()))
+    }
+
+    fn parse_bytes(raw: MappedBytes) -> Result<Lm, LmError> {
+        let total_len = raw.len();
+        let (v, n, eos_total, d, voff, uni_off, ctx_id_off, ctx_tot_off, off_off, c, nxt_off, cnt_off, e) = {
+            let mut r = Rd(&raw);
+            if r.take(8)? != b"SJLM0001" {
+                return Err(LmError::Format);
+            }
+            let v = r.u32()? as usize;
+            let (n, eos_total, d) = (r.u64()?, r.u64()?, r.f64()?);
+            if v < 2 || n == 0 || !d.is_finite() {
+                return Err(LmError::Format);
+            }
+            let v1 = v.checked_add(1).ok_or(LmError::Format)?;
+            if v.checked_mul(10).is_none_or(|min| min > r.0.len()) {
+                return Err(LmError::Format);
+            }
+            let mut voff = Vec::with_capacity(v1);
+            for _ in 0..v {
+                let pos = total_len - r.0.len();
+                voff.push(u32::try_from(pos).map_err(|_| LmError::Format)?);
+                let len = r.u16()? as usize;
+                let w = r.take(len)?;
+                std::str::from_utf8(w).map_err(|_| LmError::Format)?;
+            }
+            let uni_off = total_len - r.0.len();
+            voff.push(u32::try_from(uni_off).map_err(|_| LmError::Format)?);
+            let word = |i: usize| &raw[voff[i] as usize + 2..voff[i + 1] as usize];
+            if word(0) != b"<s>" || word(1) != b"</s>" || (3..v).any(|i| word(i - 1) >= word(i)) {
+                return Err(LmError::Format);
+            }
+            r.take(v.checked_mul(8).ok_or(LmError::Format)?)?;
+            let c = r.u32()? as usize;
+            let ctx_id_off = total_len - r.0.len();
+            r.take(c.checked_mul(4).ok_or(LmError::Format)?)?;
+            let ctx_tot_off = total_len - r.0.len();
+            r.take(c.checked_mul(8).ok_or(LmError::Format)?)?;
+            let off_off = total_len - r.0.len();
+            let c1 = c.checked_add(1).ok_or(LmError::Format)?;
+            r.take(c1.checked_mul(4).ok_or(LmError::Format)?)?;
+            let e = r.u32()? as usize;
+            let nxt_off = total_len - r.0.len();
+            r.take(e.checked_mul(4).ok_or(LmError::Format)?)?;
+            let cnt_off = total_len - r.0.len();
+            r.take(e.checked_mul(4).ok_or(LmError::Format)?)?;
+            if !r.0.is_empty() {
+                return Err(LmError::Format);
+            }
+            (v, n, eos_total, d, voff, uni_off, ctx_id_off, ctx_tot_off, off_off, c, nxt_off, cnt_off, e)
+        };
+        let mut lm = Lm {
+            raw,
+            n,
+            d,
+            p_eos: eos_total as f64 / n as f64,
+            v,
+            c,
+            e,
+            voff,
+            uni_off,
+            ctx_id_off,
+            ctx_tot_off,
+            off_off,
+            nxt_off,
+            cnt_off,
+            ctx_back: Vec::new(),
+            classes: None,
+            sha: String::new(),
+            kn: None,
+            tri_formal: None,
+            tri_chat: None,
+        };
         let vmax = v as u32;
-        if ctx_id.iter().any(|&i| i >= vmax) || ctx_id.windows(2).any(|w| w[0] >= w[1]) {
+        if lm.off(0) != 0 || lm.off(c) as usize != e {
             return Err(LmError::Format);
         }
-        if off[0] != 0 || off[c] as usize != e || off.windows(2).any(|w| w[0] > w[1]) || ctx_tot.contains(&0) {
-            return Err(LmError::Format);
-        }
-        if nxt.iter().any(|&i| i >= vmax) {
-            return Err(LmError::Format);
-        }
-        let mut ctx_total = Vec::with_capacity(c);
         let mut ctx_back = Vec::with_capacity(c);
         for i in 0..c {
-            let range = off[i] as usize..off[i + 1] as usize;
-            if nxt[range.clone()].windows(2).any(|w| w[0] >= w[1]) {
+            let cid = lm.ctx_id(i);
+            let tot = lm.ctx_tot(i);
+            let lo = lm.off(i) as usize;
+            let hi = lm.off(i + 1) as usize;
+            if cid >= vmax || (i > 0 && lm.ctx_id(i - 1) >= cid) || tot == 0 || lo > hi || hi > e {
                 return Err(LmError::Format);
             }
             // back(v): sum (count - D) in file order, then divide once.
             let mut kept_sum = 0.0f64;
-            for j in range {
-                kept_sum += cnt[j] as f64 - d;
+            for j in lo..hi {
+                let w = lm.nxt(j);
+                if w >= vmax || (j > lo && lm.nxt(j - 1) >= w) {
+                    return Err(LmError::Format);
+                }
+                kept_sum += lm.cnt(j) as f64 - d;
             }
-            let t = ctx_tot[i] as f64;
-            ctx_total.push(t);
-            ctx_back.push(1.0 - kept_sum / t);
+            ctx_back.push(1.0 - kept_sum / (tot as f64));
         }
-        Ok(Lm {
-            n,
-            d,
-            p_eos: eos_total as f64 / n as f64,
-            pool,
-            voff,
-            uni,
-            ctx_id,
-            ctx_total,
-            ctx_back,
-            off,
-            nxt,
-            cnt,
-            classes: None,
-            sha: crate::eval::sha256_hex(bytes),
-            kn: None,
-            tri_formal: None,
-            tri_chat: None,
-        })
+        lm.ctx_back = ctx_back;
+        lm.sha = crate::eval::sha256_hex(&lm.raw);
+        Ok(lm)
     }
 
-    fn vocab_word(&self, i: usize) -> &[u8] {
-        &self.pool[self.voff[i] as usize..self.voff[i + 1] as usize]
+    #[inline]
+    fn uni(&self, i: usize) -> u64 {
+        le_u64(&self.raw, self.uni_off + 8 * i)
+    }
+    #[inline]
+    fn ctx_id(&self, i: usize) -> u32 {
+        le_u32(&self.raw, self.ctx_id_off + 4 * i)
+    }
+    #[inline]
+    fn ctx_tot(&self, i: usize) -> u64 {
+        le_u64(&self.raw, self.ctx_tot_off + 8 * i)
+    }
+    #[inline]
+    fn off(&self, i: usize) -> u32 {
+        le_u32(&self.raw, self.off_off + 4 * i)
+    }
+    #[inline]
+    fn nxt(&self, j: usize) -> u32 {
+        le_u32(&self.raw, self.nxt_off + 4 * j)
+    }
+    #[inline]
+    fn cnt(&self, j: usize) -> u32 {
+        le_u32(&self.raw, self.cnt_off + 4 * j)
     }
 
     /// Vocabulary id; ids 0 and 1 are the sentence markers, the rest are sorted by UTF-8 bytes.
@@ -554,10 +702,13 @@ impl Lm {
             "</s>" => return Some(1),
             _ => {}
         }
-        let (mut lo, mut hi) = (2usize, self.uni.len());
+        let raw: &[u8] = &self.raw;
+        let wb = w.as_bytes();
+        let (mut lo, mut hi) = (2usize, self.v);
         while lo < hi {
             let mid = (lo + hi) / 2;
-            match self.vocab_word(mid).cmp(w.as_bytes()) {
+            let word = &raw[self.voff[mid] as usize + 2..self.voff[mid + 1] as usize];
+            match word.cmp(wb) {
                 std::cmp::Ordering::Less => lo = mid + 1,
                 std::cmp::Ordering::Greater => hi = mid,
                 std::cmp::Ordering::Equal => return Some(mid as u32),
@@ -567,15 +718,19 @@ impl Lm {
     }
 
     fn ctx_of(&self, id: Option<u32>) -> Ctx {
-        Ctx { id, idx: id.and_then(|id| self.ctx_id.binary_search(&id).ok()) }
+        let idx = id.and_then(|id| {
+            LeU32Slice(&self.raw[self.ctx_id_off..self.ctx_id_off + 4 * self.c]).binary_search(&id).ok()
+        });
+        Ctx { id, idx }
     }
 
     /// Whether the table keeps the bigram (v, w) with a non-zero count: the branch of `prob_c_kn` that does not back off
     /// (SR-TW-M: the colloquial lc tells a word seen at the sentence start from an unseen one).
     pub fn has_bigram(&self, v: &str, w: &str) -> bool {
         let (Some(i), Some(w)) = (self.ctx_of(self.word_id(v)).idx, self.word_id(w)) else { return false };
-        let range = self.off[i] as usize..self.off[i + 1] as usize;
-        self.nxt[range.clone()].binary_search(&w).is_ok_and(|j| self.cnt[range.start + j] != 0)
+        let lo = self.off(i) as usize;
+        let hi = self.off(i + 1) as usize;
+        LeU32Slice(&self.raw[self.nxt_off + 4 * lo..self.nxt_off + 4 * hi]).binary_search(&w).is_ok_and(|j| self.cnt(lo + j) != 0)
     }
 
     /// P(w | context) with the backoff distribution value `pb` (lm.py `prob`): the one probability function every
@@ -610,18 +765,20 @@ impl Lm {
         let back = match ctx.idx {
             None => 1.0,
             Some(i) => {
-                let range = self.off[i] as usize..self.off[i + 1] as usize;
-                let found = w.and_then(|w| self.nxt[range.clone()].binary_search(&w).ok());
-                if let Some(k) = found.map(|j| self.cnt[range.start + j]).filter(|&k| k != 0) {
-                    return (k as f64 - self.d) / self.ctx_total[i] + self.ctx_back[i] * pb;
+                let raw: &[u8] = &self.raw;
+                let lo = le_u32(raw, self.off_off + 4 * i) as usize;
+                let hi = le_u32(raw, self.off_off + 4 * (i + 1)) as usize;
+                let found = w.and_then(|w| LeU32Slice(&raw[self.nxt_off + 4 * lo..self.nxt_off + 4 * hi]).binary_search(&w).ok());
+                if let Some(k) = found.map(|j| le_u32(raw, self.cnt_off + 4 * (lo + j))).filter(|&k| k != 0) {
+                    return (k as f64 - self.d) / (le_u64(raw, self.ctx_tot_off + 8 * i) as f64) + self.ctx_back[i] * pb;
                 }
                 self.ctx_back[i]
             }
         };
         if let (Some(c), Some(v), Some(w)) = (&self.classes, ctx.id, w) {
-            let (cv, cw) = (c.cls[v as usize], c.cls[w as usize]);
+            let (cv, cw) = (c.cls(v as usize), c.cls(w as usize));
             if cv != NO_CLASS && cw != NO_CLASS {
-                return back * ((1.0 - c.mu) * pb + c.mu * c.pc[cv as usize * c.k3 + cw as usize] * c.emit[w as usize]);
+                return back * ((1.0 - c.mu) * pb + c.mu * c.pc(cv as usize, cw as usize) * c.emit(w as usize));
             }
         }
         back * pb
@@ -718,7 +875,7 @@ impl Lm {
 
     /// Unigram count (0 for unknown words).
     pub fn count(&self, w: &str) -> u64 {
-        self.word_id(w).map_or(0, |i| self.uni[i as usize])
+        self.word_id(w).map_or(0, |i| self.uni(i as usize))
     }
 
     /// Total unigram count N.
@@ -727,9 +884,13 @@ impl Lm {
     }
 
     /// Ids of the words listed after `v` in the model, ascending; empty when `v` has no context entry.
-    pub fn successor_ids(&self, v: &str) -> &[u32] {
-        let range = self.ctx_of(self.word_id(v)).idx.map_or(0..0, |i| self.off[i] as usize..self.off[i + 1] as usize);
-        &self.nxt[range]
+    pub fn successor_ids(&self, v: &str) -> LeU32Slice<'_> {
+        let range = self.ctx_of(self.word_id(v)).idx.map_or(0..0, |i| {
+            let lo = self.nxt_off + 4 * self.off(i) as usize;
+            let hi = self.nxt_off + 4 * self.off(i + 1) as usize;
+            lo..hi
+        });
+        LeU32Slice(&self.raw[range])
     }
 
     /// `word` for a caller that looked the ids up once: `ctx` from `context_of(v)`, `w` from `word_id`. `cfg` as in `unigram_back`: the
@@ -2624,5 +2785,219 @@ mod tests {
         assert_eq!(rerank_pool(&nb(&[false, false, false, false]), 2), Some(vec![0, 1]));
         assert_eq!(rerank_pool(&[], 8), None);
         assert_eq!(rerank_pool(&nb(&[false, false]), 0), None, "topk 0: no rerank, not an empty pool");
+    }
+
+    fn tiny_kn(model: &[u8]) -> Vec<u8> {
+        let mut b = KN_MAGIC.to_vec();
+        b.extend(4u32.to_le_bytes());
+        b.extend(crate::eval::sha256(model));
+        b.extend(1u32.to_le_bytes()); // theta
+        b.extend(0.5f64.to_le_bytes()); // beta
+        b.extend(5u64.to_le_bytes()); // sum of N' for ids 2..4: (1 + 1) + (2 + 1) = 5
+        for n in [0u32, 0, 1, 2] {
+            b.extend(n.to_le_bytes());
+        }
+        b
+    }
+
+    #[test]
+    fn load_opts_maps_all_ngram_files() {
+        let dir = std::env::temp_dir().join(format!("shanjie-lm-all-mmap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let m = dir.join("bigram.sjlm");
+        let c = dir.join("classes.sjc");
+        let k = dir.join("kn.sjkn");
+        let tf = dir.join("trigram.sjt3");
+        let tc = dir.join("trigram-chat.sjt3");
+
+        let model = tiny();
+        let classes = tiny_classes(&model);
+        let kn = tiny_kn(&model);
+        let tri_f = tiny_tri(&model);
+        let tri_c = tri_bytes(&model, 0.75, &[((0, 0), 6, &[(3, 6)])]);
+
+        std::fs::write(&m, &model).unwrap();
+        std::fs::write(&c, &classes).unwrap();
+        std::fs::write(&k, &kn).unwrap();
+        std::fs::write(&tf, &tri_f).unwrap();
+        std::fs::write(&tc, &tri_c).unwrap();
+
+        let lm = Lm::load_opts(&m, true, true, &[Profile::Chat, Profile::Formal]).unwrap();
+        assert!(lm.is_mapped(), "bigram.sjlm must be mapped");
+        assert_eq!(lm.classes_is_mapped(), Some(true), "classes.sjc must be mapped");
+        assert_eq!(lm.kn_is_mapped(), Some(true), "kn.sjkn must be mapped");
+        assert_eq!(lm.tri_is_mapped(Profile::Formal), Some(true), "trigram.sjt3 must be mapped");
+        assert_eq!(lm.tri_is_mapped(Profile::Chat), Some(true), "trigram-chat.sjt3 must be mapped");
+        assert_eq!(lm.identity().1, 4 + 1, "identity().1 must stay V + 1");
+
+        let mut mem = Lm::parse_with_classes(&model, &classes).unwrap();
+        mem.add_kn(&kn).unwrap();
+        mem.add_tri_for(Profile::Formal, tri_f).unwrap();
+        mem.add_tri_for(Profile::Chat, tri_c).unwrap();
+        assert!(!mem.is_mapped());
+        assert_eq!(mem.classes_is_mapped(), Some(false));
+        assert_eq!(mem.kn_is_mapped(), Some(false));
+        assert_eq!(mem.tri_is_mapped(Profile::Formal), Some(false));
+        assert_eq!(mem.tri_is_mapped(Profile::Chat), Some(false));
+
+        assert_eq!(lm.sha256(), mem.sha256());
+        assert_eq!(lm.identity(), mem.identity());
+        assert_eq!(lm.kn_sha256(), mem.kn_sha256());
+        assert_eq!(lm.kn_tag(Profile::Chat), mem.kn_tag(Profile::Chat));
+        assert_eq!(lm.kn_tag(Profile::Formal), mem.kn_tag(Profile::Formal));
+        assert_eq!(lm.tri_tag(Profile::Chat), mem.tri_tag(Profile::Chat));
+        assert_eq!(lm.tri_tag(Profile::Formal), mem.tri_tag(Profile::Formal));
+        for w in ["<s>", "</s>", "a", "b", "zzz"] {
+            assert_eq!(lm.word_id(w), mem.word_id(w));
+            assert_eq!(lm.count(w), mem.count(w));
+            let s1: Vec<u32> = lm.successor_ids(w).iter().collect();
+            let s2: Vec<u32> = mem.successor_ids(w).iter().collect();
+            assert_eq!(s1, s2);
+        }
+        for profile in [Profile::Chat, Profile::Formal] {
+            let cfg = lm.scoring(profile);
+            for u in [None, Some("<s>"), Some("a"), Some("b")] {
+                for v in ["<s>", "a", "b", "zzz"] {
+                    for w in ["a", "b", "<s>", "</s>", "zzz"] {
+                        assert_eq!(lm.has_bigram(v, w), mem.has_bigram(v, w));
+                        assert_eq!(lm.prob(v, w, 0.1).to_bits(), mem.prob(v, w, 0.1).to_bits());
+                        assert_eq!(lm.word(0.5, v, w, -1.0).to_bits(), mem.word(0.5, v, w, -1.0).to_bits());
+                        assert_eq!(lm.word3(cfg, u, v, w, -1.0).to_bits(), mem.word3(cfg, u, v, w, -1.0).to_bits());
+                    }
+                    assert_eq!(lm.eos(0.5, v).to_bits(), mem.eos(0.5, v).to_bits());
+                    assert_eq!(lm.eos3(cfg, u, v).to_bits(), mem.eos3(cfg, u, v).to_bits());
+                }
+            }
+        }
+        drop(lm);
+        drop(mem);
+
+        // Error priority checks: remove side files cleanly first.
+        let _ = std::fs::remove_file(&tf);
+        let _ = std::fs::remove_file(&tc);
+        let _ = std::fs::remove_file(&k);
+
+        // 0-byte .sjlm without classes -> Format; 0-byte .sjlm + classes == true + missing classes.sjc -> Io.
+        std::fs::write(&m, []).unwrap();
+        assert_eq!(Lm::load_opts(&m, false, false, &[]).err(), Some(LmError::Format), "0-byte model without classes");
+        assert_eq!(Lm::load_opts(&m, true, false, &[]).err(), Some(LmError::Format), "0-byte model with classes present");
+        std::fs::remove_file(&c).unwrap();
+        assert_eq!(Lm::load_opts(&m, true, false, &[]).err(), Some(LmError::Io), "0-byte model + classes == true + missing classes.sjc");
+
+        // Truncated and bad-magic .sjlm -> Format.
+        std::fs::write(&m, &model[..model.len() - 1]).unwrap();
+        assert_eq!(Lm::load_opts(&m, false, false, &[]).err(), Some(LmError::Format), "truncated model");
+        let mut bad_magic = model.clone();
+        bad_magic[7] = b'2';
+        std::fs::write(&m, &bad_magic).unwrap();
+        assert_eq!(Lm::load_opts(&m, false, false, &[]).err(), Some(LmError::Format), "bad magic model");
+
+        // Restore valid .sjlm: missing classes.sjc -> Io, 0-byte classes.sjc -> Format.
+        std::fs::write(&m, &model).unwrap();
+        assert_eq!(Lm::load_opts(&m, true, false, &[]).err(), Some(LmError::Io), "missing classes.sjc");
+        std::fs::write(&c, []).unwrap();
+        assert_eq!(Lm::load_opts(&m, true, false, &[]).err(), Some(LmError::Format), "0-byte classes.sjc");
+
+        // Restore valid classes.sjc: 0-byte kn.sjkn -> KnSide.
+        std::fs::write(&c, &classes).unwrap();
+        std::fs::write(&k, []).unwrap();
+        assert_eq!(Lm::load_opts(&m, true, true, &[]).err(), Some(LmError::KnSide), "0-byte kn.sjkn");
+        std::fs::remove_file(&k).unwrap();
+
+        // Directory paths for kn.sjkn -> KnSide, classes.sjc -> Io, model -> Io.
+        std::fs::create_dir(&k).unwrap();
+        assert_eq!(Lm::load_opts(&m, true, true, &[]).err(), Some(LmError::KnSide), "directory kn.sjkn");
+        std::fs::remove_dir(&k).unwrap();
+
+        std::fs::remove_file(&c).unwrap();
+        std::fs::create_dir(&c).unwrap();
+        assert_eq!(Lm::load_opts(&m, true, false, &[]).err(), Some(LmError::Io), "directory classes.sjc");
+        std::fs::remove_dir(&c).unwrap();
+
+        std::fs::remove_file(&m).unwrap();
+        std::fs::create_dir(&m).unwrap();
+        assert_eq!(Lm::load_opts(&m, false, false, &[]).err(), Some(LmError::Io), "directory model");
+        std::fs::remove_dir(&m).unwrap();
+
+        #[cfg(unix)]
+        {
+            let mkfifo = |p: &Path| {
+                assert!(std::process::Command::new("mkfifo").arg(p).status().unwrap().success(), "mkfifo");
+            };
+
+            // Dangling symlink and FIFO for model -> Io.
+            std::os::unix::fs::symlink(dir.join("missing.sjlm"), &m).unwrap();
+            assert_eq!(Lm::load_opts(&m, false, false, &[]).err(), Some(LmError::Io), "dangling symlink model");
+            std::fs::remove_file(&m).unwrap();
+            mkfifo(&m);
+            assert_eq!(Lm::load_opts(&m, false, false, &[]).err(), Some(LmError::Io), "FIFO model");
+            std::fs::remove_file(&m).unwrap();
+
+            // Dangling symlink and FIFO for classes.sjc -> Io.
+            std::fs::write(&m, &model).unwrap();
+            std::os::unix::fs::symlink(dir.join("missing.sjc"), &c).unwrap();
+            assert_eq!(Lm::load_opts(&m, true, false, &[]).err(), Some(LmError::Io), "dangling symlink classes.sjc");
+            std::fs::remove_file(&c).unwrap();
+            mkfifo(&c);
+            assert_eq!(Lm::load_opts(&m, true, false, &[]).err(), Some(LmError::Io), "FIFO classes.sjc");
+            std::fs::remove_file(&c).unwrap();
+
+            // Dangling symlink and FIFO for kn.sjkn -> KnSide.
+            std::fs::write(&c, &classes).unwrap();
+            std::os::unix::fs::symlink(dir.join("missing.sjkn"), &k).unwrap();
+            assert_eq!(Lm::load_opts(&m, true, true, &[]).err(), Some(LmError::KnSide), "dangling symlink kn.sjkn");
+            std::fs::remove_file(&k).unwrap();
+            mkfifo(&k);
+            assert_eq!(Lm::load_opts(&m, true, true, &[]).err(), Some(LmError::KnSide), "FIFO kn.sjkn");
+            std::fs::remove_file(&k).unwrap();
+        }
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn malformed_header_huge_vocab_returns_format_without_oom() {
+        let mut buf = b"SJLM0001".to_vec();
+        buf.extend(u32::MAX.to_le_bytes());
+        buf.extend(1u64.to_le_bytes());
+        buf.extend(0u64.to_le_bytes());
+        buf.extend(0.75f64.to_le_bytes());
+        assert_eq!(buf.len(), 36);
+        assert_eq!(Lm::parse(&buf).err(), Some(LmError::Format));
+    }
+
+    #[test]
+    fn le_u32_slice_bounds_and_search() {
+        let empty = LeU32Slice(&[]);
+        assert_eq!(empty.len(), 0);
+        assert!(empty.is_empty());
+        assert_eq!(empty.get(0), None);
+        assert_eq!(empty.get(usize::MAX / 4), None);
+        assert_eq!(empty.get(usize::MAX), None);
+        assert_eq!(empty.binary_search(&10), Err(0));
+        assert_eq!(empty.iter().collect::<Vec<_>>(), Vec::<u32>::new());
+
+        let mut bytes = Vec::new();
+        for x in [2u32, 5, 9, 14] {
+            bytes.extend(x.to_le_bytes());
+        }
+        let s = LeU32Slice(&bytes);
+        assert_eq!(s.len(), 4);
+        assert!(!s.is_empty());
+        assert_eq!(s.get(0), Some(2));
+        assert_eq!(s.get(1), Some(5));
+        assert_eq!(s.get(2), Some(9));
+        assert_eq!(s.get(3), Some(14));
+        assert_eq!(s.get(4), None);
+        assert_eq!(s.get(usize::MAX / 4), None);
+        assert_eq!(s.get(usize::MAX), None);
+        assert_eq!(s.binary_search(&1), Err(0));
+        assert_eq!(s.binary_search(&2), Ok(0));
+        assert_eq!(s.binary_search(&6), Err(2));
+        assert_eq!(s.binary_search(&9), Ok(2));
+        assert_eq!(s.binary_search(&14), Ok(3));
+        assert_eq!(s.binary_search(&20), Err(4));
+        assert_eq!(s.iter().collect::<Vec<_>>(), vec![2, 5, 9, 14]);
     }
 }

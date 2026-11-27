@@ -1,6 +1,8 @@
 """docs/spec/models.md §6.1 的單元測試，加上 build_lm 重構後輸出位元組不變的金標準。用法：python3 -B -m unittest tools/test_kn_cont.py
 玩具語料沿用 test_build_lm（手算見各測試）。SJKN0002 的檔頭有 β 與 ΣN′（kn_cont.py 用 lm.kn_total 算）；呼叫端另外傳 kn_classes（和 lm_eval 一樣用 build_lm.variant_classes 算）時，lm.py 重算 ΣN′ 和檔頭比對。"""
+import contextlib
 import hashlib
+import io
 import math
 import os
 import pickle
@@ -8,6 +10,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -240,6 +243,42 @@ class KnCont(unittest.TestCase):
         p = self.side(beta=0.5)
         self.assertEqual(lm_eval.kn_tag(p, 0.5), f"+kn:{hashlib.sha256(open(p, 'rb').read()).hexdigest()[:8]}:θ1:β0.5")
         self.assertEqual(lm_eval.kn_tag(p), lm_eval.kn_tag(p, 0.5))   # beta omitted: read from the header
+
+    def test_main_atomic_replace_existing_output(self):
+        """輸出已存在時以暫存檔＋os.replace 原子替換，不動舊 inode（POSIX）且不留 .tmp* 檔。"""
+        vocab = L.BigramLM(self.path, classes=False).vocab
+        want = kn_cont.side_bytes(self.path, kn_cont.continuation(self.bi, self.cls, 1, vocab), self.cls, 1, 1.0)
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "kn.sjkn")
+            with open(out, "wb") as f:
+                f.write(b"OLD_SENTINEL")
+            old_ino = os.stat(out).st_ino if os.name == "posix" else None
+            with mock.patch.object(sys, "argv", ["kn_cont.py", "--lm", self.path, "--theta", "1", "--beta", "1.0", "--out", out]), \
+                    mock.patch.object(build_lm, "merged_counts", return_value=({}, self.bi, self.cls)), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                kn_cont.main()
+            if os.name == "posix":
+                self.assertNotEqual(os.stat(out).st_ino, old_ino)
+            with open(out, "rb") as f:
+                self.assertEqual(f.read(), want)
+            self.assertEqual([name for name in os.listdir(d) if ".tmp" in name], [])
+
+    def test_main_replace_failure_preserves_target_and_cleans_tmp(self):
+        """os.replace 失敗時保留原本的目的檔位元組，並清除暫存檔。"""
+        sentinel = b"SENTINEL_KN_BYTES"
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "kn.sjkn")
+            with open(out, "wb") as f:
+                f.write(sentinel)
+            with mock.patch.object(sys, "argv", ["kn_cont.py", "--lm", self.path, "--theta", "1", "--beta", "1.0", "--out", out]), \
+                    mock.patch.object(build_lm, "merged_counts", return_value=({}, self.bi, self.cls)), \
+                    mock.patch.object(os, "replace", side_effect=OSError("simulated replace failure")), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(OSError):
+                    kn_cont.main()
+            with open(out, "rb") as f:
+                self.assertEqual(f.read(), sentinel)
+            self.assertEqual([name for name in os.listdir(d) if ".tmp" in name], [])
 
 
 if __name__ == "__main__":

@@ -883,7 +883,8 @@ struct Replay {
 type Shadow = (char, u8);
 
 /// What an engine hands over to build the next one without reading the model files again (docs/spec/c-abi.md §5.4, `Engine::share`,
-/// `Engine::new_shared`): the loaded n-gram model (the two trigram tables inside it are memory maps), the small model, the colloquial table,
+/// `Engine::new_shared`): the loaded n-gram model (its `.sjlm` model, `classes.sjc`, `kn.sjkn` and the two trigram tables `trigram*.sjt3`
+/// inside it are read-only memory maps), the small model, the colloquial table (its `.sjlm` is a read-only memory map),
 /// the reading table, the digit table and the English follower table, all `Arc`s, plus the data folder. It owns no user input and borrows
 /// nothing from the engine, so it outlives it, and it never changes after it is made.
 pub struct Shared {

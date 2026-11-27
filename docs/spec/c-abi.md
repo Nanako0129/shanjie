@@ -121,7 +121,7 @@
 ### 5.4 共用部分的 handle
 
 - 用途：切換詞包時建新引擎不再重讀模型檔。`shanjie_engine_share` 在引擎自己的執行緒取出可共用的部分（只複製參照，不讀檔，微秒級）；`shanjie_engine_new_shared` 在任何執行緒用它建新引擎；`shanjie_shared_free` 釋放。做法和重排工作相同：取出在引擎的執行緒、使用在任何執行緒、handle 不借用引擎。
-- 內容（`engine::Shared`）：n-gram 模型（通語、辨類、承接，以及 mmap 的兩張連文表）、會意的小模型、常談的表、數字表、英文後接詞表（後四樣來源引擎有載入才有），讀音表，以及資料目錄的路徑。全部是建好後不變的資料，所以來源引擎釋放之後仍可使用；`Send + Sync` 來自欄位的型別，沒有新增 `unsafe impl`（連文表經既有的 `trigram::Mapped` 進到模型裡）。
+- 內容（`engine::Shared`）：n-gram 模型（內含的通語 `.sjlm`、辨類 `classes.sjc`、承接 `kn.sjkn` 與兩張連文表 `trigram*.sjt3` 皆為唯讀 mmap）、會意的小模型、常談的表（其 `.sjlm` 為唯讀 mmap）、數字表、英文後接詞表（後四樣來源引擎有載入才有），讀音表，以及資料目錄的路徑。全部是建好後不變的資料，所以來源引擎釋放之後仍可使用；`Send + Sync` 來自欄位的型別，沒有新增 `unsafe impl`（上述唯讀映射檔皆經 `trigram::Mapped` 進到模型與常談表裡）。
 - 讀音表只在來源引擎與新引擎的詞包列都沒有單音節讀音的列時沿用（讀音表只讀單音節讀音下的單字詞，鍵是音節編號，詞包的音節編號接在基底之後）；否則照 `load_lm` 從詞庫與檔案重建。出貨的五個詞包都沒有單音節的列（`core/tests/engine_share.rs` 斷言）。
 - `new_shared` 等同 `new_packs`（資料目錄是來源引擎的）之後接 `load_lm`、`load_tinylm`、`load_colloquial`：詞庫（含詞包列）、封頂詞庫、預測索引、數字的合法表與詞、常談的詞集、中英混合詞表、降權表與重排保護詞照從檔案建的做法重建；`demote.tsv`、`variant-order.tsv`、`rerank-protect.tsv`、`mixed-words.tsv` 與 `std-exempt.tsv`（讀音表沿用時也讀一次並解析）照讀。不重讀的只有上面列的模型與表。
 - 全有或全無：每一步都成功才回 0；任何一步失敗回非 0、`*out` 是 NULL，已建好的部分全部丟掉，不會交出「有詞庫、沒有模型」的引擎。這一點和從檔案建不同（那條路的 `load_lm`、`load_tinylm`、`load_colloquial` 各自失敗時引擎仍留著）。所以回 0 時，handle 裡有的每一樣在新引擎上都算載入成功。

@@ -115,12 +115,12 @@
 - 摘要行標記 `+tri:<表檔 SHA-256 前 8 碼>`。`--no-tri` 兩個設定都不讀。
 - 取捨：下限 `F·P2` 用來限制「有存的前文、但這個詞沒被留下」時的懲罰：不加下限時書面會出現「好」＋ㄅㄚ˙ 變「爸」、「搞完這波」變「睪丸這波」這類退步；`F` = 0.5 是照調參集挑的。
 
-### 3.5 trigram 表的唯讀映射
+### 3.5 模型與伴生表的唯讀映射
 
-- 兩張表都以唯讀、私有映射載入（`mmap(PROT_READ, MAP_PRIVATE)`；Windows 用 `CreateFileMappingW`／`MapViewOfFile`，開檔只允許共享讀取），核心不加依賴，`mmap`、`munmap` 直接宣告。檔案必須是一般檔案、長度非 0，否則 `LmError::TriTable`。測試可用 `Vec<u8>` 當位元組來源，解析與打分相同。
-- 映射期間檔案不能原地截短或改寫（被截掉的頁面會 SIGBUS）；安裝流程一律先放到暫存區再 rename 換上，舊版移走。這件事寫在 `core/include/shanjie.h` 與映射型別的註解。
-- 記憶體：映射的頁面是乾淨的檔案頁，系統可隨時丟掉，不計入程序的 phys_footprint（活動監視器的「記憶體」欄）；書面有表時 max RSS 仍會把讀過的頁面算進去（載入檢查會讀整個表）。看記憶體成本時以 peak memory footprint 為準。
-- 取捨：用映射而不是 `std::fs::read`，因為 133 MB 的表整檔讀進匿名記憶體會讓使用者看到的記憶體多一整張表。
+- 通語與常談模型（`.sjlm`）、辨類（`classes.sjc`）、承接（`kn.sjkn`）與兩張 trigram 表（`trigram*.sjt3`）全部經 `core/src/trigram.rs` 的 `Mapped::open`／`MappedBytes` 以唯讀、私有映射載入（Unix 為 `mmap(PROT_READ, MAP_PRIVATE)`；Windows 為 `CreateFileMappingW(PAGE_READONLY)`／`MapViewOfFile(FILE_MAP_READ)`，開檔只允許 `FILE_SHARE_READ` 共享讀取），核心不加依賴，`mmap`、`munmap` 直接宣告。檔案必須是一般檔案、長度非 0 且不超過 `isize::MAX`；`Mapped::open` 回傳 `MapError::{Io, Empty}`，供 `lm.rs` 的 `map_or_empty` 與 `load_opts` 保持原本的錯誤優先序（0 位元組 `.sjlm`／`classes.sjc` 轉由 `parse_bytes*` 報 `LmError::Format`，不存在／非一般檔／超限則報 `LmError::Io`；`kn.sjkn` 依存在檢查後固定回 `LmError::KnSide`；trigram 表維持 `LmError::TriTable`）。解析與查詢直接在映射位元組上以小端序（`from_le_bytes`）就地讀取、不複製成 heap 陣列。測試與記憶體建構 API（`Lm::parse`、`Lm::parse_with_classes`、`Lm::add_kn`、`Lm::add_tri_for`）可用 `MappedBytes::Mem(Vec<u8>)` 當位元組來源，解析與打分相同。
+- 映射期間這些檔案都不能原地截短或改寫（被截掉的頁面會 SIGBUS，改寫會破壞載入時驗過的不變量）；建置工具（`build_lm.py`、`build_classes.py`、`kn_cont.py`、`build_trigram.py`）與安裝流程一律先寫暫存檔再以 rename／`os.replace` 換上，舊版移走。這件事寫在 `core/include/shanjie.h`、映射型別與 `lm.rs` 的註解。
+- 記憶體：映射的頁面是乾淨的檔案頁，系統可隨時丟掉，不計入程序的 phys_footprint（活動監視器的「記憶體」欄）；載入檢查（檔頭驗證、SHA-256 計算、排序與範圍檢查）會順序讀過映射頁，所以 max RSS 仍會把讀過的頁面算進去。看記憶體成本時以 peak memory footprint 與載入後常駐 `phys_footprint` 為準。
+- 取捨：用映射並就地讀取而不是 `std::fs::read` 加 heap `Vec` 複本，因為 133 MB 的書面 trigram 表、88 MB 的通語、6 MB 的辨類、1.6 MB 的承接與 4.7 MB 的常談表若整檔讀進匿名記憶體或保留堆上陣列，會讓使用者看到的記憶體大幅增加。
 
 ### 3.6 各設定的打分
 
@@ -434,7 +434,7 @@
 - 三聲變調（§6.6）只看調號、不看詞的結構：照本調打的陽平後面接上聲時，也多一個上聲的讀法（扣 `DELTA_TONE3`）；一個區段最多查 15 個子集；口語讀音的輕聲音節（§6.6 的 K 規則）在任何音節後都收下，未收輕聲尾只在前一個音節是陽平時收下；位置表以整串組字算，中間的標點與英文會切開一段陽平。
 - 口語變調（§6.6、§8.7）：輕聲來源只看調號，打輕聲時同音節其他聲調的多字詞都成為候選（扣 `DELTA_NEUTRAL`）；整串第一個音節的輕聲不查；一個區段最多查 15 個讀音；同一個讀音已有別的詞時疊字陰平化的詞不是第一名（紅彤彤）；全用數字鍵的輕聲音節（ㄓㄚ˙ `5 8 7`）在數字層開著時是數字，要打那個詞得照本調打或關掉中英混打；台灣口語的 ˇˊ 稱謂讀法不做。
 - 強制詞（`acg-oov`）不經通語統計：當成未知詞，所以它們不會從通語的二元組得到上下文加分，也不會被當成下一個詞的上下文。
-- trigram 表的 D 固定 0.75、下限 F 固定 0.5；映射期間表檔不可原地改寫。
+- trigram 表的 D 固定 0.75、下限 F 固定 0.5；通語／常談（`.sjlm`）、`classes.sjc`、`kn.sjkn` 與 trigram 表在映射期間皆不可原地截短或改寫（須以 rename 取代）。
 - 輸入框前文只有結尾至多 2 個漢字當 n-gram 的歷史詞（前文重現項另外查最後 64 個字元的漢字對，§4.6）；英文段只在有 trigram 表時當總分的邊界。
 - 前文重現項只看字元的原樣，不做簡繁與異體的正規化；前文裡留著的錯字或另一種寫法，同音的詞會被推向它。
 - 學習加分的詞不經過 KN、trigram 與讀音項：使用者教過的選擇優先於模型統計。

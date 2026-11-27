@@ -46,68 +46,82 @@ pub(crate) struct Mapped {
 unsafe impl Send for Mapped {}
 unsafe impl Sync for Mapped {}
 
+/// Error returned by `Mapped::open` so callers can preserve `std::fs::read` error priorities
+/// (`Empty` for a 0-byte regular file vs `Io` for missing, non-regular, or unreadable paths).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MapError {
+    Io,
+    Empty,
+}
+
 impl Mapped {
     /// Maps the regular file at `path`. A file that cannot be opened, is not a regular file (a FIFO or a directory: opened with
-    /// O_NONBLOCK so a FIFO does not block, then refused), is empty, or fails `mmap` is `Err(())`; the caller names it (the trigram
-    /// table's `LmError::TriTable`, what a failed read is today).
+    /// O_NONBLOCK so a FIFO does not block, then refused), exceeds `isize::MAX`, or fails `mmap` is `Err(MapError::Io)`.
+    /// A 0-byte regular file is `Err(MapError::Empty)`.
     ///
     /// # Safety
     /// The file must not be truncated or rewritten in place while the mapping is alive: a page past a new end is a SIGBUS, and
-    /// bytes that change after `Tri::parse` checked them break the invariants the lookups rely on (an index could panic).
+    /// bytes that change after parsing checked them break the invariants the lookups rely on (an index could panic).
     /// Replacing the file by rename is fine (the mapping keeps the old inode).
     #[cfg(unix)]
-    pub(crate) unsafe fn open(path: &Path) -> Result<Mapped, ()> {
+    pub(crate) unsafe fn open(path: &Path) -> Result<Mapped, MapError> {
         use std::os::unix::fs::OpenOptionsExt;
-        let f = std::fs::OpenOptions::new().read(true).custom_flags(crate::tinylm::O_NONBLOCK).open(path).map_err(|_| ())?;
-        let meta = f.metadata().map_err(|_| ())?;
-        let len = meta.len() as usize;
-        if !meta.is_file() || len == 0 {
-            return Err(());
+        let f = std::fs::OpenOptions::new().read(true).custom_flags(crate::tinylm::O_NONBLOCK).open(path).map_err(|_| MapError::Io)?;
+        let meta = f.metadata().map_err(|_| MapError::Io)?;
+        if !meta.is_file() {
+            return Err(MapError::Io);
         }
-        // SAFETY: a valid descriptor and a non-zero length; the kernel keeps the mapping after the descriptor is closed (dropped below).
+        if meta.len() == 0 {
+            return Err(MapError::Empty);
+        }
+        let len = isize::try_from(meta.len()).map_err(|_| MapError::Io)? as usize;
+        // SAFETY: a valid descriptor and a non-zero length <= isize::MAX; the kernel keeps the mapping after the descriptor is closed (dropped below).
         let ptr = unsafe { mmap(std::ptr::null_mut(), len, PROT_READ, MAP_PRIVATE, f.as_raw_fd(), 0) };
         if ptr == MAP_FAILED {
-            return Err(());
+            return Err(MapError::Io);
         }
         Ok(Mapped { ptr, len })
     }
 
     /// Windows: the same contract through a file mapping. The file is opened `GENERIC_READ` with `FILE_SHARE_READ` only (what
     /// `CreateFileW(GENERIC_READ, FILE_SHARE_READ, ...)` gives, through std's `share_mode`), checked on that handle (a disk file, not a
-    /// directory, not empty), then `CreateFileMappingW(PAGE_READONLY)` and `MapViewOfFile(FILE_MAP_READ)`. The mapping object's handle
-    /// is closed at once; the view keeps the section alive until `drop`. While a view exists Windows refuses to delete or truncate the
-    /// file, to open it with `CREATE_ALWAYS`, and to replace it by rename; it does not stop another process that opens the file for
-    /// writing after `open` returns from changing bytes in place.
+    /// directory: `MapError::Io`; 0 bytes: `MapError::Empty`), then `CreateFileMappingW(PAGE_READONLY)` and `MapViewOfFile(FILE_MAP_READ)`.
+    /// The mapping object's handle is closed at once; the view keeps the section alive until `drop`. While a view exists Windows refuses to
+    /// delete or truncate the file, to open it with `CREATE_ALWAYS`, and to replace it by rename; it does not stop another process that opens
+    /// the file for writing after `open` returns from changing bytes in place.
     ///
     /// # Safety
     /// As the Unix `open`: the file must not be rewritten in place while mapped. Windows blocks truncation and deletion, not an
     /// in-place write, so this stays the caller's promise; an update replaces the file only after the engine has dropped the map.
     #[cfg(windows)]
-    pub(crate) unsafe fn open(path: &Path) -> Result<Mapped, ()> {
+    pub(crate) unsafe fn open(path: &Path) -> Result<Mapped, MapError> {
         use std::os::windows::fs::OpenOptionsExt;
         use std::os::windows::io::AsRawHandle;
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::Storage::FileSystem::{GetFileType, FILE_SHARE_READ, FILE_TYPE_DISK};
         use windows_sys::Win32::System::Memory::{CreateFileMappingW, MapViewOfFile, FILE_MAP_READ, PAGE_READONLY};
-        let f = std::fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(path).map_err(|_| ())?;
-        let meta = f.metadata().map_err(|_| ())?;
-        let len = meta.len() as usize;
+        let f = std::fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(path).map_err(|_| MapError::Io)?;
+        let meta = f.metadata().map_err(|_| MapError::Io)?;
         let h = f.as_raw_handle();
         // SAFETY: `h` is the open handle `f` owns for the whole function.
-        if !meta.is_file() || len == 0 || unsafe { GetFileType(h) } != FILE_TYPE_DISK {
-            return Err(());
+        if !meta.is_file() || unsafe { GetFileType(h) } != FILE_TYPE_DISK {
+            return Err(MapError::Io);
         }
-        // SAFETY: a valid read-only handle; size 0/0 maps the whole file, which `meta` showed is non-empty; no name, default security.
+        if meta.len() == 0 {
+            return Err(MapError::Empty);
+        }
+        let len = isize::try_from(meta.len()).map_err(|_| MapError::Io)? as usize;
+        // SAFETY: a valid read-only handle; size 0/0 maps the whole file, which `meta` showed is non-empty and <= isize::MAX; no name, default security.
         let map = unsafe { CreateFileMappingW(h, std::ptr::null(), PAGE_READONLY, 0, 0, std::ptr::null()) };
         if map.is_null() {
-            return Err(());
+            return Err(MapError::Io);
         }
         // SAFETY: `map` is the mapping object just created; 0 bytes maps from offset 0 to the end of the object.
         let view = unsafe { MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0) };
         // SAFETY: `map` is closed once; the view (if any) holds its own reference to the section.
         unsafe { CloseHandle(map) };
         if view.Value.is_null() {
-            return Err(());
+            return Err(MapError::Io);
         }
         Ok(Mapped { ptr: view.Value, len })
     }
@@ -115,8 +129,9 @@ impl Mapped {
 
 impl Deref for Mapped {
     type Target = [u8];
+    #[inline]
     fn deref(&self) -> &[u8] {
-        // SAFETY: `ptr` maps `len` readable bytes until `drop`.
+        // SAFETY: `ptr` maps `len` readable bytes until `drop`, and `Mapped::open` verified `self.len <= isize::MAX as usize`.
         unsafe { std::slice::from_raw_parts(self.ptr as *const u8, self.len) }
     }
 }
@@ -134,18 +149,26 @@ impl Drop for Mapped {
     }
 }
 
-/// Where a table's bytes live: the mapping the shipping path uses, or memory (tests, `Lm::add_tri`).
-pub(crate) enum TriBytes {
+/// Where a table's bytes live: the mapping the shipping path uses, or memory (tests, `Lm::parse`, `Lm::add_kn`, `Lm::add_tri_for`, 0-byte empty).
+pub(crate) enum MappedBytes {
     Map(Mapped),
     Mem(Vec<u8>),
 }
 
-impl Deref for TriBytes {
+impl MappedBytes {
+    #[cfg(test)]
+    pub(crate) fn is_mapped(&self) -> bool {
+        matches!(self, MappedBytes::Map(_))
+    }
+}
+
+impl Deref for MappedBytes {
     type Target = [u8];
+    #[inline]
     fn deref(&self) -> &[u8] {
         match self {
-            TriBytes::Map(m) => m,
-            TriBytes::Mem(v) => v,
+            MappedBytes::Map(m) => m,
+            MappedBytes::Mem(v) => v,
         }
     }
 }
@@ -163,7 +186,7 @@ pub(crate) struct Tri {
     v: u64,
     d: f64,
     c: usize,
-    raw: TriBytes,
+    raw: MappedBytes,
     /// Section offsets into `raw`: key, total, off, next, count.
     at: [usize; 5],
     /// `+tri:<sha8 of the file>` (the summary-line tag), hashed on first use.
@@ -184,7 +207,7 @@ pub(crate) struct TriMemo(pub(crate) std::collections::HashMap<(u32, u32), Optio
 
 impl Tri {
     /// `raw` is the whole file; `v` and `model_sha` (hex) are the bigram model it must be bound to.
-    pub(crate) fn parse(raw: TriBytes, v: usize, model_sha: &str) -> Result<Tri, LmError> {
+    pub(crate) fn parse(raw: MappedBytes, v: usize, model_sha: &str) -> Result<Tri, LmError> {
         let bad = LmError::TriTable;
         let u32_at = |p: usize| raw.get(p..p + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
         if raw.len() < HEAD + 4 || &raw[..8] != MAGIC {
@@ -258,7 +281,7 @@ impl Tri {
     /// Whether the bytes are a file mapping (what `Lm::load_opts` must give; the tests look at it).
     #[cfg(test)]
     pub(crate) fn is_mapped(&self) -> bool {
-        matches!(self.raw, TriBytes::Map(_))
+        self.raw.is_mapped()
     }
 
     /// The tag `+tri:<sha8 of the file>` (same text as reference/proto/lm_eval.py).
