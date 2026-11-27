@@ -121,7 +121,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 
 第 0 名永遠不被遮罩，所以一定有候選可選。τ 與全部分數用的是整張候選表，不因遮罩而變。
 
-`rerank(ng, cands, key, params, masked, learn)`：取前 `TOPK`，算 `ll`，`pick_masked`；回傳選中的索引與 `ll`（少於 2 個候選回 `(0, None)`）。`masked` 是呼叫端算好的遮罩（3.4，和候選同順序；空的代表沒有遮罩）。任何呼叫者給的 `params` 都先過 2.1 的檢查（不合回 `Format`）。`rerank_colloquial(ng, cands, words, key, co, level, masked, learn)` 收同一個 `masked`。
+`TinyLm::rerank(ng, cands, key, params, masked, learn)`：先過 2.1 的 `params` 檢查（不合回 `Format`），取前 `TOPK` 個候選；少於 2 個候選回 `Ok((0, None))`，任一候選超過 `ctx − 1` 字元回 `Err(TooLong)`。接著檢查 `ng[0] − ng[1] ≥ τ` 且 `learn.b[..n]` 全為 `0.0`：條件成立時略過 `rerank_ll` 前向計算並直接回 `Ok((0, None))`；否則算 `ll` 再做 `pick_masked`，回傳選中的索引與 `Some(ll)`。`TinyLm::rerank_with_ll` 在把握段照樣算 `ll`（供 `--tinylm-scores` 使用）。`masked` 是呼叫端算好的遮罩（3.4，和候選同順序；空的代表沒有遮罩）。`rerank_colloquial(ng, cands, words, key, co, level, masked, learn)` 收同一個 `masked`。
 
 ### 3.4 遮罩與學習項
 
@@ -166,7 +166,7 @@ k（前文鍵）怎麼來見 5.2。k 對版本 1 到 4 的模型：`SENTINEL`（
 - 任何一個 col 不是有限值（`inf`、NaN）時，這一次呼叫整個不加常談項，用同一檔的檔頭 (α, τ, δ) 做原本的 `pick_masked`（`colloquial::guarded_pick`），不讓無限大或 NaN 左右選字；遮罩與學習項在退路上照樣套用。
 - 取捨：常談項只放在重排裡、n-gram 第一名固定當錨點，因為量過 n-gram 分差 ≥ τ 的列不會少任何改對，不必動解碼器。
 
-`TinyLm::rerank_colloquial(ng, cands, words, key, co, level, masked, learn)` 是引擎與 CLI 共用的唯一入口（`masked` 由呼叫端算好，3.4），回傳選中的索引與原始的 ll。
+`TinyLm::rerank_colloquial(ng, cands, words, key, co, level, masked, learn)` 是引擎與 CLI 共用的唯一入口（`masked` 由呼叫端算好，3.4），回傳選中的索引與原始的 `ll`：先截到前 `TOPK` 個候選，少於 2 個回 `Ok((0, None))`，任一候選超過 `ctx − 1` 字元回 `Err(TooLong)`；再計算一次 `col`，當所有 `col` 都是有限值時有效門檻 `eff_tau` 取該檔常談格 `cell.τ`，否則取同檔聊天檔頭的 `plain.τ`；若 `ng[0] − ng[1] ≥ eff_tau` 且 `learn.b[..n]` 全為 `0.0`，略過前向計算直接回 `Ok((0, None))`，否則呼叫 `rerank_ll` 並把同一份 `&col` 交給 `colloquial::guarded_pick`（不重複查表）。`TinyLm::rerank_colloquial_with_ll` 不跳過把握段，強制計算 `ll`（供 `--tinylm-scores` 使用）。
 
 ### 4.3 生效條件
 
@@ -361,11 +361,11 @@ Windows 版的殼分成兩半：引擎在常駐程序 `shanjie-host.exe`，每�
 
 - `--tinylm FILE.sjtl`：用 `load_paired` 載入；n-gram 雜湊不符、KN 側檔不符、`--no-classes`、`--no-demote` 都是錯誤（α、τ 只對辨類與降權表開著的分數成立）。每列取候選池（3.1）的前 8 名重排，top1、`--rowstats`、摘要行都用重排後的第一名；前文鍵用 `tl.key_for_len(ctx, 那一列候選池裡最長的候選字數)`（`--context` 時；不加 `--context` 時為空；版本 1 到 5 忽略第二個參數，等於 `key_for(ctx)`）。摘要行設定標記加 `+tl:<檔 SHA-256 前 8 碼>`，版本 6 的邊界格式再加 `+sep:<K>`。CLI 不實作研究端的 `ctxbs`（在 cdev、ctune 這類前文欄是一段連續漢字、沒有標點的集合上，研究端對政策鍵的長鍵補一個非漢字再取；產品裡殼傳的是原文、含標點，不需要）：版本 6 在這兩份集合上的 CLI 讀數和研究讀數不同。
 - `--rerank-level conservative|standard|aggressive`（預設 standard）：需要 `--tinylm`（沒有 `--tinylm` 時任何值都是用法錯誤）；用在版本 1、2 的檔且不是 standard 時結束碼 2 並說明；不是 standard 時摘要行在 `+tl:…` 後加 `+rl:conservative` 或 `+rl:aggressive`。`tools/bench.py` 與不在本 repo 的研究工具因此把它當作不是出貨設定。
-- `--tinylm-scores OUT`：每列一行 JSON，只有數字沒有文字：`i`、`n`、`ng`、`ok`、`ed`、`glen`、`c`（選中的索引，沒重排為 0）、`ll`（n ≥ 2 的列）、`masked`（手動詞遮罩擋掉的索引，空也寫）；有 `--colloquial-core` 且常談實際跑過的列最後多 `col`（4.6）。有模糊音位元時 `n`、`ng`、`ok`、`ed`、`ll`、`masked` 列的是候選池，`c` 仍是 n-best 的索引。前文重現的加重（3.1.1）重排過的列：各欄照重排後的順序，`ng` 寫加分後的 `ng'`，`idx` 是各項對應的 n-best 索引（紀錄裡只有一個 `idx`），`c` 仍是 n-best 索引，`masked` 是對解碼器第一名算、照重排排列的遮罩；沒有重排的列和以前相同。`--tinylm-scores-topk N`（研究用，N ≥ 8）把 `ll` 延伸到前 N 個候選，不改其他欄位；需要 `--tinylm-scores`，不能與 `--fuzzy` 並用。`--tinylm-scores` 與 `--set holdout` 不能並用（逐候選記錄是調 α、τ 的資料）。
+- `--tinylm-scores OUT`：每列一行 JSON，只有數字沒有文字：`i`、`n`、`ng`、`ok`、`ed`、`glen`、`c`（選中的索引，沒重排為 0）、`ll`（n ≥ 2 的列）、`masked`（手動詞遮罩擋掉的索引，空也寫）；有 `--colloquial-core` 且常談實際跑過的列最後多 `col`（4.6）。此旗標（含 `--tinylm-scores-topk`）一律呼叫 `TinyLm::rerank_with_ll`／`TinyLm::rerank_colloquial_with_ll`，不略過把握段，讓每列 n ≥ 2（且未超長）的候選都保留完整 `ll`（與常談 `col`）。有模糊音位元時 `n`、`ng`、`ok`、`ed`、`ll`、`masked` 列的是候選池，`c` 仍是 n-best 的索引。前文重現的加重（3.1.1）重排過的列：各欄照重排後的順序，`ng` 寫加分後的 `ng'`，`idx` 是各項對應的 n-best 索引（紀錄裡只有一個 `idx`），`c` 仍是 n-best 索引，`masked` 是對解碼器第一名算、照重排排列的遮罩；沒有重排的列和以前相同。`--tinylm-scores-topk N`（研究用，N ≥ 8）把 `ll` 延伸到前 N 個候選，不改其他欄位；需要 `--tinylm-scores`，不能與 `--fuzzy` 並用。`--tinylm-scores` 與 `--set holdout` 不能並用（逐候選記錄是調 α、τ 的資料）。
 - `--tinylm-paired`：見 4.6；常談項對 `--tinylm` 給的模型照出貨方式作用，`col` 欄也在這種列出現。
 - 前文重現的加重（3.1.1）：有 `--context` 與 `--tinylm` 時預設生效，摘要行標記是 `+recur+pr`；`--no-pool-recur`（評測專用）只關這一項（標記 `+recur`），`--no-recur` 兩者都關（沒有 `+recur`）；沒有 `--tinylm` 時沒有候選池，這一項不存在、輸出和 `--no-pool-recur` 逐位元組相同。`--pool-mask-diff FILE`（評測專用，需要 `--context` 與 `--tinylm`；和 `--no-recur`、`--no-pool-recur` 並用時檔案一定是空的，所以拒絕；檔案是逐列的輸出，和 `--set holdout` 並用也拒絕）：把「遮罩不同的列」的列號寫進檔（只有數字），摘要行的字典最後多 `'pool_mask_diff': <列數>`（沒有這個旗標時不出現）。遮罩不同的列：這一列有重排，而且探索片的算法（以重排後第一名為保護基準、讀音取它的路徑）算出的遮罩和這一片的遮罩（對解碼器第一名算、照 `order` 排列）在任何位置不同；或這一列因為重排後第一名被遮罩而沒有重排。
 - `--picks FILE`（有沒有 `--tinylm` 都可用）：每列一行 `列號\t名次\t句子`，行數等於 rowstats，照列號順序（`--threads` 時也是）。名次是送出的那一句在這一列 n-best 的索引（0 是 n-gram 第一名，和 `--tinylm-scores` 的 `c` 同一個索引）；句子是這一列算對錯用的那一句（`top1_sha256` 用的同一份）。`--fuzzy` 時沒有任何讀音覆蓋的列寫 `列號\t-\t`。檔裡有列的內容，所以和 `--dump` 一樣在 `--set holdout` 時拒絕（讀任何檔之前）；rowstats 不變。
-- 候選比 ctx − 1 長的列保留第一名並在 stderr 計數；stderr 另印每列重排時間 p50、p95 與載入時間、載入前後的記憶體。
+- 候選比 ctx − 1 長的列保留第一名並在 stderr 計數；未帶 `--tinylm-scores` 時，有實際跑過前向計算的列才印出既有的 `tinylm: rerank n=... p50=... p95=...` 延遲行（格式逐字不變，含載入時間與前後記憶體），並另印獨立一行 `tinylm: rerank skipped=<N>`（只計入 `n ≥ 2`、未超長且 `ll` 為 `None` 的把握跳過列，全部列都跳過時仍照印）。
 - `shanjie-replay` 的重排選項：`--rerank each|final`、`--no-tinylm`、`--learn-guard on|off`、`--rerank-level`、`--colloquial`、`--no-colloquial`、`--no-pool-recur`（`Engine::set_pool_recur(false)`；標記規則同 CLI：有小模型時 `+recur+pr`）；引擎照 App 建（降權開、重排開、標準強度、載入常談表），所以重播的選字與 CLI 在同條件下相同。詳見 `docs/spec/evaluation.md`。
 
 ## 10. 驗證

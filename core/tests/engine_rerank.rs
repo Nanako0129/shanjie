@@ -1176,3 +1176,56 @@ fn english_before_the_composition_takes_the_mixed_word() {
     }
     assert_eq!(shown(&mut e_model(), "QQ", &["ㄒㄩˋ"]), "恤", "control: with the model the same row applies");
 }
+
+/// docs/spec/semantic-rerank.md §3.3, §5.2: in a multi-stretch `RerankJob`, when stretch 0 is confident (`ng[0] - ng[1] >= tau`) and
+/// skips the forward pass, it still appends its `surfaces[pick]` into `before` so stretch 1's `Choice::key` (`result.keys()[1]`) and
+/// pick match running without skip (`tau = +inf`).
+#[test]
+fn confident_skip_on_first_stretch_still_feeds_before_to_later_stretch() {
+    let mut syls: Vec<String> = ["ㄋㄧˇ", "ㄏㄠˇ", "ㄉㄜ˙"].into_iter().map(String::from).collect();
+    syls.extend(row(12));
+    let (b, word) = (3, "的");
+
+    // Probe the two stretches' n-gram margins to pick `tau` strictly between stretch 0 (skip) and stretch 1 (run).
+    let probe_model = sjtl_for(0.7, f64::INFINITY, Some(&lm_path()));
+    let mut probe_e = engine_with(Some(&probe_model));
+    fix_word(&mut probe_e, &syls, b, word);
+    let probe_job = probe_e.take_rerank_job().expect("a two-stretch job");
+    let ng = probe_job.ng_scores();
+    let cands = probe_job.candidates();
+    assert_eq!(ng.len(), 2);
+    let (g0, g1) = (ng[0][0] - ng[0][1], ng[1][0] - ng[1][1]);
+    assert!(g0 > g1, "premise: stretch 0 margin ({g0}) > stretch 1 margin ({g1})");
+    let mid_tau = (g0 + g1) / 2.0;
+
+    // Without skip (`tau = +inf`): stretch 0 keeps pick 0 (`你好`) so its text feeds stretch 1's key.
+    let noskip_res = probe_job.run();
+    assert_eq!(noskip_res.picks()[0], 0, "premise: stretch 0 keeps 0 even without skip");
+
+    // With skip on stretch 0 (`tau = mid_tau`): stretch 0 skips `rerank_ll`, stretch 1 runs `rerank_ll`.
+    let skip_model = sjtl_for(0.7, mid_tau, Some(&lm_path()));
+    let tl_skip = TinyLm::load(&skip_model).unwrap();
+    let params = tl_skip.alpha_tau_delta(Profile::Chat);
+    let c0: Vec<&str> = cands[0].iter().take(TOPK).map(String::as_str).collect();
+    let c1: Vec<&str> = cands[1].iter().take(TOPK).map(String::as_str).collect();
+    assert_eq!(tl_skip.rerank(&ng[0], &c0, &noskip_res.keys()[0], params, &[], &Default::default()).unwrap(), (0, None));
+    assert!(tl_skip.rerank(&ng[1], &c1, &noskip_res.keys()[1], params, &[], &Default::default()).unwrap().1.is_some());
+
+    let mut skip_e = engine_with(Some(&skip_model));
+    fix_word(&mut skip_e, &syls, b, word);
+    let skip_res = skip_e.take_rerank_job().expect("a two-stretch job").run();
+    let want_key1 = context_key(&format!("{}{word}", cands[0][0]));
+    assert_eq!(skip_res.keys()[1], want_key1, "stretch 0 still appended its surface into before");
+    assert_eq!(skip_res.keys(), noskip_res.keys());
+    assert_eq!(skip_res.picks(), noskip_res.picks());
+
+    // Also verify `keep_model()` (`tau = 0.0`): stretch 0 skips and still feeds stretch 1's key on row 16.
+    let syls16 = row(16);
+    let mut keep_e = engine_with(Some(&keep_model()));
+    fix_word(&mut keep_e, &syls16, 4, "打");
+    let keep_job = keep_e.take_rerank_job().expect("a two-stretch job");
+    let c16 = keep_job.candidates();
+    let keep_res = keep_job.run();
+    assert_eq!(keep_res.picks(), vec![0, 0]);
+    assert_eq!(keep_res.keys()[1], context_key(&format!("{}打", c16[0][0])));
+}

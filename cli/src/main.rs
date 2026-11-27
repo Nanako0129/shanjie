@@ -325,6 +325,7 @@ struct RowOut {
     ok: bool,
     in64: bool,
     long: bool,
+    skipped: bool,
     /// `--tinylm-scores-topk`: candidates 9..N the small model could not score (longer than its context).
     no_ll: usize,
     /// `--pool-mask-diff`: the row is one of `mask_differs`.
@@ -853,9 +854,19 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let picked = match colloq_on {
                 Some(co) => {
                     let words: Vec<Vec<&str>> = nbest.iter().map(|&p| scored[p].1.iter().map(|w| w.0).collect()).collect();
-                    tl.rerank_colloquial(&ng, &top, &words, key, co, level, &masked, &Default::default())
+                    if want_scores {
+                        tl.rerank_colloquial_with_ll(&ng, &top, &words, key, co, level, &masked, &Default::default())
+                    } else {
+                        tl.rerank_colloquial(&ng, &top, &words, key, co, level, &masked, &Default::default())
+                    }
                 }
-                None => tl.rerank(&ng, &top, key, tl.params(prof, level), &masked, &Default::default()),
+                None => {
+                    if want_scores {
+                        tl.rerank_with_ll(&ng, &top, key, tl.params(prof, level), &masked, &Default::default())
+                    } else {
+                        tl.rerank(&ng, &top, key, tl.params(prof, level), &masked, &Default::default())
+                    }
+                }
             };
             let ll = match picked {
                 // A position outside the list is no choice: the rerank's first candidate.
@@ -870,6 +881,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 }
                 Err(e) => return Err(e.to_string()),
             };
+            out.skipped = top.len() >= 2 && !out.long && ll.is_none();
             if ll.is_some() {
                 out.rerank = Some(t0.elapsed());
             }
@@ -941,6 +953,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         Ok(out)
     };
     let (mut top1, mut o64, mut firsts, mut rs, mut rerank, mut long) = (0usize, 0usize, Vec::new(), Vec::new(), Vec::new(), 0usize);
+    let mut skipped = 0usize;
     let mut no_ll = 0usize;
     let mut mask_diffs = 0usize;
     // Puts one row's output in the files and the counters; called in row order, so every file and the summary line are those of N = 1.
@@ -949,6 +962,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         top1 += out.ok as usize;
         o64 += out.in64 as usize;
         long += out.long as usize;
+        skipped += out.skipped as usize;
         no_ll += out.no_ll;
         if let (Some(w), true) = (mask_diff.as_mut(), out.mask_diff) {
             mask_diffs += 1;
@@ -1063,6 +1077,9 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             // The percentiles of a parallel run are measured under contention; N = 1 prints the line as before (tools/bench.py parses it).
             if threads > 1 { format!(" (threads {threads}: measured under contention)") } else { String::new() }
         );
+    }
+    if tl.is_some() && !want_scores {
+        eprintln!("tinylm: rerank skipped={skipped}");
     }
     if let Some(mut d) = dump {
         d.flush().map_err(|_| "cannot write dump".to_string())?;
