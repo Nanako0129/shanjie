@@ -8,6 +8,69 @@ public struct AppProfileRow: Equatable, Hashable, Sendable {
     public let chat: Bool
 }
 
+/// One symbol checkbox in the 自訂半形符號 disclosure group (docs/spec/keys-and-composition.md §8.1).
+public struct HalfPunctItem: Equatable, Hashable, Identifiable, Sendable {
+    public let bit: Int
+    public let label: String
+    public var id: Int { bit }
+
+    public init(bit: Int, label: String) {
+        self.bit = bit
+        self.label = label
+    }
+}
+
+/// One group of checkboxes in the 自訂半形符號 disclosure group (docs/spec/keys-and-composition.md §8.1).
+public struct HalfPunctGroup: Equatable, Hashable, Identifiable, Sendable {
+    public let title: String
+    public let items: [HalfPunctItem]
+    public var id: String { title }
+
+    public init(title: String, items: [HalfPunctItem]) {
+        self.title = title
+        self.items = items
+    }
+}
+
+/// The 27 non-Zhuyin symbol keys of 部分符號使用半形, in their three display groups (docs/spec/keys-and-composition.md §8.1).
+public enum HalfPunctCatalog: Sendable {
+    public static let groups: [HalfPunctGroup] = [
+        HalfPunctGroup(title: "程式與指令", items: [
+            HalfPunctItem(bit: 21, label: "`（·）"),
+            HalfPunctItem(bit: 0, label: "~（Shift+` ～）"),
+            HalfPunctItem(bit: 1, label: "!（Shift+1 ！）"),
+            HalfPunctItem(bit: 2, label: "@（Shift+2）"),
+            HalfPunctItem(bit: 3, label: "#（Shift+3）"),
+            HalfPunctItem(bit: 4, label: "$（Shift+4）"),
+            HalfPunctItem(bit: 5, label: "%（Shift+5）"),
+            HalfPunctItem(bit: 6, label: "^（Shift+6）"),
+            HalfPunctItem(bit: 7, label: "&（Shift+7）"),
+            HalfPunctItem(bit: 8, label: "*（Shift+8）"),
+            HalfPunctItem(bit: 11, label: "_（Shift+-）"),
+            HalfPunctItem(bit: 12, label: "+（Shift+= ＋）"),
+            HalfPunctItem(bit: 22, label: "=（＝）"),
+            HalfPunctItem(bit: 15, label: "|（Shift+\\ ｜）"),
+        ]),
+        HalfPunctGroup(title: "括號與引號", items: [
+            HalfPunctItem(bit: 9, label: "(（Shift+9 （）"),
+            HalfPunctItem(bit: 10, label: ")（Shift+0 ））"),
+            HalfPunctItem(bit: 23, label: "[（「）"),
+            HalfPunctItem(bit: 24, label: "]（」）"),
+            HalfPunctItem(bit: 13, label: "{（Shift+[ 『）"),
+            HalfPunctItem(bit: 14, label: "}（Shift+] 』）"),
+            HalfPunctItem(bit: 26, label: "'（‘／、）"),
+            HalfPunctItem(bit: 17, label: "\"（Shift+' “／；）"),
+            HalfPunctItem(bit: 25, label: "\\（、／＼）"),
+        ]),
+        HalfPunctGroup(title: "中文句讀鍵位", items: [
+            HalfPunctItem(bit: 18, label: "<（Shift+, ，）"),
+            HalfPunctItem(bit: 19, label: ">（Shift+. 。）"),
+            HalfPunctItem(bit: 20, label: "?（Shift+/ ？）"),
+            HalfPunctItem(bit: 16, label: ":（Shift+; ：）"),
+        ]),
+    ]
+}
+
 /// The settings window's view model (docs/spec/macos-shell.md §9.3). Every control goes
 /// through the same Shell setters and stores as the input method menu, and every value is re-read
 /// when the Shell posts `didChangeSettings`, so the window and the menu never disagree. The SwiftUI
@@ -76,6 +139,9 @@ public final class SettingsModel: ObservableObject {
     public var shiftSideEnabled: Bool { shiftToggle }
     /// 標點排列 (docs/spec/keys-and-composition.md §8.1).
     @Published public private(set) var punctLayout = PunctLayout.apple
+    /// 部分符號使用半形 (docs/spec/keys-and-composition.md §8.1): switch and 27-bit symbol mask (mask kept when off).
+    @Published public private(set) var halfPunct = false
+    @Published public private(set) var halfPunctMask: UInt32 = CoreEngine.halfPunctDefaultMask
     /// The grey "資料更新至 …" line under the 動漫與遊戲詞 toggle (docs/spec/lexicon-and-packs.md §4.5): the same text as the menu's, `nil` for no line.
     public var acgDataLine: String? { shell.acgDataDate.map(MenuEntry.Text.acgDataDate) }
     @Published public private(set) var backupExcluded = false
@@ -148,6 +214,8 @@ public final class SettingsModel: ObservableObject {
         shiftToggle = shell.shiftToggleOn
         shiftSide = shell.shiftSide
         punctLayout = shell.punctLayout
+        halfPunct = shell.halfPunctOn
+        halfPunctMask = shell.halfPunctMask
         glassTint = shell.glassTint
         candidateVertical = shell.candidateVertical
         profileMode = shell.profileMode
@@ -212,6 +280,17 @@ public final class SettingsModel: ObservableObject {
     public func setShiftToggle(_ on: Bool) { shell.applyShiftToggle(on) }
     public func setShiftSide(_ side: ShiftTap.Side) { shell.setShiftSide(side) }
     public func setPunctLayout(_ layout: PunctLayout) { shell.applyPunctLayout(layout) }
+    public func setHalfPunct(_ on: Bool) { shell.applyHalfPunct(on) }
+    /// One checkbox of 自訂半形符號: `bit` is a bit of the 27-bit mask (`0..<27`).
+    public func setHalfPunct(bit: Int, _ on: Bool) {
+        precondition((0..<27).contains(bit))
+        let bitMask = UInt32(1) << UInt32(bit)
+        shell.applyHalfPunctMask(on ? (shell.halfPunctMask | bitMask) : (shell.halfPunctMask & ~bitMask))
+    }
+    public func resetHalfPunctMask() { shell.applyHalfPunctMask(CoreEngine.halfPunctDefaultMask) }
+    /// In the Eten layout, `=` (bit 22, ㄦ) and `'` (bit 26, ㄘ) are Zhuyin keys, so those checkboxes are greyed while keeping their bits.
+    public func isHalfPunctBitDisabled(_ bit: Int) -> Bool { layout == .eten && (bit == 22 || bit == 26) }
+    public var showsHalfPunctEtenNote: Bool { layout == .eten }
     public func setBackupExcluded(_ on: Bool) {
         shell.setBackupExcluded(on)
         refreshExternal()  // not read on the change notification

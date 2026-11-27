@@ -388,6 +388,54 @@ const PLAIN_PUNCT: [(char, char); 6] = [('[', '「'), (']', '」'), ('\\', '、'
 /// A key not listed here is layout 0's. The test `punct_layout_1_cells_are_the_lexicon_rows` reads the file.
 const SHIFT_PUNCT_1: [(char, char); 8] = [('\'', '；'), ('2', '＠'), ('3', '＃'), ('4', '＄'), ('5', '％'), ('6', '︿'), ('7', '＆'), ('8', '＊')];
 const PLAIN_PUNCT_1: [(char, char); 2] = [('\'', '、'), ('\\', '＼')];
+
+/// All 27 non-Zhuyin symbol keys controlled by `Engine::set_half_punct` (bits 0..=26).
+pub const HALF_PUNCT_ALL_MASK: u32 = (1u32 << 27) - 1;
+/// Default 14 half-width punctuation keys when partial half-width punctuation is enabled:
+/// bits 0..=8 (`~ ! @ # $ % ^ & *`), 11 (`_`), 12 (`+`), 15 (`|`), 21 (`` ` ``), 22 (`=`).
+pub const HALF_PUNCT_DEFAULT_MASK: u32 = 0x0060_99FF;
+
+struct HalfPunctEntry {
+    bit: u32,
+    keycap: char,
+    ascii: char,
+    full0: char,
+    full1: char,
+    sec: Option<char>,
+}
+
+const HALF_PUNCT_SHIFT: [HalfPunctEntry; 21] = [
+    HalfPunctEntry { bit: 0,  keycap: '`',  ascii: '~', full0: '～', full1: '～', sec: None },
+    HalfPunctEntry { bit: 1,  keycap: '1',  ascii: '!', full0: '！', full1: '！', sec: None },
+    HalfPunctEntry { bit: 2,  keycap: '2',  ascii: '@', full0: '＠', full1: '＠', sec: None },
+    HalfPunctEntry { bit: 3,  keycap: '3',  ascii: '#', full0: '＃', full1: '＃', sec: None },
+    HalfPunctEntry { bit: 4,  keycap: '4',  ascii: '$', full0: '＄', full1: '＄', sec: None },
+    HalfPunctEntry { bit: 5,  keycap: '5',  ascii: '%', full0: '％', full1: '％', sec: None },
+    HalfPunctEntry { bit: 6,  keycap: '6',  ascii: '^', full0: '＾', full1: '︿', sec: None },
+    HalfPunctEntry { bit: 7,  keycap: '7',  ascii: '&', full0: '＆', full1: '＆', sec: None },
+    HalfPunctEntry { bit: 8,  keycap: '8',  ascii: '*', full0: '＊', full1: '＊', sec: None },
+    HalfPunctEntry { bit: 9,  keycap: '9',  ascii: '(', full0: '（', full1: '（', sec: None },
+    HalfPunctEntry { bit: 10, keycap: '0',  ascii: ')', full0: '）', full1: '）', sec: None },
+    HalfPunctEntry { bit: 11, keycap: '-',  ascii: '_', full0: '＿', full1: '＿', sec: None },
+    HalfPunctEntry { bit: 12, keycap: '=',  ascii: '+', full0: '＋', full1: '＋', sec: None },
+    HalfPunctEntry { bit: 13, keycap: '[',  ascii: '{', full0: '『', full1: '『', sec: Some('｛') },
+    HalfPunctEntry { bit: 14, keycap: ']',  ascii: '}', full0: '』', full1: '』', sec: Some('｝') },
+    HalfPunctEntry { bit: 15, keycap: '\\', ascii: '|', full0: '｜', full1: '｜', sec: None },
+    HalfPunctEntry { bit: 16, keycap: ';',  ascii: ':', full0: '：', full1: '：', sec: None },
+    HalfPunctEntry { bit: 17, keycap: '\'', ascii: '"', full0: '“', full1: '；', sec: None },
+    HalfPunctEntry { bit: 18, keycap: ',',  ascii: '<', full0: '，', full1: '，', sec: Some('＜') },
+    HalfPunctEntry { bit: 19, keycap: '.',  ascii: '>', full0: '。', full1: '。', sec: Some('＞') },
+    HalfPunctEntry { bit: 20, keycap: '/',  ascii: '?', full0: '？', full1: '？', sec: None },
+];
+
+const HALF_PUNCT_PLAIN: [HalfPunctEntry; 6] = [
+    HalfPunctEntry { bit: 21, keycap: '`',  ascii: '`',  full0: '·', full1: '·', sec: Some('｀') },
+    HalfPunctEntry { bit: 22, keycap: '=',  ascii: '=',  full0: '＝', full1: '＝', sec: None },
+    HalfPunctEntry { bit: 23, keycap: '[',  ascii: '[',  full0: '「', full1: '「', sec: Some('［') },
+    HalfPunctEntry { bit: 24, keycap: ']',  ascii: ']',  full0: '」', full1: '」', sec: Some('］') },
+    HalfPunctEntry { bit: 25, keycap: '\\', ascii: '\\', full0: '、', full1: '＼', sec: None },
+    HalfPunctEntry { bit: 26, keycap: '\'', ascii: '\'', full0: '‘', full1: '、', sec: None },
+];
 /// Option + key and Option + Shift + key -> the character rule 1o puts into the composition (docs/spec/keys-and-composition.md §8.1), position by position
 /// the keys of `OPTION_KEYS`. Apple's Zhuyin, measured 2026-11-20 in a VM (macOS 26.6.2) with HID-level key events, every cell.
 const OPTION_KEYS: &str = "`1234567890-=[]\\;',./";
@@ -682,6 +730,8 @@ struct Fixed {
     /// English word the core knows: those keys and the syllable the split made. The window lists the word while that syllable alone stands
     /// behind the token with the cursor at the end (`mixed_sweep` drops it otherwise).
     whole: Option<(String, String)>,
+    /// Partial half-width punctuation (`set_half_punct`): unit inserted via `half_punct_of`, so `open_candidates` expands it to its full-width alternatives.
+    from_half_punct: bool,
 }
 
 /// docs/spec/english-mixed.md §5.7: the mixed word behind one English token.
@@ -697,7 +747,7 @@ struct MixedMark {
 impl Fixed {
     /// A word the engine fixed on its own (docs/spec/keys-and-composition.md §6.3): not learned, not a user choice.
     fn frozen(start: usize, end: usize, word: String) -> Self {
-        Fixed { start, end, word, pre: None, key: None, pick_keys: Vec::new(), zh: None, frozen: true, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), own: None, whole: None }
+        Fixed { start, end, word, pre: None, key: None, pick_keys: Vec::new(), zh: None, frozen: true, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), own: None, whole: None, from_half_punct: false }
     }
 }
 
@@ -917,6 +967,8 @@ pub struct Engine {
     key_scheme: u8,
     /// Punctuation layout (`set_punct_layout`): 0 Apple Zhuyin's (default), 1 McBopomofo's.
     punct_layout: u8,
+    /// Partial half-width punctuation mask (`set_half_punct`): bits 0..=26 (`HALF_PUNCT_ALL_MASK`), default 0 (off).
+    half_punct_mask: u32,
     /// docs/spec/keys-and-composition.md §4.1.1 rule 16u: the run of Up presses in a composition under key scheme 1, set by each swap. Every key past rule 1 and
     /// 5q that is not Up clears it, and so does the third press (it opens the window); a call that is not a key is caught by `UpRun`'s check.
     up_run: Option<UpRun>,
@@ -1449,6 +1501,7 @@ impl Engine {
             cand_vertical: false,
             key_scheme: 0,
             punct_layout: 0,
+            half_punct_mask: 0,
             up_run: None,
             abbr: false,
             cand_len_cap: false,
@@ -2333,6 +2386,18 @@ impl Engine {
         }
         self.setting_changed();
         self.punct_layout = layout as u8;
+        self.handled().map(Some)
+    }
+
+    /// Partial half-width punctuation mask (bits 0..=26, `HALF_PUNCT_ALL_MASK`; default 0). Any bit outside `HALF_PUNCT_ALL_MASK`
+    /// changes nothing and gives `Ok(None)` (the C ABI's 2). The next key reads it; nothing shown changes, so the snapshot equals
+    /// the output before the call.
+    pub fn set_half_punct(&mut self, mask: u32) -> Result<Option<Output>, EngineError> {
+        if mask & !HALF_PUNCT_ALL_MASK != 0 {
+            return Ok(None);
+        }
+        self.setting_changed();
+        self.half_punct_mask = mask;
         self.handled().map(Some)
     }
 
@@ -3865,7 +3930,7 @@ impl Engine {
         self.fixed.extend(frozen);
         self.syls.splice(start..end, reading);
         let key = pre.is_some().then_some(key);
-        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_keys: Vec::new(), zh: None, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), own: None, whole: None });
+        self.fixed.push(Fixed { start, end: start + m, word, pre, key, pick_keys: Vec::new(), zh: None, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), own: None, whole: None, from_half_punct: false });
         self.fixed.sort_by_key(|f| f.start);
         self.cursor = start + m;
         self.refresh()?;
@@ -4465,6 +4530,10 @@ impl Engine {
         if !self.run.is_empty() {
             return self.run_key(k);
         }
+        // Partial half-width punctuation (`set_half_punct`): before key scheme 1 rule 2m and rule 2 (`punct_of`).
+        if let Some(p) = self.half_punct_of(k.ch, m, is_char) {
+            return self.insert_half_punct(p);
+        }
         // Key scheme 1, K8-K10 and K24a (step 7, in rule 2's place for these two keys): Shift+, and Shift+. are the half-width `<` `>`. With a window open they
         // are eaten (K24a). Nothing composed: passed on (K8). Only an unfinished syllable: it goes and the character is committed, never passed on (K9; an IMM32
         // host drops a key that was claimed and then passed on, docs/spec/windows-tip.md §5.4). Otherwise the character becomes a half-width unit at the cursor
@@ -4491,7 +4560,7 @@ impl Engine {
             Some('、')
         } else if is_char && m == MOD_SHIFT {
             self.punct_of(&SHIFT_PUNCT_1, &SHIFT_PUNCT, k.ch)
-        } else if is_char && m == 0 && self.layout.symbol_of(k.ch).is_none() && self.layout.tone_of(k.ch).is_none() {
+        } else if is_char && m == 0 && !self.is_zhuyin_or_tone(k.ch) {
             self.punct_of(&PLAIN_PUNCT_1, &PLAIN_PUNCT, k.ch)
         } else {
             None
@@ -4852,6 +4921,36 @@ impl Engine {
         Ok(true)
     }
 
+    fn is_zhuyin_or_tone(&self, ch: char) -> bool {
+        self.layout.symbol_of(ch).is_some() || self.layout.tone_of(ch).is_some()
+    }
+
+    /// Partial half-width punctuation (`set_half_punct`): returns the half-width ASCII mark when the key's bit is set.
+    /// Guarded against the ASCII state and against Zhuyin/tone keys (so ETen's `'` and `=` stay Zhuyin).
+    fn half_punct_of(&self, ch: char, m: u32, is_char: bool) -> Option<char> {
+        if self.half_punct_mask == 0 || self.ascii || !is_char {
+            return None;
+        }
+        let table: &[HalfPunctEntry] = if m == MOD_SHIFT {
+            &HALF_PUNCT_SHIFT
+        } else if m == 0 && !self.is_zhuyin_or_tone(ch) {
+            &HALF_PUNCT_PLAIN
+        } else {
+            return None;
+        };
+        let entry = table.iter().find(|e| e.keycap == ch)?;
+        ((self.half_punct_mask & (1u32 << entry.bit)) != 0).then_some(entry.ascii)
+    }
+
+    /// Full-width base (and optional secondary mark) for an ASCII character inserted via `set_half_punct`.
+    fn half_punct_full(&self, ch: char) -> Option<(char, Option<char>)> {
+        HALF_PUNCT_SHIFT
+            .iter()
+            .chain(HALF_PUNCT_PLAIN.iter())
+            .find(|e| e.ascii == ch)
+            .map(|e| (if self.punct_layout == 1 { e.full1 } else { e.full0 }, e.sec))
+    }
+
     /// Rule 2's table: the key's cell in punctuation layout 1 (`one`) when that layout is chosen and has the key, else layout 0's (`base`).
     fn punct_of(&self, one: &[(char, char)], base: &[(char, char)], ch: char) -> Option<char> {
         let find = |t: &[(char, char)]| t.iter().find(|(c, _)| *c == ch).map(|(_, p)| *p);
@@ -4864,6 +4963,13 @@ impl Engine {
         self.clear_pend();
         self.cands = None;
         self.insert_token(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()), None)
+    }
+
+    /// Rule 2 insertion for a mark from `set_half_punct`: marks the `Fixed` unit with `from_half_punct = true` so `Down` offers full-width alternatives.
+    fn insert_half_punct(&mut self, p: char) -> Result<Output, EngineError> {
+        self.clear_pend();
+        self.cands = None;
+        self.insert_token_inner(format!("{PUNCT_PREFIX}{p}"), Some(p.to_string()), None, true)
     }
 
     /// docs/spec/keys-and-composition.md §4.3 mouse pick: `index` is a position in the last output's `candidates`: the candidate window's, or, with
@@ -4989,6 +5095,10 @@ impl Engine {
     /// Insert one token (a syllable, or punctuation with its fixed word) at the cursor, shift the
     /// fixed words on its right, recompute; at MAX_SYLLABLES tokens commit everything (docs/spec/keys-and-composition.md §8.2).
     fn insert_token(&mut self, reading: String, fixed_word: Option<String>, zh: Option<String>) -> Result<Output, EngineError> {
+        self.insert_token_inner(reading, fixed_word, zh, false)
+    }
+
+    fn insert_token_inner(&mut self, reading: String, fixed_word: Option<String>, zh: Option<String>, from_half_punct: bool) -> Result<Output, EngineError> {
         // docs/spec/keys-and-composition.md §6.5: a newly typed syllable frees the pieces a deletion split off, before anything decodes.
         // Punctuation, English tokens and spaces are not syllables and leave them.
         if fixed_word.is_none() {
@@ -5012,7 +5122,7 @@ impl Engine {
         let excluded: Vec<usize> = pieces.iter().map(|&s| if s >= c { s + 1 } else { s }).collect();
         self.syls.insert(c, reading);
         if let Some(word) = fixed_word {
-            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_keys: Vec::new(), zh, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), own: None, whole: None });
+            self.fixed.push(Fixed { start: c, end: c + 1, word, pre: None, key: None, pick_keys: Vec::new(), zh, frozen: false, split_off: false, displaced_new: Vec::new(), mixed: MixedMark::default(), own: None, whole: None, from_half_punct });
             self.fixed.sort_by_key(|f| f.start);
         }
         self.cursor += 1;
@@ -5196,9 +5306,20 @@ impl Engine {
                 return;
             }
             let typed = self.syls[touching][PUNCT_PREFIX.len()..].to_string();
-            let alts = typed.chars().next().and_then(|c| self.punct.get(&c)).cloned().unwrap_or_default();
+            let from_half_punct = self.fixed.iter().any(|f| f.start == touching && f.end == touching + 1 && f.from_half_punct);
+            let half_full = if from_half_punct {
+                typed.chars().next().and_then(|c| self.half_punct_full(c))
+            } else {
+                None
+            };
+            let alts_key = half_full.map(|(f, _)| f).or_else(|| typed.chars().next());
+            let alts = alts_key.and_then(|c| self.punct.get(&c)).cloned().unwrap_or_default();
+            let full_items: Vec<String> = half_full
+                .into_iter()
+                .flat_map(|(f, sec)| std::iter::once(f.to_string()).chain(sec.map(|s| s.to_string())))
+                .collect();
             let mut listed = HashSet::new();
-            for w in std::iter::once(typed).chain(alts) {
+            for w in std::iter::once(typed).chain(full_items).chain(alts) {
                 if listed.insert(w.clone()) {
                     list.push((w, 1));
                 }
@@ -5756,6 +5877,9 @@ impl Engine {
                 zh = None;
             }
         }
+        let from_half_punct = end == start + 1
+            && self.is_punct(start)
+            && self.fixed.iter().any(|f| f.start == start && f.end == end && f.from_half_punct);
         self.fixed.retain(|f| !(f.start < end && start < f.end));
         self.fixed.extend(frozen);
         // A candidate pick changes the text before every fixed word to its right: their prediction keys no longer
@@ -5763,7 +5887,7 @@ impl Engine {
         for f in self.fixed.iter_mut().filter(|f| f.start >= end) {
             f.key = None;
         }
-        self.fixed.push(Fixed { start, end, word, pre, key, pick_keys, zh, frozen: false, split_off: false, displaced_new, mixed, own: None, whole: None });
+        self.fixed.push(Fixed { start, end, word, pre, key, pick_keys, zh, frozen: false, split_off: false, displaced_new, mixed, own: None, whole: None, from_half_punct });
         self.fixed.sort_by_key(|f| f.start);
         self.refresh()
     }

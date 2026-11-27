@@ -146,6 +146,12 @@ public struct MenuEntry: Equatable, Sendable {
         public static let punctLayout = "標點排列"
         public static let punctLayoutApple = "macOS 注音"
         public static let punctLayoutMcbopomofo = "小麥注音"
+        /// The 部分符號使用半形 switch and its customize disclosure group of the 鍵盤 section (docs/spec/keys-and-composition.md §8.1).
+        public static let halfPunct = "部分符號使用半形"
+        public static let halfPunctNote = "開啟後，下方勾選的符號鍵一律直接送出半形（中英混打關著也有效）；原本的全形仍可用 Option 組合鍵或按 ↓ 選取。"
+        public static let halfPunctCustomize = "自訂半形符號"
+        public static let halfPunctReset = "回復預設勾選"
+        public static let halfPunctEtenNote = "倚天排列下 '、= 為注音鍵，維持注音。"
         /// The spacing toggle in the settings window and the line under it (docs/spec/english-mixed.md §9, §11).
         public static let spacing = "中英文之間自動加空格"
         public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"

@@ -231,6 +231,16 @@ struct SettingsPageForm: View {
     private static let appIconSize: CGFloat = 16
     /// The four pair checkboxes, in the order of the bits of `shanjie_engine_set_fuzzy` (docs/spec/decoder.md §6.2).
     private static let fuzzyPairs = ["ㄣ／ㄥ", "ㄓ／ㄗ", "ㄔ／ㄘ", "ㄕ／ㄙ"]
+    /// Chosen by eye to arrange the 27 symbol checkboxes in two columns inside `formWidth`; not measured against any reference.
+    private static let halfPunctColumnCount = 2
+    /// Chosen by eye for the vertical gap between the three symbol groups and the reset button inside the disclosure group; not measured against any reference.
+    private static let halfPunctGroupSpacing: CGFloat = 10
+    /// Chosen by eye for the gap between a group's caption heading and its checkbox grid; not measured against any reference.
+    private static let halfPunctHeaderSpacing: CGFloat = 4
+    /// Chosen by eye for the row spacing inside the 2-column checkbox grid; not measured against any reference.
+    private static let halfPunctRowSpacing: CGFloat = 6
+    /// Chosen by eye for the top inset below the DisclosureGroup header row; not measured against any reference.
+    private static let halfPunctTopPadding: CGFloat = 4
     let page: SettingsPage
     @ObservedObject var model: SettingsModel
     let appLabels: AppLabels
@@ -251,6 +261,46 @@ struct SettingsPageForm: View {
                         Text(MenuEntry.Text.punctLayoutApple).tag(PunctLayout.apple)
                         Text(MenuEntry.Text.punctLayoutMcbopomofo).tag(PunctLayout.mcbopomofo)
                     }
+                    // docs/spec/keys-and-composition.md §8.1: native Toggle, caption note, and collapsed DisclosureGroup with 2-column checkboxes.
+                    Toggle(MenuEntry.Text.halfPunct, isOn: Binding(get: { model.halfPunct }, set: { model.setHalfPunct($0) }))
+                    Text(MenuEntry.Text.halfPunctNote)
+                        .font(.caption).foregroundStyle(.secondary)
+                    DisclosureGroup(MenuEntry.Text.halfPunctCustomize) {
+                        VStack(alignment: .leading, spacing: Self.halfPunctGroupSpacing) {
+                            ForEach(HalfPunctCatalog.groups) { group in
+                                VStack(alignment: .leading, spacing: Self.halfPunctHeaderSpacing) {
+                                    Text(group.title)
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    LazyVGrid(
+                                        columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: Self.halfPunctColumnCount),
+                                        alignment: .leading,
+                                        spacing: Self.halfPunctRowSpacing
+                                    ) {
+                                        ForEach(group.items) { item in
+                                            Toggle(
+                                                item.label,
+                                                isOn: Binding(
+                                                    get: { (model.halfPunctMask >> UInt32(item.bit)) & 1 == 1 },
+                                                    set: { model.setHalfPunct(bit: item.bit, $0) }
+                                                )
+                                            )
+                                            .toggleStyle(.checkbox)
+                                            .disabled(model.isHalfPunctBitDisabled(item.bit))
+                                        }
+                                    }
+                                }
+                            }
+                            if model.showsHalfPunctEtenNote {
+                                Text(MenuEntry.Text.halfPunctEtenNote)
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Button(MenuEntry.Text.halfPunctReset) {
+                                model.resetHalfPunctMask()
+                            }
+                        }
+                        .padding(.top, Self.halfPunctTopPadding)
+                    }
+                    .disabled(!model.halfPunct)
                 }
                 Section("聊天／書面") {
                     Picker("切換方式", selection: Binding(get: { model.profileMode }, set: { model.setProfileMode($0) })) {
