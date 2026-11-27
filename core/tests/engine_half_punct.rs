@@ -4,6 +4,7 @@
 //! full-width recovery, learning exclusion, and invalid-mask error handling.
 
 use core::engine::*;
+#[cfg(unix)]
 use core::learn_store::LearnStore;
 use core::Lexicon;
 use std::path::{Path, PathBuf};
@@ -102,6 +103,7 @@ fn spec_key(s: &KeySpec) -> Key {
     if s.shifted { shift(s.keycap) } else { plain(s.keycap) }
 }
 
+#[cfg(unix)]
 fn tmp_dir(tag: &str) -> PathBuf {
     let d = std::env::temp_dir().join(format!("shanjie-half-punct-{}-{tag}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
@@ -394,9 +396,15 @@ fn full_width_recovery_via_rule1o_and_down_list() {
 
 #[test]
 fn picking_full_width_from_half_punct_does_not_learn() {
-    let dir = tmp_dir("learn");
     let mut e = app();
-    e.learning_open(&dir).unwrap();
+    // learning_open / LearnStore::open return StoreError::Io on Windows (docs/spec/windows-tip.md §2.5);
+    // in-memory learning exclusion runs on every platform.
+    #[cfg(unix)]
+    let dir = {
+        let dir = tmp_dir("learn");
+        e.learning_open(&dir).unwrap();
+        dir
+    };
     e.set_learning(true);
     e.set_half_punct(HALF_PUNCT_ALL_MASK).unwrap();
 
@@ -417,9 +425,12 @@ fn picking_full_width_from_half_punct_does_not_learn() {
     assert_eq!(kk(&mut e, KeyKind::Enter).commit, "測試～");
     assert!(e.learner().records().is_empty());
 
-    let (_, on_disk, _) = LearnStore::open(&dir).unwrap();
-    assert!(on_disk.is_empty());
-    let _ = std::fs::remove_dir_all(&dir);
+    #[cfg(unix)]
+    {
+        let (_, on_disk, _) = LearnStore::open(&dir).unwrap();
+        assert!(on_disk.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[test]
