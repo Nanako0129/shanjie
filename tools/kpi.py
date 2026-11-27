@@ -143,20 +143,53 @@ def git_clean_head(root, version):
     return head
 
 
+# Model file extensions (the same five as scripts/check-models.sh). Any file in data/lm with one of these extensions is
+# treated as a model file and must belong to the version's shipped set (VERSIONS2), even when a data/<name>.sha256 exists.
+MODEL_EXTS = (".sjlm", ".sjc", ".sjkn", ".sjt3", ".sjtl")
+
+
+def _tracked_lm_hash(root, name):
+    """Expected SHA-256 of data/lm/<name> from data/<name>.sha256, or None if no valid hash file tracks that file."""
+    hf = os.path.join(root, "data", name + ".sha256")
+    if not os.path.isfile(hf):
+        return None
+    with open(hf, encoding="utf-8") as fh:
+        parts = fh.read().split()
+    if len(parts) == 2 and re.fullmatch(r"[0-9a-f]{64}", parts[0]) and parts[1] in (name, f"data/lm/{name}"):
+        return parts[0]
+    return None
+
+
 def check_models(root, spec):
-    """-> {file name: sha256} of exactly the files the version ships (resolve_models' set), read from data/lm and matching data/*.sha256."""
+    """-> {file name: sha256} of the model files the version ships (resolve_models' set), read from data/lm and matching data/*.sha256.
+    Non-model files in data/lm tracked by data/<name>.sha256 (such as colloquial-attribution.tsv) are allowed once their hash matches
+    and are not returned in the models dict. Any unshipped model file (by MODEL_EXTS, even with a .sha256 file) and any unlisted entry
+    in data/lm are refused."""
     names = ["bigram.sjlm", "classes.sjc"] + (["kn.sjkn"] if spec.get("kn") else []) + (["trigram.sjt3"] if spec.get("tri") else []) \
         + (["trigram-chat.sjt3"] if spec.get("tri_chat") else []) + (["tinylm.sjtl"] if spec["tinylm"] else []) + (["colloquial.sjlm"] if spec.get("colloquial") else [])
     lm = os.path.join(root, "data/lm")
-    extra = sorted(f for f in os.listdir(lm) if f not in names and not f.startswith("."))
+    extra, side_hashes = [], []
+    for f in sorted(os.listdir(lm)):
+        if f in names or f.startswith("."):
+            continue
+        p = os.path.join(lm, f)
+        want = None if f.endswith(MODEL_EXTS) or not os.path.isfile(p) else _tracked_lm_hash(root, f)
+        if want is None:
+            extra.append(f)
+        else:
+            side_hashes.append((f, p, want))
     if extra:
         die(f"data/lm holds files the version does not ship: {', '.join(extra)}")
+    for f, p, want in side_hashes:
+        if bench.sha_file(p) != want:
+            die(f"data/lm/{f} does not match data/{f}.sha256")
     out = {}
     for n in names:
         hf = os.path.join(root, "data", n + ".sha256")
         if not os.path.isfile(hf):
             die(f"data/{n}.sha256 is missing")
-        want = open(hf).read().split()[0]
+        with open(hf, encoding="utf-8") as fh:
+            want = fh.read().split()[0]
         p = os.path.join(lm, n)
         if not os.path.isfile(p):
             die(f"data/lm/{n} is missing")
