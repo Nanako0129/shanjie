@@ -265,6 +265,25 @@ public final class MemoryFuzzyStore: FuzzyStore {
     }
 }
 
+/// Where the "部分符號使用半形" switch and its 27-bit symbol mask are kept (docs/spec/keys-and-composition.md §8.1):
+/// `halfPunct` `nil` means never chosen (off); `halfPunctMask` `nil` means never chosen (`CoreEngine.halfPunctDefaultMask`).
+@MainActor
+public protocol HalfPunctStore: AnyObject {
+    var halfPunct: Bool? { get set }
+    var halfPunctMask: UInt32? { get set }
+}
+
+/// The in-memory HalfPunctStore.
+@MainActor
+public final class MemoryHalfPunctStore: HalfPunctStore {
+    public var halfPunct: Bool?
+    public var halfPunctMask: UInt32?
+    public init(halfPunct: Bool? = nil, halfPunctMask: UInt32? = nil) {
+        self.halfPunct = halfPunct
+        self.halfPunctMask = halfPunctMask
+    }
+}
+
 /// Where the "動漫與遊戲詞" switch is kept (docs/spec/lexicon-and-packs.md §4.1, §4.2): `nil` means never chosen, which is on. Same arrangement as `PredictionStore`.
 @MainActor
 public protocol AcgPackStore: AnyObject {
@@ -703,6 +722,14 @@ public final class Shell {
     public var shiftSide: ShiftTap.Side { shiftTap.side }
     /// docs/spec/keys-and-composition.md §8.1: the punctuation layout (default Apple Zhuyin's); sent to every engine `build()` makes and on every change.
     public private(set) var punctLayout = PunctLayout.apple
+    private let halfPunctStore: HalfPunctStore
+    /// docs/spec/keys-and-composition.md §8.1: whether selected symbol keys send half-width characters directly (default off); sent to every engine `setUp` configures.
+    public private(set) var halfPunctOn = false
+    /// docs/spec/keys-and-composition.md §8.1: the 27-bit symbol mask kept even while `halfPunctOn` is off; unknown bits are masked off on load and write.
+    public private(set) var halfPunctMask: UInt32 = CoreEngine.halfPunctDefaultMask
+    var effectiveHalfPunctMask: UInt32 { halfPunctOn ? halfPunctMask : 0 }
+    /// What `setUp` sent to each engine it configured, in order (test hook, like `fuzzySent`).
+    private(set) var halfPunctSent: [UInt32] = []
     /// docs/spec/macos-shell.md §13: the in-memory diagnostic log of the Shift toggle.
     public let diag: DiagLog
     /// docs/spec/macos-shell.md §13.1 (`flags`): the system's running count of `flagsChanged` events in this login session
@@ -997,6 +1024,8 @@ public final class Shell {
     /// (docs/spec/english-mixed.md §10.3). The defaults (in memory, not owed, no window) are for the tests; the app passes its own.
     /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes
     /// `Shell.shipsAbbreviation`, which the tests read.
+    /// `halfPunctStore`: the 部分符號使用半形 switch and its 27-bit symbol mask (docs/spec/keys-and-composition.md §8.1). The default (in
+    /// memory, off) is for the tests; the app passes its own.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
                 demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, englishStore: EnglishStore, acgPackStore: AcgPackStore, quotePackStore: QuotePackStore,
@@ -1017,7 +1046,8 @@ public final class Shell {
                 englishNoticeStore: EnglishNoticeStore = MemoryEnglishNoticeStore(),
                 englishNotice: EnglishNoticePanel? = nil,
                 diagLogStore: DiagLogStore = MemoryDiagLogStore(),
-                flagsCounter: @escaping () -> UInt32 = { 0 }) {
+                flagsCounter: @escaping () -> UInt32 = { 0 },
+                halfPunctStore: HalfPunctStore = MemoryHalfPunctStore()) {
         self.resources = resources
         diag = DiagLog(store: diagLogStore)
         self.flagsCounter = flagsCounter
@@ -1025,6 +1055,9 @@ public final class Shell {
         shiftToggleOn = shiftToggleStore.shiftToggle ?? false // docs/spec/english-mixed.md §10.1: was true
         shiftTap.side = ShiftTap.Side(stored: shiftToggleStore.shiftSide)
         punctLayout = PunctLayout(stored: layoutStore.punctLayout)
+        self.halfPunctStore = halfPunctStore
+        halfPunctOn = halfPunctStore.halfPunct ?? false
+        halfPunctMask = (halfPunctStore.halfPunctMask ?? CoreEngine.halfPunctDefaultMask) & CoreEngine.halfPunctAllMask
         self.shiftHint = shiftHint
         self.englishNoticeStore = englishNoticeStore
         self.englishNotice = englishNotice
@@ -1166,6 +1199,14 @@ public final class Shell {
 
     func applyPunctLayout(_ layout: PunctLayout) {
         if let o = owner { o.applyPunctLayout(layout) } else { dropOnFailure(setPunctLayout(layout)) }
+    }
+
+    func applyHalfPunct(_ on: Bool) {
+        if let o = owner { o.applyHalfPunct(on) } else { dropOnFailure(setHalfPunct(on)) }
+    }
+
+    func applyHalfPunctMask(_ mask: UInt32) {
+        if let o = owner { o.applyHalfPunctMask(mask) } else { dropOnFailure(setHalfPunctMask(mask)) }
     }
 
     func applyEnglishOverwrite(_ on: Bool) {
@@ -1359,6 +1400,25 @@ public final class Shell {
         layoutStore.punctLayout = layout.rawValue
         defer { changed() }
         return engine?.setPunctLayout(layout.code)
+    }
+
+    /// The settings window's 部分符號使用半形 switch (docs/spec/keys-and-composition.md §8.1): stored (keeping `halfPunctMask` untouched),
+    /// and sent to the engine (`0` when off), whose next key reads it. Nothing shown changes, so the snapshot is not applied.
+    func setHalfPunct(_ on: Bool) -> CoreResult? {
+        halfPunctOn = on
+        halfPunctStore.halfPunct = on
+        defer { changed() }
+        return engine?.setHalfPunct(effectiveHalfPunctMask)
+    }
+
+    /// The settings window's 自訂半形符號 mask (docs/spec/keys-and-composition.md §8.1): unknown bits stripped, stored, and sent to the engine
+    /// while `halfPunctOn` is true (`0` when off). Nothing shown changes, so the snapshot is not applied.
+    func setHalfPunctMask(_ mask: UInt32) -> CoreResult? {
+        let clean = mask & CoreEngine.halfPunctAllMask
+        halfPunctMask = clean
+        halfPunctStore.halfPunctMask = clean
+        defer { changed() }
+        return engine?.setHalfPunct(effectiveHalfPunctMask)
     }
 
     /// The menu's choice (docs/spec/semantic-rerank.md §8.2): stored, and sent to the engine, which recomputes the composition (off: the n-gram
@@ -1643,6 +1703,12 @@ public final class Shell {
         // And the punctuation layout (docs/spec/keys-and-composition.md §8.1), every time: the core's default is Apple Zhuyin's.
         if case .failed(let c) = e.setPunctLayout(punctLayout.code) {
             Log.shell.error("shanjie_engine_set_punct_layout failed, code \(c)")
+        }
+        // And the 27-bit half-width punctuation mask (docs/spec/keys-and-composition.md §8.1), every time: the core's default is 0.
+        let halfPunct = effectiveHalfPunctMask
+        halfPunctSent.append(halfPunct)
+        if case .failed(let c) = e.setHalfPunct(halfPunct) {
+            Log.shell.error("shanjie_engine_set_half_punct failed, code \(c)")
         }
         // A rebuilt engine starts with the core's default (off since S7c-2c), and load_tinylm leaves the switch alone: the shell's
         // own value is sent every time, so the core's default never decides.
@@ -2215,6 +2281,15 @@ public final class Session {
     /// 標點排列: nothing shown changes, so only a failure is handled.
     func applyPunctLayout(_ layout: PunctLayout) {
         if case .failed(let c)? = shell.setPunctLayout(layout) { _ = fail(c) }
+    }
+
+    /// 部分符號使用半形: nothing shown changes, so only a failure is handled.
+    func applyHalfPunct(_ on: Bool) {
+        if case .failed(let c)? = shell.setHalfPunct(on) { _ = fail(c) }
+    }
+
+    func applyHalfPunctMask(_ mask: UInt32) {
+        if case .failed(let c)? = shell.setHalfPunctMask(mask) { _ = fail(c) }
     }
 
     /// The menu's 語意校正 switch: the snapshot is shown, if this session owns the composition.

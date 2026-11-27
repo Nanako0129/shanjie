@@ -103,14 +103,14 @@
 4. 單按 Shift 切換的英數狀態（§9.3）。
 5. 已進入的預測列（規則 1a–1e）。
 6. 數字串、英文段（`docs/spec/english-mixed.md`）。
-7. 規則 2（標點）。
+7. 半形符號覆寫 `half_punct_of`（§8.1：`half_punct_mask != 0`、非 `ascii`、沒有 Option／Control／Command／Caps Lock、且該鍵在目前排列不是注音鍵也不是聲調鍵時生效，與 `english`、`abbr` 無關；倚天排列的 `'`＝`ㄘ`、`=`＝`ㄦ` 維持注音；規則 1o 永遠排在第 3 步先執行，仍出全形），再規則 2（`punct_of` 標點）。
 8. Shift＋字母開英文段。
 9. 候選窗開著（規則 3–8），數字列的起頭。
 10. 有未完成音節（規則 9–13）、沒有未完成音節（規則 14–22）。
 
 由上往下，第一條符合的生效。「注音鍵」「聲調鍵」只指沒按 Shift 的鍵。
 
-按鍵習慣 1（`shanjie_engine_set_key_scheme`，見下一段）的 `m` 規則插在這個順序的下列位置：規則 1m 在第 3 步，是規則 1 的例外，排在規則 1o 之前（兩條的修飾鍵不重疊；規則 1o 不分按鍵習慣）；規則 2m 在第 7 步，取代規則 2 對 Shift+, 、Shift+. 的處理；規則 2n 在第 8 步之前（規則 2 之後）；規則 3m–8m 在第 9 步，取代規則 3–8；規則 12m 在第 10 步，取代規則 12a、12b；規則 15m、15d、16m、16u、21m、19m 在第 10 步，各取代規則 15 的空白鍵、規則 15 的 ↓、規則 16 的聲調鍵、規則 16 的 ↑、規則 21 的 Tab、規則 19a。
+按鍵習慣 1（`shanjie_engine_set_key_scheme`，見下一段）的 `m` 規則插在這個順序的下列位置：規則 1m 在第 3 步，是規則 1 的例外，排在規則 1o 之前（兩條的修飾鍵不重疊；規則 1o 不分按鍵習慣）；規則 2m 在第 7 步，排在 `half_punct_of` 之後、既有 `punct_of` 之前，取代規則 2 對 Shift+, 、Shift+. 的處理（`half_punct_mask` 勾選 bit 18 `<` 或 bit 19 `>` 時，`half_punct_of` 先於規則 2m 生效）；規則 2n 在第 8 步之前（規則 2 之後）；規則 3m–8m 在第 9 步，取代規則 3–8；規則 12m 在第 10 步，取代規則 12a、12b；規則 15m、15d、16m、16u、21m、19m 在第 10 步，各取代規則 15 的空白鍵、規則 15 的 ↓、規則 16 的聲調鍵、規則 16 的 ↑、規則 21 的 Tab、規則 19a。
 
 | # | 狀態 | 按鍵 | 行為 |
 |---|---|---|---|
@@ -123,7 +123,7 @@
 | 1c | 預測列已進入 | Shift+Tab、Esc | 退回未進入（預測列保留） |
 | 1d | 預測列已進入 | Enter（含 Shift+Enter） | 選目前選取的，不送出也不換行 |
 | 1e | 預測列已進入 | 其他鍵（含 Backspace；橫排時含 ↑↓） | 退回未進入，再從規則 2 起處理這個鍵。Backspace 有未完成音節時照規則 11 刪最後一個符號並重算預測列；沒有時照規則 18 |
-| 2 | 任何 | §8.1 的標點鍵、Ctrl+\ | 丟掉未完成音節（多個單位時是全部）、關閉候選，把標點插入組字區游標處（不送出）。組字區空的也一樣 |
+| 2 | 任何 | §8.1 的標點鍵（含開著的 `half_punct_of` 命中的 27 鍵半形符號）、Ctrl+\ | 丟掉未完成音節（多個單位時是全部）、關閉候選，把標點插入組字區游標處（不送出；命中 `half_punct_of` 時插入半形符號並標記 `from_half_punct = true`）。組字區空的也一樣 |
 | 3 | 候選開啟（橫排） | 1–9 | 收合：選目前這一頁的第 n 個，窗關閉；超出本頁則忽略（窗保持開著）。展開：選選取所在那一排的第 n 個（每排 9 個；最後一排不足 n 個則吃掉、不動作） |
 | 4 | 候選開啟（橫排） | ↑↓、←→ | 收合：↑ ← 上一個、→ 下一個（跨頁，逐一移動，不翻頁），↓ 展開成網格（選取不動）。展開（一律 9 欄，一排是一頁，展開時選取所在的那一頁在最上面）：↓ 下一排同一個位置（最後一排較短時到該排最後一個，已在最後一排時不動）；↑ 上一排，只有在整份清單的第 0 排才收回成一列（選取不變），其他排往上捲；← → 上一個、下一個（跨列） |
 | 5 | 候選開啟（橫排） | 空白鍵 | 收合：下一頁，最後一頁再按回第一頁的第一個。展開：和 ↓ 相同，但在最後一排時回第一排同一個位置 |
@@ -179,7 +179,7 @@
 | 5m | S3，直排窗 | End | 跳到最後一頁、選最後一項 |
 | 6m | S3，直排窗 | Enter | 選目前選取的，窗關閉（同規則 6）；Shift+Enter：關窗，組字區留著、不選 |
 | 7m | S3，直排窗 | Esc | 關閉候選，組字區不變（同規則 7） |
-| 8m | S3，直排窗 | 其他到得了第 9 步的鍵（Backspace、Tab、Shift+Tab、←、→、Home、Delete、注音鍵、Shift＋字母） | 吃掉、不動作，窗開著、選取與組字不變；第 9 步沒有任何鍵關窗後再往下走（取代規則 8）。例外是第 7 步的規則 2 標點鍵（`[`、`]`、`\`、`'`、`=`、`` ` ``、Shift+/、Shift+1、Shift+;、Shift+[、Shift+]、Shift+9、Shift+0、Shift+`、Shift+\、Shift+'、Shift+=、Ctrl+\；Shift+, 、Shift+. 不在其中，見 2m）：兩種習慣下都照規則 2，關窗並把全形標點插進組字區。標點排列 1（§8.1）新增的鍵（Shift+2～8）在兩種按鍵習慣下也都照規則 2。微軟注音對這些鍵沒有量 |
+| 8m | S3，直排窗 | 其他到得了第 9 步的鍵（Backspace、Tab、Shift+Tab、←、→、Home、Delete、注音鍵、Shift＋字母） | 吃掉、不動作，窗開著、選取與組字不變；第 9 步沒有任何鍵關窗後再往下走（取代規則 8）。例外是第 7 步的 `half_punct_of`（§8.1，命中時關窗並插入半形標點，含勾選的 Shift+2～8、Shift+- 與勾選 bit 18／19 時的 Shift+, 、Shift+.）與規則 2 標點鍵（`[`、`]`、`\`、`'`、`=`、`` ` ``、Shift+/、Shift+1、Shift+;、Shift+[、Shift+]、Shift+9、Shift+0、`` Shift+` ``、Shift+\、Shift+'、Shift+=、Ctrl+\；Shift+, 、Shift+. 在未由 `half_punct_of` 覆寫時見 2m）：兩種習慣下都照規則 2，關窗並把標點插進組字區。標點排列 1（§8.1）新增的鍵（Shift+2～8）在兩種按鍵習慣下也都照規則 2。微軟注音對這些鍵沒有量 |
 | 12m | S1 | Enter、Shift+Enter | 吃掉、不動作 |
 | 15m | S2 | 空白鍵 | 在游標處插入一個半形空白單位（同規則 16a），之後 ↓、選字、送出都留著；只有 ↓ 開候選窗 |
 | 16m | S2 | 聲調鍵（空白鍵以外） | 在游標處插入聲調符號單位（同規則 22a） |
@@ -192,6 +192,7 @@
 - 沒有微軟式新規則的列：S1 的空白鍵（ㄋ 之類詞庫沒有的音節照規則 10 本來就不動作）、組字區上限（照 §5.2 的 128 個單位；微軟在第 32 個音節起把前段送出，核心沒有這個機制）、S1 的聲調鍵（照規則 10）。
 - 規則 16u、15d 的量測（`docs/windows/ms-zhuyin-ref.md`「補量」的「組字中按 ↑」）只有單字清單 3 項以上、游標在組字尾端、連按中間不夾別的鍵的情況；清單不到 3 項、游標前不是字、游標在中間、中間夾別的鍵、換的字要不要學，都是沒量過、我們的選擇。微軟的窗只列游標前那個字的單字，善解的窗照 §6.1 先列多字詞，所以「目前的字排第一」用「和顯示的那一段相同的項目」來算。
 - 1m、2m、2n、15m、16m 新插入的單位都算進 §5.2 的 128 個單位，第 128 個單位照現行規則整段送出。
+- 與 `half_punct_of`（§8.1）的互動：`half_punct_of` 排在規則 2m 之前。`half_punct_mask` 為 `0`（Windows 殼預設）或未勾選 bit 18（`Shift+,`）、bit 19（`Shift+.`）時，規則 2m 行為不變（且插入單位的 `from_half_punct` 為 `false`）；勾選 bit 18 或 19 時，`half_punct_of` 先於規則 2m 生效，在游標處插入半形 `<`／`>`（`from_half_punct = true`），不落入規則 2m。
 - 按鍵習慣 1 和英文混打、可省略韻母（開著時英文混打本就不生效）、倚天排列開著的組合沒測；Windows 版三者都關（預測列也關）。
 - 驗證：`core/tests/engine_scheme.rs`（每一列在兩種 `scheme` 下各一個測試，`scheme` 0 的對照是逐欄位相同；整頁模型斷言 `candidate_first % 9 == 0`；新單位連打到第 128 個單位整段送出；16u、15d 是 `k18_*` 那幾個測試），`core/tests/engine_learn.rs` 的 `up_swaps_teach_the_last_character_only`。
 
@@ -352,7 +353,7 @@
 
 ### 7.2 其他送出路徑
 
-- **規則 21**：組字區有字時按了核心不處理的鍵（Shift＋非標點、Tab 等），送出組字區再直通這個鍵。標點排列 1（§8.1）下 Shift+2～8 是標點，照規則 2，不屬本條。
+- **規則 21**：組字區有字時按了核心不處理的鍵（Shift＋非標點、Tab 等），送出組字區再直通這個鍵。標點排列 1 下的 Shift+2～8，以及啟用 `half_punct_mask`（§8.1）時勾選的 Shift 鍵（如 Shift+2～8、Shift+-）皆屬標點，照規則 2，不屬本條。
 - **自動送出**：第 128 個單位（§5.2）。
 - **`reset`**：模式 0 送出目前顯示的整串（含未完成音節，與 Enter 相同，所以失焦時打的注音不會無聲消失；開著的英文段以它的寫法送出，`docs/spec/english-mixed.md` §4.4，也與 Enter 相同）後清空，不學習；模式 1 丟棄；模式 2 先丟掉未完成音節（可省略韻母的多個單位是全部，也就是規則 12 Esc 清掉的範圍），再照模式 0 送出剩下顯示的整串並清空，只有未完成音節時送出空字串；其他值回 2。三者都清掉組字區、固定詞、前文（含漢字對集合），不清語言模型、設定與 ASCII 狀態。殼在 `commitComposition`、停用（輸入框變成密碼欄時改丟棄）、組字擁有者改變、表外按鍵時呼叫模式 0 或 1；模式 2 只用在單按 Shift 切到英數、而核心的 ASCII 狀態不可用時（倚天排列、可省略韻母，§9.2）。驗證：`core/tests/engine_english.rs` 的 `reset_commit_finished_drops_the_unfinished_syllable`、`core/tests/engine.rs` 的 `reset_modes_equal_fresh_engine`。
 - 送出、Esc 清空、`reset` 時，連同固定詞清掉所有組字狀態。
@@ -431,6 +432,14 @@ Option 表（規則 1o；修飾鍵恰為 Option，或 Option 加 Shift）：
   - 排列 1 新增的標點鍵和其他標點鍵一樣走規則 2（丟掉未完成音節、關候選、插入組字區、不送出），兩種按鍵習慣（§4.1.1）下都一樣；單按的鍵只在它不是目前鍵盤排列的注音鍵或聲調鍵時才算（倚天排列的 `'` 照舊是注音鍵，`\` 不是注音鍵，是「＼」）。規則 1、1o（Option 表）、ASCII 狀態（§9.3）、中英混打的 Shift＋字母、英文段與數字串開著時的規則都不變；標點候選（§8.3）照輸出的那個標點查表，不另加表。
   - 殼每次建引擎都重送（`docs/spec/macos-shell.md` §2.1）；Windows 版不呼叫，維持 0。
   - 驗證：`core/tests/engine.rs` 的 `punct_layout_1_cells_are_the_lexicon_rows`（10 格的期望值由測試讀詞庫檔產生；空組字區插入、Enter 送出；兩種按鍵習慣下有未完成音節時照規則 2）、`punct_layout_0_is_unchanged`、`punct_layout_1_leaves_the_other_keys`；殼是 `ShellTests.testPunctLayoutStoresRebuildsAndSurvivesRestart` 與 `SettingsTests.testPunctLayoutPickerDefaultsAndStores`；C 標頭是 `core/tests/c/abi_smoke.c` 的 860–867。
+- **部分符號使用半形**（`shanjie_engine_set_half_punct(engine, mask, &out)`；`HALF_PUNCT_ALL_MASK = 0x07FFFFFF`、`HALF_PUNCT_DEFAULT_MASK = 0x006099FF`，預設 `0`）：
+  - `mask` 為 `uint32_t` 27 位元遮罩（bits `0..26`），未定義位元（`mask & !HALF_PUNCT_ALL_MASK != 0`）回 `2` 且狀態不變；合法遮罩更新 `half_punct_mask` 並回 `0`（快照 `handled = 1`、`commit = ""`），下一個鍵生效。
+  - 生效條件（`half_punct_of`）：`half_punct_mask != 0`、非 `ascii`、沒有 Option／Control／Command／Caps Lock、且該鍵在目前排列不是注音鍵也不是聲調鍵；與 `english`、`abbr`、LM 是否載入無關。命中時走規則 2 插入 `_punct_<ascii>` 固定單位並標記 `from_half_punct = true`，開著的 `drun`／`run` 先照既有邊界吐出再重送；規則 1o（Option／Option+Shift）排在更前且不查此遮罩，仍出全形。
+  - 27 位元對應（共 21 個 `Shift+` 鍵與 6 個不按 Shift 非注音鍵；標 `*` 者為 `HALF_PUNCT_DEFAULT_MASK` 預設勾選的 14 鍵）：
+    - **bits `0..20`（`Shift+` 鍵，修飾鍵恰為 `MOD_SHIFT`）**：`0` `` Shift+` ``→`~`\*、`1` `Shift+1`→`!`\*、`2` `Shift+2`→`@`\*、`3` `Shift+3`→`#`\*、`4` `Shift+4`→`$`\*、`5` `Shift+5`→`%`\*、`6` `Shift+6`→`^`\*、`7` `Shift+7`→`&`\*、`8` `Shift+8`→`*`\*、`9` `Shift+9`→`(`、`10` `Shift+0`→`)`、`11` `Shift+-`→`_`\*、`12` `Shift+=`→`+`\*、`13` `Shift+[`→`{`、`14` `Shift+]`→`}`、`15` `Shift+\`→`|`\*、`16` `Shift+;`→`:`、`17` `Shift+'`→`"`、`18` `Shift+,`→`<`、`19` `Shift+.`→`>`、`20` `Shift+/`→`?`。
+    - **bits `21..26`（單按非注音鍵，無修飾鍵）**：`21` `` ` ``→`` ` ``\*、`22` `=`→`=`\*（倚天排列為注音 `ㄦ`，維持注音不覆寫）、`23` `[`→`[`、`24` `]`→`]`、`25` `\`→`\`、`26` `'`→`'`（倚天排列為注音 `ㄘ`，維持注音不覆寫）。
+  - macOS 殼偏好鍵：`halfPunct`（Bool，預設 `false`）與 `halfPunctMask`（`Int`/`UInt32`，預設 `0x006099FF`，讀取時與 `0x07FFFFFF` 做位元 AND）；總開關關著時送 `0` 給核心並保留 `halfPunctMask`。殼每次 `build()` 與背景詞包重建皆重送（`docs/spec/macos-shell.md` §2.1）。
+  - 驗證：`core/tests/engine_half_punct.rs`、`core/src/ffi.rs`、`core/tests/c/abi_smoke.c`（`run_half_punct`）、`macos/Tests/ShanjieKitTests/HalfPunctShellTests.swift`。
 - 表照蘋果內建繁體注音（`com.apple.inputmethod.TCIM.Zhuyin`）用只對自己視窗送鍵的探測程式實測，沒有複製蘋果的任何資料檔。
 - 驗證：`core/tests/engine.rs` 的 `row2_unshifted_bracket_row_is_punctuation`、`row2_punctuation_goes_into_the_composition`。
 
@@ -440,12 +449,13 @@ Option 表（規則 1o；修飾鍵恰為 Option，或 Option 加 Shift）：
 - 內部：讀音 `_punct_<標點字>`，同時是一個長度 1 的固定詞，固定詞依 `start` 排序；判斷是否為標點只看讀音是否以 `_punct_` 開頭。選字不會移除標點固定詞（候選範圍不跨過標點）。
 - 編輯：←→、Home、End 當一格跳過；Backspace、Delete 刪整個標點；算進 128 個單位。
 - 解碼：標點是句子邊界。左邊緊鄰標點的自由段，前文用句首；右邊緊鄰標點的自由段，用句尾結束。所以 `A，B` 的畫面字串等於 A 單獨解碼加「，」加 B 單獨解碼。標點固定詞不查詞庫分數（分數記 0）。
-- 規則 21 不變：Shift＋非標點仍屬規則 21。哪些 Shift 鍵是標點看標點排列（§8.1）：排列 0 下 Shift+2～8 不是標點，排列 1 下是。
+- 規則 21 不變：Shift＋非標點仍屬規則 21。哪些 Shift 鍵是標點看標點排列與 `half_punct_of`（§8.1）：未啟用 `half_punct_mask` 時，排列 0 下 Shift+2～8 與 Shift+- 不是標點、排列 1 下 Shift+2～8 是；啟用 `half_punct_mask` 後，勾選到的 Shift 鍵（含 Shift+2～8 與 Shift+-）一律由 `half_punct_of` 走規則 2 成為半形標點單位，不落入規則 21。
 - 驗證：`punctuation_is_one_cell_for_editing`、`punctuation_counts_toward_the_limit`、`candidates_never_span_punctuation`（`core/tests/engine.rs`）；標點是句子邊界的測試是 `core/tests/engine_lm.rs` 的 `punctuation_is_a_sentence_boundary`。
 
 ### 8.3 標點候選
 
 - 游標左邊緊鄰的單位是標點（或游標為 0 而第一個單位是標點）時，空白鍵與 ↓ 開候選：第一個是原本按鍵打出的標點，接著是表裡這個標點的替代，去重；沒有替代時清單只有它自己。分頁、選取、數字鍵照規則 3–8。
+- 由 `half_punct_of` 插入並標記 `from_half_punct` 的 `_punct_<ascii>` 單位，開候選清單時（空白鍵或 ↓）依序組成（去重，不寫入學習檔）：``[半形符號, 目前標點排列下的全形基準, 次列全形（若有，如 { → 『／｛、} → 』／｝、< → ，／＜、> → 。／＞、` → ·／｀、[ → 「／［、] → 」／］）, 系統／內建標點表對該全形基準的替代]``。`from_half_punct == false` 的半形標點單位（例如 `set_ascii(1)` 或按鍵習慣 1 規則 2m）維持原有行為不變。
 - 選擇：選中的字串取代那個標點的顯示（固定詞的 `word` 換成它），讀音維持 `_punct_<原本的標點>`，所以再開候選時清單不變、第一個仍是原本的標點；它仍是標點單位（句子邊界、一格）。多字元的替代（`⋯⋯`）：顯示與游標位置依單位計算，標點單位的寬度是它的固定詞的字數。
 - 候選表的來源：殼在建引擎時讀本機 macOS 的 `CIMPunctuationCandidates.plist`（私有框架的資源，`/System/Library/PrivateFrameworks/CoreChineseEngine.framework/Versions/A/Resources/` 下），轉成核心的格式，用 `shanjie_engine_set_punctuation` 交給核心；repo 與發佈檔不放蘋果的任何資料。檔案不存在或系統更新改了格式時（哪些系統版本有這個檔沒有逐版驗證），讀不到、解析失敗、結果是空的或核心拒收，核心用內建的預設表，殼記一筆固定文字的 log（`punctuation candidates: system table unavailable, using the built-in list`、`punctuation candidates: core rejected the system table, code N`）。
 - 表的格式（殼轉換出來、核心接收）：UTF-8，以 `\n` 分行，每行以 `\t` 分欄，第一欄是鍵（恰一個 Unicode scalar），其後至少一欄替代且每欄非空；同一個鍵出現多次時後面的取代前面的。殼的轉換規則與核心相同（鍵不是單一 scalar、鍵或替代是空字串或含 `\t`、`\n`、NUL 的項目整筆略過，逐個 Unicode scalar 檢查），所以核心不會拒收殼產出的表。上限 64 KB、1,000 行。核心的 `set_punctuation`：整份表取代（不是合併），失敗回 2 並保留原表，不重算組字區，`reset` 不清這張表。

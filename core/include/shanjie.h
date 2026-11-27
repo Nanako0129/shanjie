@@ -210,6 +210,18 @@ int32_t shanjie_engine_set_key_scheme(ShanjieEngine *engine, uint32_t scheme, Sh
 //   The next key reads the value. Call it after every engine creation, like set_candidate_vertical (the macOS shell does; the Windows text
 //   service never calls it).
 int32_t shanjie_engine_set_punct_layout(ShanjieEngine *engine, uint32_t layout, ShanjieOutput **out); // 0 or 1; returns a snapshot
+#define SHANJIE_HALF_PUNCT_DEFAULT_MASK 0x006099FFu // default 14 keys when enabled (bits 0..8, 11, 12, 15, 21, 22)
+#define SHANJIE_HALF_PUNCT_ALL_MASK     0x07FFFFFFu // all 27 non-Zhuyin symbol keys (bits 0..26)
+// partial half-width punctuation (docs/spec/keys-and-composition.md §8.1): set_half_punct takes a 27-bit mask of
+//   non-Zhuyin symbol keys that insert their half-width ASCII character into the composition as a punctuation unit (default 0, off):
+//   bits 0..20 (SHIFT+keycap): 0 `(~), 1 1(!), 2 2(@), 3 3(#), 4 4($), 5 5(%), 6 6(^), 7 7(&), 8 8(*), 9 9((), 10 0()),
+//     11 -(_), 12 =(+), 13 [({), 14 ](}), 15 \(|), 16 ;(:), 17 '("), 18 ,(<), 19 .(>), 20 /(?)
+//   bits 21..26 (unshifted keycap, only where not a Zhuyin or tone key of the layout): 21 `, 22 = (ETen stays ㄦ), 23 [, 24 ], 25 \, 26 ' (ETen stays ㄘ)
+//   Return codes and snapshot as shanjie_engine_set_punct_layout: 0 on success (handled 1, commit "", display unchanged;
+//   the next key reads it), 1 when engine or out is NULL, 2 when any bit outside SHANJIE_HALF_PUNCT_ALL_MASK is set
+//   (state unchanged, *out NULL), 4 internal error. Rules 1 and 1o and the ASCII state are untouched; Down on a unit
+//   inserted by this mask offers its half-width and full-width alternatives.
+int32_t shanjie_engine_set_half_punct(ShanjieEngine *engine, uint32_t mask, ShanjieOutput **out); // 27-bit mask; returns a snapshot
 // V3 (docs/spec/prediction.md §6): set_abbreviation 0 or 1 (2 otherwise, state unchanged), default 0, like
 //   set_prediction in its codes and its snapshot (handled 1, commit "" unless turning it on ends an English run, below); 1 when engine or out is NULL. With 1 (and the
 //   prediction row on and the cursor at the end of the composition) a zhuyin key whose column already holds a symbol or

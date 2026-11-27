@@ -770,6 +770,40 @@ pub unsafe extern "C" fn shanjie_engine_set_punct_layout(
     rc
 }
 
+/// docs/spec/c-abi.md, docs/spec/keys-and-composition.md §8.1. `mask` is a 27-bit mask of non-Zhuyin symbol keys
+/// that insert their half-width ASCII character into the composition (bits 0..=26; default 0). The next key reads it.
+/// Returns 0 and the snapshot like `shanjie_engine_set_punct_layout` (handled 1, commit "", nothing shown changes);
+/// any bit outside `HALF_PUNCT_ALL_MASK` leaves state unchanged and returns 2; NULL `engine` or `out` returns 1.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_half_punct(
+    engine: *mut ShanjieEngine,
+    mask: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_half_punct(mask) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(Some(o)) => unsafe { emit(o, out) },
+            Ok(None) => SHANJIE_ERR_INVALID,
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
 /// docs/spec/prediction.md §6. `enabled` 0 or 1 (default 0): whether a non-advancing symbol opens a new
 /// unfinished unit. Returns the snapshot like `set_prediction`; any other value changes nothing and returns 2.
 ///
@@ -3434,6 +3468,78 @@ mod tests {
     fn share_and_new_shared_through_the_c_abi() {
         let (ok, out, err) = run_child("child_share", false);
         assert!(ok, "shared parts child failed: {out}{err}");
+        assert!(out.contains("1 passed"), "child test actually ran");
+        assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
+    }
+
+    // ---- partial half-width punctuation: set_half_punct ----
+
+    fn half_punct(e: *mut ShanjieEngine, mask: u32) -> (i32, bool, i32, String, String) {
+        let mut o: *mut ShanjieOutput = sentinel();
+        let rc = unsafe { shanjie_engine_set_half_punct(e, mask, &mut o) };
+        if o.is_null() {
+            return (rc, true, 0, String::new(), String::new());
+        }
+        // SAFETY: test-only read of a live output.
+        let r = unsafe {
+            let s = |p| CStr::from_ptr(p).to_str().unwrap().to_string();
+            (rc, false, (*o).handled, s((*o).preedit), s((*o).commit))
+        };
+        unsafe { shanjie_output_free(o) };
+        r
+    }
+
+    #[test]
+    fn child_half_punct() {
+        if !is_child("child_half_punct") {
+            return;
+        }
+        use crate::engine::{HALF_PUNCT_ALL_MASK, HALF_PUNCT_DEFAULT_MASK, MOD_SHIFT};
+
+        let dir = tiny_dir("half_punct", "ㄅㄚ 爸 -1.0\n".as_bytes());
+        let e = new_engine(&dir, 0);
+
+        let mut o: *mut ShanjieOutput = sentinel();
+        assert!(unsafe { shanjie_engine_set_half_punct(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "engine NULL");
+        assert!(unsafe { shanjie_engine_set_half_punct(e, 1, ptr::null_mut()) } == 1, "out NULL");
+
+        for bad in [HALF_PUNCT_ALL_MASK + 1, u32::MAX] {
+            let (rc, null, ..) = half_punct(e, bad);
+            assert!(rc == 2 && null, "invalid mask");
+        }
+
+        // Default mask 0 leaves Shift+` producing full-width ～.
+        let shift_grave = ShanjieKey { kind: CHAR, ch: '`' as u32, modifiers: MOD_SHIFT };
+        let (rc, pre, commit) = send(e, shift_grave);
+        assert!(rc == 0 && pre == "～" && commit.is_empty(), "default off");
+        assert!(send(e, key(BACKSPACE, '\0')).0 == 0);
+
+        let (rc, null, handled, pre, commit) = half_punct(e, HALF_PUNCT_DEFAULT_MASK);
+        assert!(rc == 0 && !null && handled == 1 && pre.is_empty() && commit.is_empty(), "valid mask");
+
+        // Invalid mask keeps HALF_PUNCT_DEFAULT_MASK intact.
+        for bad in [HALF_PUNCT_ALL_MASK + 1, u32::MAX] {
+            let (rc, null, ..) = half_punct(e, bad);
+            assert!(rc == 2 && null, "invalid mask with state active");
+        }
+
+        let (rc, pre, commit) = send(e, shift_grave);
+        assert!(rc == 0 && pre == "~" && commit.is_empty(), "Shift+` -> ~");
+        assert!(send(e, key(BACKSPACE, '\0')).0 == 0);
+
+        let (rc, null, handled, pre, commit) = half_punct(e, 0);
+        assert!(rc == 0 && !null && handled == 1 && pre.is_empty() && commit.is_empty(), "restore 0");
+        let (rc, pre, commit) = send(e, shift_grave);
+        assert!(rc == 0 && pre == "～" && commit.is_empty(), "restored");
+
+        unsafe { shanjie_engine_free(e) };
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn half_punct_through_the_c_abi() {
+        let (ok, out, err) = run_child("child_half_punct", false);
+        assert!(ok, "half_punct child failed: {out}{err}");
         assert!(out.contains("1 passed"), "child test actually ran");
         assert!(!out.contains("shanjie-ffi-") && !err.contains("shanjie-ffi-"), "a path leaked");
     }

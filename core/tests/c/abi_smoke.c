@@ -667,6 +667,39 @@ static int run_share(const char *dir, const char *lm) {
   return 0;
 }
 
+/* Partial half-width punctuation (docs/spec/keys-and-composition.md §8.1): constants, codes, Shift+` -> ~, restore 0 -> ～. */
+static int run_half_punct(const char *dir) {
+  static ShanjieOutput dummy;
+  ShanjieEngine *e = 0;
+  ShanjieOutput *o = 0;
+  ShanjieKey sk = {1u, (uint32_t)(unsigned char)'`', 1u};
+  CHECK(1216, SHANJIE_HALF_PUNCT_DEFAULT_MASK == 0x006099FFu && SHANJIE_HALF_PUNCT_ALL_MASK == 0x07FFFFFFu);
+  CHECK(1217, shanjie_engine_new(dir, 0, &e) == 0 && e != 0);
+  o = &dummy;
+  CHECK(1218, shanjie_engine_set_half_punct(0, 1u, &o) == 1 && o == 0);
+  CHECK(1219, shanjie_engine_set_half_punct(e, 1u, 0) == 1);
+  o = &dummy;
+  CHECK(1220, shanjie_engine_set_half_punct(e, SHANJIE_HALF_PUNCT_ALL_MASK + 1u, &o) == 2 && o == 0);
+  CHECK(1221, shanjie_engine_set_half_punct(e, SHANJIE_HALF_PUNCT_DEFAULT_MASK, &o) == 0 && o != 0 && o->handled == 1 && str_eq(o->preedit, "") && str_eq(o->commit, ""));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1222, shanjie_engine_key(e, sk, &o) == 0 && o != 0 && o->handled == 1 && str_eq(o->preedit, "~") && str_eq(o->commit, ""));
+  shanjie_output_free(o);
+  o = 0;
+  o = &dummy;
+  CHECK(1223, shanjie_engine_set_half_punct(e, SHANJIE_HALF_PUNCT_ALL_MASK + 1u, &o) == 2 && o == 0);
+  CHECK(1224, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1225, shanjie_engine_set_half_punct(e, 0u, &o) == 0 && o != 0 && o->handled == 1 && str_eq(o->preedit, "") && str_eq(o->commit, ""));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(1226, shanjie_engine_key(e, sk, &o) == 0 && o != 0 && o->handled == 1 && str_eq(o->preedit, "\xef\xbd\x9e") && str_eq(o->commit, ""));
+  shanjie_output_free(o);
+  shanjie_engine_free(e);
+  return 0;
+}
+
 int main(int argc, char **argv) {
   int rc;
   if (argc != 3 && argc != 4) return 2;
@@ -684,6 +717,7 @@ int main(int argc, char **argv) {
   if (rc == 0) rc = run_fuzzy(argv[1]);
   if (rc == 0) rc = run_tone3(argv[1]);
   if (rc == 0) rc = run_share(argv[1], argv[2]);
+  if (rc == 0) rc = run_half_punct(argv[1]);
   shanjie_engine_free(0);
   shanjie_output_free(0);
   if (rc != 0) {

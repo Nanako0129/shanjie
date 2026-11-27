@@ -91,6 +91,10 @@ final class CoreEngine {
     static let packMeme = UInt32(SHANJIE_PACK_MEME)
     static let packBeauty = UInt32(SHANJIE_PACK_BEAUTY)
 
+    /// The 27-bit half-width punctuation mask constants (`SHANJIE_HALF_PUNCT_*` in shanjie.h).
+    static let halfPunctDefaultMask: UInt32 = UInt32(SHANJIE_HALF_PUNCT_DEFAULT_MASK)
+    static let halfPunctAllMask: UInt32 = UInt32(SHANJIE_HALF_PUNCT_ALL_MASK)
+
     /// `shanjie_engine_new`; on failure returns the code and nothing is allocated.
     /// `packsDir` is the directory of the word pack files and `packs` the bit mask of the packs to turn on (docs/spec/lexicon-and-packs.md §4.1, §4.2;
     /// the default is the ACG pack alone); a nil `packsDir` is `shanjie_engine_new`,
@@ -282,6 +286,13 @@ final class CoreEngine {
     func setPunctLayout(_ layout: UInt32) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_punct_layout(handle, layout, &out), out)
+    }
+
+    /// docs/spec/keys-and-composition.md §8.1: the 27-bit half-width punctuation mask (bits 0..26; 0 = all off, the core's default).
+    /// Sent to every engine `Shell.build()` makes and on every change.
+    func setHalfPunct(_ mask: UInt32) -> CoreResult {
+        var out: UnsafeMutablePointer<ShanjieOutput>?
+        return Self.take(shanjie_engine_set_half_punct(handle, mask, &out), out)
     }
 
     func pick(_ index: UInt32) -> CoreResult {

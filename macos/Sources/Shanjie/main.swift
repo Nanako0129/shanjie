@@ -126,6 +126,26 @@ final class DefaultsFuzzyStore: FuzzyStore {
     }
 }
 
+/// The "部分符號使用半形" switch and its 27-bit mask (docs/spec/keys-and-composition.md §8.1), keys `halfPunct` (Bool, absent
+/// means false) and `halfPunctMask` (integer, absent means `CoreEngine.halfPunctDefaultMask`) in the same domain.
+@MainActor
+final class DefaultsHalfPunctStore: HalfPunctStore {
+    var halfPunct: Bool? {
+        get { UserDefaults.standard.object(forKey: "halfPunct") as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: "halfPunct") }
+    }
+    var halfPunctMask: UInt32? {
+        get { (UserDefaults.standard.object(forKey: "halfPunctMask") as? Int).flatMap(UInt32.init(exactly:)) }
+        set {
+            if let newValue {
+                UserDefaults.standard.set(Int(newValue), forKey: "halfPunctMask")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "halfPunctMask")
+            }
+        }
+    }
+}
+
 /// The "動漫與遊戲詞" switch (docs/spec/lexicon-and-packs.md §4.1, §4.2), key `acgPack` in the same domain; absent means on.
 @MainActor
 final class DefaultsAcgPackStore: AcgPackStore {
@@ -345,7 +365,8 @@ func runServer() -> Never {
         shiftToggleStore: DefaultsShiftToggleStore(), shiftHint: ShiftHintAdapter(),
         englishNoticeStore: DefaultsEnglishNoticeStore(), englishNotice: EnglishNoticeAdapter(), diagLogStore: DefaultsDiagLogStore(),
         // docs/spec/macos-shell.md §13.1: the only place the real counter is passed; no permission needed.
-        flagsCounter: { CGEventSource.counterForEventType(.combinedSessionState, eventType: .flagsChanged) })
+        flagsCounter: { CGEventSource.counterForEventType(.combinedSessionState, eventType: .flagsChanged) },
+        halfPunctStore: DefaultsHalfPunctStore())
     // docs/spec/install-and-update.md §2.2, §3.7, §7.2–§7.4: the state always exists (the 關於 page shows the version); Sparkle starts only inside the .app.
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     let updates = Updates(store: DefaultsUpdateStore(), version: version)
