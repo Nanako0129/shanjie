@@ -193,7 +193,7 @@
 | `names-readings.tsv` | 人工核對過的整名讀音：名字、讀音（音節數要等於字數） |
 | `names-collisions.tsv` | 同音衝突的處置（人工維護的輸入，建置只讀不改） |
 | `names-kept-c.tsv` | 讓名單詞排第一的已出貨名字清單（10 個既出貨 `names` 詞，免於類型 `(c)` 自動剔除；建置輸入，不隨 App 內附，CC BY-SA 4.0，見 §3.4） |
-| `names-creators.tsv`、`names-stores.tsv` | 創作者（166 詞）與店家名字（231 詞）的來源檔（§3.5） |
+| `names-creators.tsv`、`names-stores.tsv` | 創作者（166 詞）與店家、企業、軟體名字（231 詞）的來源檔（§3.5） |
 | `names-english.txt` | 名單層的英文寫法：一行一個寫法（`[A-Za-z]{3,32}`、至少一個大寫字母，`#` 開頭的行與空行略過），和 `data/english-extra.txt` 合成一張正式寫法表，小寫不得重複。編進核心，不由 `tools/build_names.py` 產生、不隨資料夾載入、不受 `--no-names` 影響 |
 
 - 引擎一律載入 `names-add.tsv`（缺檔是載入失敗）；評測 CLI 的 `--no-names` 才把它拿掉。名單層的詞照 §1.4 封頂；名單層的分數已含 `NAMES_BONUS`，載入端不另外加。
@@ -233,7 +233,7 @@
 - 未處置的列寫到 `build/names/collisions.txt`；`names.json` 的 `unresolved_collision_readings` 要是 0 才合併。
 - 其他報告：`unreadable.txt`、`check-readings.txt`。
 
-### 3.5 創作者與店家名字（`--append-creators`，檔尾追加）
+### 3.5 創作者、店家與軟體名字（`--append-creators`，檔尾追加）
 
 - 來源檔 `names-creators.tsv`（實況主、YouTuber、VTuber、節目與頻道名，含台灣以外中文圈的名人，166 詞；標籤 `creator`）與 `names-stores.tsv`（店家、餐廳、飯店、企業、軟體，231 詞，含前批跨 6 個月熱詞檢出併入之 `凱渥`、`威京集團`；標籤 `store`）：欄位為詞、讀音（音節以空白分隔）、備註，可選的第四欄加分；`#` 開頭與空行略過；CRLF 照 LF 讀。
 - 追加模式不重建既有名單：`names-add.tsv`／`names-sources.tsv` 去掉 `creator`、`store` 列後逐位元組保留，檔尾依序接 creator、store 的列（`names` → `creator` → `store`）；重跑換掉的是這兩種標籤的列；兩個來源檔都不存在或沒有資料列時什麼都不碰；`names.json` 的 `sources` 分別計兩種標籤。完整重建（不帶 `--append-creators`、`--out` 是詞庫資料夾）也會接著追加。追加不連網、不讀快取。
