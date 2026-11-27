@@ -227,7 +227,7 @@
 
 ### 3.5 創作者與店家名字（`--append-creators`，檔尾追加）
 
-- 來源檔 `names-creators.tsv`（實況主、YouTuber、VTuber、節目與頻道名，含台灣以外中文圈的名人；標籤 `creator`）與 `names-stores.tsv`（店家、餐廳、飯店、企業；標籤 `store`）：欄位為詞、讀音（音節以空白分隔）、備註，可選的第四欄加分；`#` 開頭與空行略過；CRLF 照 LF 讀。
+- 來源檔 `names-creators.tsv`（實況主、YouTuber、VTuber、節目與頻道名，含台灣以外中文圈的名人；標籤 `creator`）與 `names-stores.tsv`（店家、餐廳、飯店、企業、軟體；標籤 `store`）：欄位為詞、讀音（音節以空白分隔）、備註，可選的第四欄加分；`#` 開頭與空行略過；CRLF 照 LF 讀。
 - 追加模式不重建既有名單：`names-add.tsv`／`names-sources.tsv` 去掉 `creator`、`store` 列後逐位元組保留，檔尾依序接 creator、store 的列（`names` → `creator` → `store`）；重跑換掉的是這兩種標籤的列；兩個來源檔都不存在或沒有資料列時什麼都不碰；`names.json` 的 `sources` 分別計兩種標籤。完整重建（不帶 `--append-creators`、`--out` 是詞庫資料夾）也會接著追加。追加不連網、不讀快取。
 - 每列要：詞是 2–10 個漢字、字數在分數表裡、不在 `taken`（基底、疊加層、名單其他列、詞包、前面的列）；讀音音節數等於字數，每個音節都是基底裡那個字的讀音（輕聲音節允許該字同音節的任何聲調）；同一個（詞, 讀音）重複中止。同一個詞可以有不同讀音的好幾列（只限同標籤）；店家不能用 creator 已有的詞（換讀音也不行）。不符就中止並指出路徑與行號。
 - 被擋掉（印到 stderr、不中止）：詞已在迷因詞包；讀音等於 `names` 既有列的讀音；店家的讀音等於 creator 列的讀音。
