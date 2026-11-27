@@ -168,6 +168,59 @@ class KnCont(unittest.TestCase):
         bi = {("起床", "他"): 1, ("起牀", "他"): 1, ("沒見過", "佔"): 3}
         self.assertEqual(kn_cont.continuation(bi, self.cls, 1, vocab), {"他": 1})
 
+    def test_oov_class_rep_total_and_load(self):
+        """疊加層加入更高分、但不在模型詞彙裡的異體使 cls[w][0] 落在詞彙外時，kn_total 與 _load_kn 改取類裡第一個在詞彙裡的成員。"""
+        vocab = L.BigramLM(self.path, classes=False).vocab
+        side = self.side()
+        np1 = [n + 1 for n in struct.unpack_from(f"<{len(vocab)}I", open(side, "rb").read(), 64)]
+        self.assertIsNone(L.kn_class_reps(vocab, self.cls)[("世界線", "世界綫")])
+
+        g_single = ("他新", "他")
+        cls_single = {**self.cls, "他新": g_single, "他": g_single}
+        self.assertEqual(L.kn_class_reps(vocab, cls_single)[g_single], "他")
+        self.assertEqual(L.kn_total(vocab, np1, cls_single), 7)
+        self.assertEqual(L.BigramLM(self.path, classes=False, kn=side, kn_classes=cls_single).kn[2], 7)
+
+        g_multi = ("起牀新", "起床", "起牀")
+        cls_multi = {**self.cls, "起牀新": g_multi, "起床": g_multi, "起牀": g_multi}
+        self.assertEqual(L.kn_class_reps(vocab, cls_multi)[g_multi], "起床")
+        self.assertEqual(L.kn_total(vocab, np1, cls_multi), 7)
+        self.assertEqual(L.BigramLM(self.path, classes=False, kn=side, kn_classes=cls_multi).kn[2], 7)
+
+        g_rev = ("起牀新", "起牀", "起床")
+        cls_both = {**cls_single, "起牀新": g_rev, "起床": g_rev, "起牀": g_rev}
+        self.assertEqual(L.kn_class_reps(vocab, cls_both)[g_rev], "起牀")
+        self.assertEqual(L.kn_total(vocab, np1, cls_both), 7)
+        self.assertEqual(L.BigramLM(self.path, classes=False, kn=side, kn_classes=cls_both).kn[2], 7)
+
+    def test_merging_in_vocab_words_still_raises(self):
+        """把原本分開的兩個詞彙內詞併成一類時，kn_total 減少，_load_kn 仍丟 ValueError。"""
+        side = self.side()
+        g_merge = ("占", "佔")
+        cls_merge = {**self.cls, "占": g_merge, "佔": g_merge}
+        with self.assertRaises(ValueError):
+            L.BigramLM(self.path, classes=False, kn=side, kn_classes=cls_merge)
+
+    def test_continuation_oov_predecessor_rep(self):
+        """cls[v][0] 不在詞彙裡時，continuation 仍對詞彙內的第一個成員計數一次，並通過 side_bytes 與 BigramLM 來回檢查。"""
+        vocab = L.BigramLM(self.path, classes=False).vocab
+        g_multi = ("起牀新", "起床", "起牀")
+        cls_oov = {**self.cls, "起牀新": g_multi, "起床": g_multi, "起牀": g_multi}
+        bi = {("起牀新", "他"): 1, ("起床", "他"): 1, ("起牀", "他"): 1}
+        self.assertEqual(kn_cont.continuation(bi, cls_oov, 1, vocab), {"他": 1})
+        self.assertEqual(kn_cont.continuation({("<s>", "他"): 5, ("</s>", "他"): 5}, cls_oov, 1, vocab), {})
+        self.assertEqual(kn_cont.continuation(bi, cls_oov, 1, ["<s>"]), {})
+
+        g_single = ("他新", "他")
+        cls_both = {**cls_oov, "他新": g_single, "他": g_single}
+        n = kn_cont.continuation({("起牀新", "他新"): 1, ("起床", "他新"): 1, ("起牀", "他新"): 1}, cls_both, 1, vocab)
+        self.assertEqual(n, {"他新": 1})
+        p = os.path.join(self.tmp.name, "oov-rep.sjkn")
+        open(p, "wb").write(kn_cont.side_bytes(self.path, n, cls_both, 1, 1.0))
+        lm = L.BigramLM(self.path, classes=False, kn=p, kn_classes=cls_both)
+        self.assertEqual(lm.kn[1][lm.ids["他"]], 2)
+        self.assertEqual(lm.kn[2], 5)
+
     def test_thetas_differ(self):
         bi = {("他", "起床"): 1, ("佔", "起床"): 2, ("占", "起床"): 3}   # N(起床) = 3、2、1
         sides = [open(self.side(t, bi, f"t{t}.sjkn"), "rb").read() for t in (1, 2, 3)]

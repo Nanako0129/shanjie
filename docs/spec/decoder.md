@@ -96,13 +96,13 @@
 
 ### 3.3 Kneser-Ney 側檔（`kn.sjkn`）
 
-- 格式 `SJKN0002`（小端序，`tools/kn_cont.py` 寫）：魔數、V（u32）、模型 SHA-256（32 bytes）、θ（u32）、β（f64）、ΣN′（u64）、`N` u32[V]（id 0、1 為 0；異體類的非代表成員取代表成員的 N）。檔案長度 = 64 + 4V。出貨檔 θ = 1、β = 1。`SJKN0001` 只有 Python 讀得到。
-- `N(w)`＝有多少種不同的前一個詞 v（`<s>` 不算、v 在模型詞彙裡、v 是它的異體類代表或不在類裡）滿足二元組計數 ≥ θ；`N′ = N + 1`。ΣN′ 是預先彙總的值（每個異體類只算一次），由工具用 `lm.kn_total` 算好寫進檔頭，Rust 只讀檔頭。
+- 格式 `SJKN0002`（小端序，`tools/kn_cont.py` 寫）：魔數、V（u32）、模型 SHA-256（32 bytes）、θ（u32）、β（f64）、ΣN′（u64）、`N` u32[V]（id 0、1 為 0；同一個異體類的所有詞彙內成員共用該類合併後的 N，由 `merge_variants` 歸在 `cls[w][0]`）。檔案長度 = 64 + 4V。出貨檔 θ = 1、β = 1。`SJKN0001` 只有 Python 讀得到。
+- `N(w)`（`tools/kn_cont.py::continuation`）＝有多少種不同的前一個詞 v（`<s>` 不算、v 在模型詞彙 `vocab` 裡〔id ≥ 2〕、且滿足 `once(v)`：v 是它所屬異體類〔類 tuple 順序〕裡第一個落在 `vocab`〔id ≥ 2〕裡的成員〔`lm.kn_class_reps`〕，或不在任何異體類裡）滿足二元組計數 ≥ θ；`N′ = N + 1`。ΣN′ 是每個異體類只算一次的預先彙總值，由 `tools/kn_cont.py` 與 `reference/proto/lm.py` 共用 `lm.kn_total`（依 `lm.kn_class_reps` 取每個異體類〔類 tuple 順序〕裡第一個落在 `vocab`〔id ≥ 2〕裡的成員）算好寫入並核對 `SJKN0002` 檔頭。Rust 核心（`core/src/lm.rs`）不在執行時計算異體類，而是直接讀檔頭的 ΣN′、對詞彙內的詞（id ≥ 2）直接索引 `N[id]`，詞彙外的詞（OOV）直接略過 KN（`pb = 10^lp`），與 Python `lm.py` 一致。
 - 載入檢查（失敗都是 `LmError::KnSide`）：魔數、V、模型雜湊、β ∈ [0,1]、長度、ΣN′ > 0、且 ΣN′ 介於「最大的 N′」與「id ≥ 2 的 N′ 總和」之間。
 - 作用：詞彙內的詞（id ≥ 2）的 `pb` 換成 `β·N′/ΣN′ + (1−β)·pb`，在三個分支之前做一次。β：聊天用檔頭的值，書面一律用 `FORMAL_KN_BETA` = 0.75，不論檔頭記多少。預測列與數字層用該設定的 β，但不用 trigram 表。
 - 例外：解碼時被學習加分的詞條（`was_boosted`）與 `Engine::total_score` 裡同樣的詞，改走 `prob_learned`（等於沒有側檔時的公式，`pb` 是加分後的值），不做 KN 替換、也不經過 trigram（§3.4），否則加分會被縮掉。
 - 摘要行標記 `+kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<該設定的 β>`；側檔本身的雜湊在第一次用到標記時才算。`--no-kn` 兩種設定都關。
-- 取捨：把 ΣN′ 存進檔頭，因為 Rust 核心沒有詞庫的異體類輸入，無法重算；上游的 Python 每次評測用 `kn_classes` 重算並和檔頭比對，那才是這個預先彙總值的檢查。
+- 取捨：把 ΣN′ 存進檔頭，因為 Rust 核心（`core/src/lm.rs`）沒有詞庫的異體類輸入，只在執行時讀檔頭的 ΣN′ 與索引 `N[id]`（詞彙外直接略過 KN、`pb = 10^lp`），無法也不必重算；上游 Python（`lm.kn_total` 與 `tools/kn_cont.py::continuation` 的 `once(v)`）改取每個異體類（類 tuple 順序）裡第一個落在模型詞彙 `vocab`（id ≥ 2）裡的成員（`lm.kn_class_reps`）作為詞彙內代表、每類只算一次，而非無條件只認詞庫疊加後的整體最高分代表 `cls[w][0]`。這樣即使後續詞庫層（例如 `names-add.tsv`）加入一個在 `build_lm.variant_classes` 裡排名高於既有詞彙內詞的詞彙外 `MERGE` 異體詞，既定異體類對 ΣN′ 的單次貢獻仍能保持穩定，不會因整體代表變成詞彙外詞而整類歸零；同時若兩個本就在 `vocab` 裡的詞被新併入同一類，或既有的類被漏算，ΣN′ 檔頭比對仍會失敗並抓出不一致。
 
 ### 3.4 trigram 表（`trigram.sjt3`、`trigram-chat.sjt3`）
 

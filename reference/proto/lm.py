@@ -31,9 +31,17 @@ CLASS_MAGIC = b"SJCL0001"
 NO_CLASS = 0xFFFF
 
 
+def kn_class_reps(vocab, cls):
+    """每個異體類在詞彙表（id >= 2）裡的代表成員：類 tuple 裡第一個出現在 vocab[2:] 的成員（都沒有時為 None）。
+    疊加層可能加入詞庫分數更高、但不在 bigram.sjlm 詞彙裡的異體，使 cls[w][0] 落在詞彙外；這裡改取第一個在詞彙裡的成員，避免整類漏數。"""
+    known = set(vocab[2:])
+    return {g: next((m for m in g if m in known), None) for g in set(cls.values())}
+
+
 def kn_total(vocab, np1, cls):
-    """ΣN′：id >= 2 的 N′ 相加，每個異體類只算代表成員一次（docs/spec/models.md）。"""
-    return sum(np1[i] for i in range(2, len(vocab)) if vocab[i] not in cls or cls[vocab[i]][0] == vocab[i])
+    """ΣN′：id >= 2 的 N′ 相加，每個異體類只算類 tuple 裡第一個落在 vocab[2:] 的成員一次（docs/spec/models.md）。"""
+    reps = kn_class_reps(vocab, cls)
+    return sum(np1[i] for i in range(2, len(vocab)) if vocab[i] not in cls or reps[cls[vocab[i]]] == vocab[i])
 
 
 def read_header(b):

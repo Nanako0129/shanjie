@@ -151,7 +151,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 | N | u32[V]（id 0、1 是 0） |
 
 - 總長 = 64 + 4V。載入時全部符合才收：魔術字串、V 等於通語詞彙數、通語雜湊、長度、β ∈ [0, 1]、`0 < ΣN′`，且 ΣN′ 不小於最大的 N′ 也不大於 id ≥ 2 的 N′ 總和（N′ = N + 1）。
-- ΣN′ 是上游（Python，`lm.kn_total` 加 `build_lm.variant_classes`）預先算好寫進檔頭的值，每個異體類只算一次；Rust 只讀檔頭，不重算。
+- ΣN′ 是上游（Python，`lm.kn_total` 依 `build_lm.variant_classes` 與 `lm.kn_class_reps`）預先算好並寫入與核對檔頭的值：每個異體類依類 tuple 順序取第一個落在模型詞彙 `vocab`（id ≥ 2）裡的成員作為詞彙內代表，每類只算一次（與 `tools/kn_cont.py::continuation` 的 `once(v)` 一致）。這樣後續詞庫層（例如 `names-add.tsv`）加入排名更高的詞彙外 `MERGE` 異體詞時，既定異體類對 ΣN′ 的單次貢獻仍維持不變，不致掉成 0；同時若兩個本就在 `vocab` 裡的詞被新併類或既有類被漏算，ΣN′ 檔頭比對仍會失敗。Rust 核心（`core/src/lm.rs`）不在執行時計算異體類，只讀檔頭的 ΣN′、對詞彙內詞（id ≥ 2）直接索引 `N[id]`，詞彙外詞略過 KN（`pb = 10^lp`），與 Python `lm.py` 一致。
 - 核心保留側檔整個位元組與它的 SHA-256（`Lm::kn_sha256`，從檢查過的同一份位元組算，不重讀檔），供會意檔的配對用（§8.1）。
 - 摘要行標記：`+kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<該設定用的 β>`。
 
@@ -288,8 +288,8 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 
 ### 6.1 接續次數
 
-- `N(w)` = 接在 w 前面、出現次數至少 θ 次的不同前文詞數；前文不含 `<s>`，必須在模型詞彙裡，異體類只算一種前文；類的非代表成員取代表成員的 N；模型詞彙裡有、計數裡沒有的詞 N = 0。θ ∈ {1, 2, 3}，計數用 §4.4 同一套加權、四捨五入、去 0、異體合併的整數二元組。
-- 在解碼裡：模型詞彙裡的詞（id ≥ 2）的回退分布 `pb` 換成 `β · N′ ÷ ΣN′ + (1 − β) · 10^lp`（N′ = N + 1，`lp` 是詞庫分數）；句尾與不在詞彙裡的詞（沒見過的疊加詞、詞包詞）的 `pb` 不變。三個機率分支（保留條目、詞類項、一般回退）都用換過的 `pb`。完整公式見 `docs/spec/decoder.md`。
+- `N(w)`（`tools/kn_cont.py::continuation`）= 接在 w 前面、出現次數至少 θ 次的不同前文詞數；前文不含 `<s>`，必須在模型詞彙 `vocab`（id ≥ 2）裡，並以 `once(v)` 依類 tuple 順序取每個異體類第一個落在 `vocab`（id ≥ 2）裡的成員（`lm.kn_class_reps`）作為詞彙內代表、只算一種前文；同一個異體類的所有詞彙內成員共用該類合併後的 N（由 `merge_variants` 歸在 `cls[w][0]`）；模型詞彙裡有、計數裡沒有的詞 N = 0。θ ∈ {1, 2, 3}，計數用 §4.4 同一套加權、四捨五入、去 0、異體合併的整數二元組，ΣN′ 亦同由 `lm.kn_total` 依 `lm.kn_class_reps` 計算與核對（見 §3.3）。
+- 在解碼裡：模型詞彙裡的詞（id ≥ 2）的回退分布 `pb` 換成 `β · N′ ÷ ΣN′ + (1 − β) · 10^lp`（N′ = N + 1，`lp` 是詞庫分數）；句尾與不在詞彙裡的詞（沒見過的疊加詞、詞包詞）的 `pb` 不變（`pb = 10^lp`）。三個機率分支（保留條目、詞類項、一般回退）都用換過的 `pb`；Rust 核心（`core/src/lm.rs`）直接讀檔頭 ΣN′ 與索引 `N[id]`，不在執行時重算異體類。完整公式見 `docs/spec/decoder.md`。
 - 動機：回退時看「這個詞接在幾種不同的詞後面」而不是它出現幾次，只出現在固定搭配裡的字回退機率會變小，對準「常用單字組合贏過整詞」這類錯。
 
 ### 6.2 選定值
@@ -306,7 +306,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 
 ### 6.4 驗證
 
-- Python：`tools/test_kn_cont.py`（`test_side_file_layout`、`test_counts_by_hand`、`test_beta_zero_bit_identical`、`test_beta_one_three_branches`、`test_unknown_and_eos_unchanged`、`test_monotone_in_N`、`test_mismatch_raises`、`test_thetas_differ`、`test_kn_tiny_golden_is_current`）。
+- Python：`tools/test_kn_cont.py`（`test_side_file_layout`、`test_counts_by_hand`、`test_beta_zero_bit_identical`、`test_beta_one_three_branches`、`test_unknown_and_eos_unchanged`、`test_monotone_in_N`、`test_mismatch_raises`、`test_oov_class_rep_total_and_load`、`test_merging_in_vocab_words_still_raises`、`test_continuation_oov_predecessor_rep`、`test_thetas_differ`、`test_kn_tiny_golden_is_current`）。
 - Rust：`core/tests/kn_tiny.rs`（`beta_one_three_branches_by_hand`、`formal_takes_beta_075_and_chat_the_files`、`beta_zero_is_bit_identical_to_no_side_file`、`bad_side_files_are_format_errors`、`decode_matches_python_byte_for_byte`）。
 
 ## 7. 連文
