@@ -1,50 +1,181 @@
 {
  "categories": {
+  "Category:中華民國文化部指定文化園區": {
+   "exists": true,
+   "pages": 5,
+   "subcategories": 0
+  },
   "Category:台灣公司": {
    "exists": true,
    "pages": 956,
-   "subcategories": 18
+   "subcategories": 17
+  },
+  "Category:台灣古道": {
+   "exists": true,
+   "pages": 34,
+   "subcategories": 0
+  },
+  "Category:台灣夜市": {
+   "exists": true,
+   "pages": 14,
+   "subcategories": 0
+  },
+  "Category:台灣小百岳": {
+   "exists": true,
+   "pages": 102,
+   "subcategories": 0
+  },
+  "Category:台灣房屋仲介業": {
+   "exists": true,
+   "pages": 10,
+   "subcategories": 0
   },
   "Category:台灣手搖茶飲品牌": {
    "exists": true,
    "pages": 24,
    "subcategories": 0
   },
-  "Category:台灣電子商務網站": {
-   "exists": false
+  "Category:台灣文化藝術中心": {
+   "exists": true,
+   "pages": 28,
+   "subcategories": 0
+  },
+  "Category:台灣新聞網站": {
+   "exists": true,
+   "pages": 63,
+   "subcategories": 0
+  },
+  "Category:台灣暢貨中心": {
+   "exists": true,
+   "pages": 10,
+   "subcategories": 0
+  },
+  "Category:台灣當代藝術館": {
+   "exists": true,
+   "pages": 10,
+   "subcategories": 0
+  },
+  "Category:台灣百岳": {
+   "exists": true,
+   "pages": 105,
+   "subcategories": 0
+  },
+  "Category:台灣百貨公司": {
+   "exists": true,
+   "pages": 46,
+   "subcategories": 0
+  },
+  "Category:台灣航空公司": {
+   "exists": true,
+   "pages": 18,
+   "subcategories": 0
+  },
+  "Category:台灣表演藝術場地": {
+   "exists": true,
+   "pages": 19,
+   "subcategories": 0
+  },
+  "Category:台灣購物中心": {
+   "exists": true,
+   "pages": 55,
+   "subcategories": 0
+  },
+  "Category:台灣連鎖電影院": {
+   "exists": true,
+   "pages": 11,
+   "subcategories": 0
+  },
+  "Category:台灣重劃區": {
+   "exists": true,
+   "pages": 6,
+   "subcategories": 0
+  },
+  "Category:台灣零售商": {
+   "exists": true,
+   "pages": 34,
+   "subcategories": 0
+  },
+  "Category:台灣電影院": {
+   "exists": true,
+   "pages": 14,
+   "subcategories": 0
+  },
+  "Category:台灣音樂廳": {
+   "exists": true,
+   "pages": 15,
+   "subcategories": 0
   },
   "Category:台灣餐飲公司": {
    "exists": true,
    "pages": 38,
    "subcategories": 5
   },
-  "Category:臺灣的大學": {
-   "exists": false
+  "Category:市地重劃區": {
+   "exists": true,
+   "pages": 11,
+   "subcategories": 0
+  },
+  "Category:臺灣區域步道": {
+   "exists": true,
+   "pages": 39,
+   "subcategories": 0
+  },
+  "Category:臺灣國家步道": {
+   "exists": true,
+   "pages": 18,
+   "subcategories": 0
+  },
+  "Category:臺灣物流公司": {
+   "exists": true,
+   "pages": 7,
+   "subcategories": 0
+  },
+  "Category:臺灣網路書店": {
+   "exists": true,
+   "pages": 6,
+   "subcategories": 0
+  },
+  "Category:臺灣老街": {
+   "exists": true,
+   "pages": 49,
+   "subcategories": 0
+  },
+  "Category:臺灣電信業公司": {
+   "exists": true,
+   "pages": 21,
+   "subcategories": 0
+  },
+  "Category:臺灣電子商務": {
+   "exists": true,
+   "pages": 9,
+   "subcategories": 0
   }
  },
  "dropped": {
-  "excluded_by_names_collisions_tsv": 3,
-  "in_lexicon": 317,
-  "list_article": 16,
-  "not_han_or_length": 48,
-  "nsi_no_usable_name": 43,
-  "simplified": 1,
-  "title_not_han": 75,
-  "type_c_dropped": 15,
+  "excluded_by_names_collisions_tsv": 5,
+  "in_lexicon": 986,
+  "list_article": 25,
+  "not_han_or_length": 149,
+  "nsi_no_usable_name": 66,
+  "reserved_for_creator_store": 20,
+  "simplified": 5,
+  "title_not_han": 148,
+  "type_c_dropped": 18,
   "unreadable": 1
  },
  "files": {
   "names-add.tsv": {
-   "bytes": 153688,
-   "lines": 2018,
-   "sha256": "4345343ed4ebd23fc3e9c90dd55ac6c22444625ae1579e64d944a1389add99a0"
+   "bytes": 683787,
+   "lines": 8481,
+   "sha256": "a6aafa86ed166b55d0275700231971fd2b498a6668226fa10407bcc75340cadf"
   },
   "names-sources.tsv": {
-   "bytes": 140109,
-   "lines": 2123,
-   "sha256": "dad71b716cd112519caa6fb209ad758a12753736e1dcf4c9a5f8924b90c05f69"
+   "bytes": 482865,
+   "lines": 9013,
+   "sha256": "24278171bfb8777e3f0cc65e25411d253c08ff4cb413f10179f8d50cd88c2082"
   }
  },
+ "kept_c": 10,
  "moe": {
   "high.csv": {
    "rows": 506,
@@ -57,43 +188,442 @@
    "year": 115
   }
  },
+ "nhi_as_of": "20261127",
  "nsi_commit": "ac22bfd445b729b567070c1b0900be6d0c6ef924",
  "nsi_taiwan_brands": {
   "amenity/bank": 34,
   "amenity/cafe": 48,
+  "amenity/cinema": 7,
   "amenity/fast_food": 33,
   "amenity/fuel": 6,
+  "amenity/ice_cream": 3,
+  "amenity/parcel_locker": 2,
   "amenity/pharmacy": 5,
   "amenity/restaurant": 53,
+  "office/estate_agent": 8,
+  "office/insurance": 10,
   "shop/bakery": 8,
   "shop/beverages": 0,
+  "shop/books": 6,
+  "shop/car": 6,
   "shop/clothes": 10,
   "shop/convenience": 4,
   "shop/cosmetics": 3,
   "shop/department_store": 0,
   "shop/electronics": 4,
+  "shop/furniture": 3,
   "shop/mall": 0,
   "shop/mobile_phone": 1,
+  "shop/motorcycle": 1,
+  "shop/optician": 7,
+  "shop/pet": 2,
+  "shop/sports": 3,
   "shop/supermarket": 11,
-  "shop/tea": 0
+  "shop/tea": 0,
+  "shop/telecommunication": 3,
+  "shop/variety_store": 6,
+  "tourism/hotel": 10
  },
- "rows": 2018,
+ "opendata": {
+  "102184": {
+   "agency": "高雄市政府捷運工程局",
+   "dataset_id": "102184",
+   "emitted": 38,
+   "relpath": "1-transit/klrt_stations_102184.csv",
+   "rows": 38,
+   "sha256": "b7e3cf89364f7cfb71a9dc5ed950091cf4bea691543e7385d517da5e2358ea41"
+  },
+  "11545": {
+   "agency": "金融監督管理委員會證券期貨局",
+   "dataset_id": "11545",
+   "emitted": 64,
+   "relpath": "3-business/twse_securities_headquarters.csv",
+   "rows": 64,
+   "sha256": "2e22c3ceac72968c1baa6af5a447732089051fc13cfead64e3d450da62535e97"
+  },
+  "121140": {
+   "agency": "臺北市政府捷運工程局",
+   "dataset_id": "121140",
+   "emitted": 231,
+   "relpath": "1-transit/taipei_dorts_stations_121140.json",
+   "rows": 124,
+   "sha256": "7498ac8ed2bd389de6cac2ee6533e240f8f10cb5a282f125483af2f79603d7d8"
+  },
+  "121594": {
+   "agency": "臺北市市場處",
+   "dataset_id": "121594",
+   "emitted": 6,
+   "relpath": "4-venues/taipei-night-markets-121594.csv",
+   "rows": 47,
+   "sha256": "0e6da1861b242dbf1e4a6e6888d0b862b70c469a49e15ae4b298beb7ca87090c"
+  },
+  "123714": {
+   "agency": "新北市政府地政局",
+   "dataset_id": "123714",
+   "emitted": 42,
+   "relpath": "5-geography/ntpc_redev_private_123714.csv",
+   "rows": 43,
+   "sha256": "1e46d33e3e5e1b42e342e3c24923c8cf5b63d74ac4e347afd2f0ede267b05310"
+  },
+  "125432": {
+   "agency": "新北市政府地政局",
+   "dataset_id": "125432",
+   "emitted": 17,
+   "relpath": "5-geography/ntpc_redev_public_125432.csv",
+   "rows": 23,
+   "sha256": "eaa71412f106faded0703b2a2ef0c5315086fcd55e00d95caf66f760940b4536"
+  },
+  "128394": {
+   "agency": "桃園市政府桃園捷運公司",
+   "dataset_id": "128394",
+   "emitted": 41,
+   "relpath": "1-transit/tymetro_stations_128394.xml",
+   "rows": 21,
+   "sha256": "40ccbe31c60234eb4d5130d45a94e7ba9b66b7f96a95724a8a98543118fd8120"
+  },
+  "131734": {
+   "agency": "臺北大眾捷運股份有限公司",
+   "dataset_id": "131734",
+   "emitted": 213,
+   "relpath": "1-transit/trtc_stations_131734.csv",
+   "rows": 110,
+   "sha256": "dc2a2e5070eba123621190621d135f6cde55459c1042d7f942b9ef4a66146ab0"
+  },
+  "136354": {
+   "agency": "國防部軍醫局",
+   "dataset_id": "136354",
+   "emitted": 12,
+   "relpath": "2-hospitals/mnd_136354_military_hospitals.csv",
+   "rows": 20,
+   "sha256": "feb660ef8de7d430ae48574470ea658bf94987afe532beca75fa7462e9f1fc11"
+  },
+  "140066": {
+   "agency": "臺南市政府",
+   "dataset_id": "140066",
+   "emitted": 26,
+   "relpath": "5-geography/tainan_old_place_names_140066.csv",
+   "rows": 23,
+   "sha256": "d5d782adb466d930fa19ac96a14227def9781800ce11fe02c6b63596550302d5"
+  },
+  "144164": {
+   "agency": "臺中捷運股份有限公司",
+   "dataset_id": "144164",
+   "emitted": 35,
+   "relpath": "1-transit/tmrt_green_stations_144164.csv",
+   "rows": 18,
+   "sha256": "edac6764b887cb48f8e07c5a9cf29a948a7b2728d26dafa3ca8a5a7b7da40532"
+  },
+  "164242": {
+   "agency": "原住民族委員會",
+   "dataset_id": "164242",
+   "emitted": 6,
+   "relpath": "4-venues/cip-indigenous-cultural-houses-164242.json",
+   "rows": 28,
+   "sha256": "997d98dce5bab4f11813a1f2da8d3f712e74fa524db6a9bf9654aa82ea3ae63c"
+  },
+  "164266": {
+   "agency": "原住民族委員會",
+   "dataset_id": "164266",
+   "emitted": 63,
+   "relpath": "4-venues/cip-indigenous-museums-164266.json",
+   "rows": 110,
+   "sha256": "106fbed690adfcea8dec3630100249aa805793e7948e3d35a81d920c4dd3ffde"
+  },
+  "18419": {
+   "agency": "金融監督管理委員會證券期貨局",
+   "dataset_id": "18419",
+   "emitted": 1330,
+   "relpath": "3-business/twse_listed_companies.csv",
+   "rows": 1098,
+   "sha256": "6ad793bf02d1a82024b958e348396e8fb32f4941921b0539afa6255951db6820"
+  },
+  "20765": {
+   "agency": "金融監督管理委員會證券期貨局",
+   "dataset_id": "20765",
+   "emitted": 64,
+   "relpath": "3-business/twse_securities_firms_detail.csv",
+   "rows": 64,
+   "sha256": "cbbe1cc4dc80342dbb1fa8a580e175ae6da47a98ef65d85f8bac3f12c97b7cd2"
+  },
+  "22213": {
+   "agency": "文化部影視及流行音樂產業局",
+   "dataset_id": "22213",
+   "emitted": 87,
+   "relpath": "4-venues/bamid-cinemas-2025-22213.csv",
+   "rows": 107,
+   "sha256": "76c3d97668df3a00a6c6e631817e1b394aba2ad5dbec605433aa09a32f8582d5"
+  },
+  "25036": {
+   "agency": "金融監督管理委員會證券期貨局",
+   "dataset_id": "25036",
+   "emitted": 1084,
+   "relpath": "3-business/tpex_otc_companies.csv",
+   "rows": 899,
+   "sha256": "0d5ee8e9f863f38b98f624cbc99f98d750f99c60aa86eb7ca3cae50dadeadcdb"
+  },
+  "25965": {
+   "agency": "桃園市政府經濟發展局",
+   "dataset_id": "25965",
+   "emitted": 4,
+   "relpath": "4-venues/taoyuan-night-markets-25965.csv",
+   "rows": 4,
+   "sha256": "e0800417d0850498144c1da54273cf9c678edd507c7ce6afd4365b2cabcd2a6e"
+  },
+  "28567": {
+   "agency": "金融監督管理委員會證券期貨局",
+   "dataset_id": "28567",
+   "emitted": 464,
+   "relpath": "3-business/fsc_public_companies.csv",
+   "rows": 298,
+   "sha256": "fdb42fc7cd51c7b66a4d1d2f275adc39b947cd8eb22362e9d5b7e0ab857626d1"
+  },
+  "28568": {
+   "agency": "金融監督管理委員會證券期貨局",
+   "dataset_id": "28568",
+   "emitted": 507,
+   "relpath": "3-business/tpex_emerging_companies.csv",
+   "rows": 377,
+   "sha256": "dd481607edcbe3e2ae298714987e8e7ef70387a98a1a61c8a3747ccdb5bdd0f9"
+  },
+  "28775": {
+   "agency": "金融監督管理委員會銀行局",
+   "dataset_id": "28775",
+   "emitted": 120,
+   "relpath": "3-business/fsc_fhc_headquarters.csv",
+   "rows": 93,
+   "sha256": "013ee038ce10779d47233a852f48468b33815e8503bbd297ce8034fe06367609"
+  },
+  "33425": {
+   "agency": "國營臺灣鐵路股份有限公司",
+   "dataset_id": "33425",
+   "emitted": 490,
+   "relpath": "1-transit/tra_stations_33425.json",
+   "rows": 246,
+   "sha256": "57f12bc23fddd89f712912b1f8bcf43684f594132f866c823f479244edeb2d03"
+  },
+  "37675": {
+   "agency": "農業部(林業及自然保育署)",
+   "dataset_id": "37675",
+   "emitted": 19,
+   "relpath": "5-geography/moa_forest_recreation_areas_37675.csv",
+   "rows": 19,
+   "sha256": "9533afcbe39382814cedd2e82fc2a7222e32de6b0749c7b89a000858ab6e9d63"
+  },
+  "38257": {
+   "agency": "交通部觀光署",
+   "dataset_id": "38257",
+   "emitted": 21,
+   "relpath": "4-venues/motc-theme-parks-38257.csv",
+   "rows": 25,
+   "sha256": "a6fc52bd715eb2484e5b55e6e0a0b0bbdf45781321a21310dec04ed7364d49c0"
+  },
+  "39280": {
+   "agency": "衛生福利部中央健康保險署",
+   "dataset_id": "39280",
+   "emitted": 24,
+   "relpath": "2-hospitals/nhi_39280_medical_centers.csv",
+   "rows": 29,
+   "sha256": "0e9eb807f78575b38769d0b56477518dd1304ac219b604b7e64f180e2f57437a"
+  },
+  "39281": {
+   "agency": "衛生福利部中央健康保險署",
+   "dataset_id": "39281",
+   "emitted": 86,
+   "relpath": "2-hospitals/nhi_39281_regional_hospitals.csv",
+   "rows": 86,
+   "sha256": "8c6cbf580541ced5413c1d3672434c8828c855f7550f807c13f28322154c465d"
+  },
+  "39282": {
+   "agency": "衛生福利部中央健康保險署",
+   "dataset_id": "39282",
+   "emitted": 298,
+   "relpath": "2-hospitals/nhi_39282_district_hospitals.csv",
+   "rows": 373,
+   "sha256": "71862eb64183e4f20136c0b5e0bd6042d9b9f100988b057424419a082ecdc159"
+  },
+  "46397": {
+   "agency": "桃園市政府地政局",
+   "dataset_id": "46397",
+   "emitted": 27,
+   "relpath": "5-geography/taoyuan_redev_public_46397.csv",
+   "rows": 45,
+   "sha256": "e230e072454f1792a6fe34244f2826b15702dbad6e955de2a52f87afda1410b5"
+  },
+  "47005": {
+   "agency": "高雄市政府經濟發展局",
+   "dataset_id": "47005",
+   "emitted": 14,
+   "relpath": "4-venues/kaohsiung-night-markets-47005.csv",
+   "rows": 75,
+   "sha256": "e99d00e3e055e3a17f57d993d06273d220340ff0160ad5c728c6cc24aa5f912b"
+  },
+  "53421": {
+   "agency": "臺南市政府地政局",
+   "dataset_id": "53421",
+   "emitted": 16,
+   "relpath": "5-geography/tainan_redev_public_53421.csv",
+   "rows": 17,
+   "sha256": "9f4fde7d3b2cdaa81fed55cae8608a0de16f3a7bcddf78f6a9cd500f08b7aeca"
+  },
+  "53634": {
+   "agency": "臺南市政府經濟發展局",
+   "dataset_id": "53634",
+   "emitted": 32,
+   "relpath": "4-venues/tainan-night-markets-53634.csv",
+   "rows": 32,
+   "sha256": "58d15116df863887c67e30d9f48f804b19a87b0f0d530301b78f2adf6a9a7497"
+  },
+  "6041": {
+   "agency": "金融監督管理委員會",
+   "dataset_id": "6041",
+   "emitted": 112,
+   "relpath": "3-business/fsc_financial_institutions.csv",
+   "rows": 5293,
+   "sha256": "03d4b05c21450794fe611176a106823bb01adf5efc9d7fa995b108afbc5472a3"
+  },
+  "6242": {
+   "agency": "文化部",
+   "dataset_id": "6242",
+   "emitted": 97,
+   "relpath": "4-venues/moc-museums-6242.json",
+   "rows": 144,
+   "sha256": "5d989ad2fb585848cf862d25175f6efeea8f78081a54454da487d9a13e163581"
+  },
+  "6244": {
+   "agency": "文化部",
+   "dataset_id": "6244",
+   "emitted": 205,
+   "relpath": "4-venues/moc-local-cultural-houses-6244.json",
+   "rows": 260,
+   "sha256": "9ef5bec0fafc39b4623e50ef279d6d25b950da4fab0bd9b01ec10632f1202b16"
+  },
+  "6271": {
+   "agency": "勞動部勞工保險局",
+   "dataset_id": "6271",
+   "emitted": 126,
+   "relpath": "2-hospitals/mol_6271_accredited_hospitals.csv",
+   "rows": 139,
+   "sha256": "d69a1a2428a36029c3d96ae79812c7cee1e492ff83d8d0169fafff649e41f896"
+  },
+  "6848": {
+   "agency": "經濟部產業發展署",
+   "dataset_id": "6848",
+   "emitted": 122,
+   "relpath": "4-venues/moea-tourism-factories-6848.csv",
+   "rows": 158,
+   "sha256": "5d2ee4616bbb3608c115e4c4c54647917564d67c1603e17684b80239662af60f"
+  },
+  "71520": {
+   "agency": "農業部(林業及自然保育署)",
+   "dataset_id": "71520",
+   "emitted": 103,
+   "relpath": "5-geography/moa_forest_trails_71520.csv",
+   "rows": 117,
+   "sha256": "adef0db22ea277e425a481ce029997e4ae80f3e801ec5104b80cab10bbdf620d"
+  },
+  "7186": {
+   "agency": "金融監督管理委員會保險局",
+   "dataset_id": "7186",
+   "emitted": 73,
+   "relpath": "3-business/fsc_insurance_companies.json",
+   "rows": 52,
+   "sha256": "4a5017a8197d792b80d5bd0b3ea8ca87f91858ef417260f38375e67fa89b7bf0"
+  },
+  "73225": {
+   "agency": "內政部國土測繪中心",
+   "dataset_id": "73225",
+   "emitted": 23,
+   "relpath": "1-transit/thsr_stations_moi_73225.zip",
+   "rows": 12,
+   "sha256": "59ad37724722a9782dbda6b5e103644e0e0ef3e89bc1299efcd0316ce56c19c4"
+  },
+  "73226": {
+   "agency": "內政部國土測繪中心",
+   "dataset_id": "73226",
+   "emitted": 530,
+   "relpath": "1-transit/tra_stations_moi_73226.zip",
+   "rows": 268,
+   "sha256": "a41dc62827adea8275dd0ce3718de93a42678134a033784be9dddc5a71429ccf"
+  },
+  "73230": {
+   "agency": "內政部國土測繪中心",
+   "dataset_id": "73230",
+   "emitted": 61,
+   "relpath": "1-transit/lrt_stations_moi_73230.zip",
+   "rows": 61,
+   "sha256": "af8df31a529ddbbaf82da60fcf161ff46101331f5238226611e27b25b319377f"
+  },
+  "73233": {
+   "agency": "內政部國土測繪中心",
+   "dataset_id": "73233",
+   "emitted": 409,
+   "relpath": "1-transit/mrt_stations_moi_73233.zip",
+   "rows": 804,
+   "sha256": "2c899d452fe145bbe5dc3578c7b497b815c74211b4af0669e1f865b2365b6e68"
+  },
+  "7777": {
+   "agency": "交通部觀光署",
+   "dataset_id": "7777",
+   "emitted": 794,
+   "relpath": "4-venues/motc-attractions-7777.json",
+   "rows": 6203,
+   "sha256": "2b3fe318f4e94ed663d8bed9ac4cdd27617bebb921184b8dee28658363aa1228"
+  },
+  "85028": {
+   "agency": "臺中市政府經濟發展局",
+   "dataset_id": "85028",
+   "emitted": 5,
+   "relpath": "4-venues/taichung-night-markets-85028.csv",
+   "rows": 5,
+   "sha256": "ad2552433a6b6c3b6b03c8bd64e2196d0a9e6e10b2c83c88b30f504767437b03"
+  },
+  "88233": {
+   "agency": "高雄市政府捷運工程局",
+   "dataset_id": "88233",
+   "emitted": 72,
+   "relpath": "1-transit/krtc_stations_88233.csv",
+   "rows": 38,
+   "sha256": "279864c360a23499b2fa78351f3fdd04200fe7e58bd317be11363baed782b472"
+  },
+  "9963": {
+   "agency": "內政部國家公園署",
+   "dataset_id": "9963",
+   "emitted": 84,
+   "relpath": "5-geography/moi_np_trails_9963.xml",
+   "rows": 105,
+   "sha256": "1766da39e039d1922d1c79acd32bab3e9bccf1e42564d6dc2ab574f6358305c9"
+  },
+  "9968": {
+   "agency": "內政部國家公園署",
+   "dataset_id": "9968",
+   "emitted": 196,
+   "relpath": "5-geography/moi_np_poi_9968.xml",
+   "rows": 215,
+   "sha256": "ee539b46ad7de069645d977628a92f8bd444a4f9e3ba1b4ba3a59a488f00a16d"
+  }
+ },
+ "rows": 8481,
+ "skipped_subcategories": [
+  "Category:台灣各公司人物"
+ ],
  "sources": {
-  "category": 649,
+  "category": 1096,
   "creator": 166,
+  "hospital-abbr": 96,
   "manual": 1,
-  "nsi": 140,
-  "nsi-wikipedia": 86,
+  "nsi": 181,
+  "nsi-wikipedia": 128,
+  "opendata": 6259,
   "school": 596,
-  "school-abbr": 255,
-  "store": 229
+  "school-abbr": 258,
+  "store": 231
  },
  "unresolved_collision_readings": 0,
- "version": "nsiac22bfd4-moe115.115-4345343e",
+ "version": "nsiac22bfd4-moe115.115-a6aafa86",
  "wiki_revisions": {
-  "max": 94910703,
+  "max": 95852924,
   "min": 700780,
-  "pages": 1304
+  "pages": 2058
  },
- "words": 2001
+ "words": 8443
 }

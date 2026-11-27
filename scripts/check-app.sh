@@ -120,7 +120,23 @@ cmp -s "$R/std-exempt.tsv" "$ROOT/data/lexicon/std-exempt.tsv" || fail "Resource
 grep -q 'std-exempt.tsv' "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not list std-exempt.tsv"
 # The rerank-protect words (docs/spec/lexicon-and-packs.md §2.12): the core refuses to load without them, and the bundled file is the committed one.
 cmp -s "$R/rerank-protect.tsv" "$ROOT/data/lexicon/rerank-protect.tsv" || fail "Resources/rerank-protect.tsv differs from data/lexicon/rerank-protect.tsv"
-for s in 'names-add.tsv' 'name-suggestion-index' 'Wikipedia contributors' '政府資料開放授權條款' 'Redistribution and use in source and binary forms'; do
+for s in 'names-add.tsv' 'name-suggestion-index' '32 categories under' 'ac22bfd445b729b567070c1b0900be6d0c6ef924' 'Wikipedia contributors' '政府資料開放授權條款' 'Redistribution and use in source and binary forms' \
+         '教育部統計處' '6091' '6089' \
+         '國營臺灣鐵路股份有限公司' '33425' \
+         '內政部國土測繪中心' '73225' '73226' '73230' '73233' \
+         '臺北大眾捷運股份有限公司' '131734' '臺北市政府捷運工程局' '121140' \
+         '桃園市政府桃園捷運公司' '128394' '臺中捷運股份有限公司' '144164' \
+         '高雄市政府捷運工程局' '88233' '102184' \
+         '衛生福利部中央健康保險署' '39280' '39281' '39282' \
+         '勞動部勞工保險局' '6271' '國防部軍醫局' '136354' \
+         '金融監督管理委員會' '6041' '金融監督管理委員會證券期貨局' '18419' '25036' '28568' '28567' '20765' '11545' \
+         '金融監督管理委員會銀行局' '28775' '金融監督管理委員會保險局' '7186' \
+         '文化部' '6242' '6244' '文化部影視及流行音樂產業局' '22213' \
+         '原住民族委員會' '164242' '164266' '交通部觀光署' '38257' '7777' '經濟部產業發展署' '6848' \
+         '農業部林業及自然保育署' '71520' '37675' '內政部國家公園署' '9963' '9968' \
+         '臺北市市場處' '121594' '桃園市政府經濟發展局' '25965' '桃園市政府地政局' '46397' \
+         '臺中市政府經濟發展局' '85028' '臺南市政府' '140066' '臺南市政府經濟發展局' '53634' '臺南市政府地政局' '53421' \
+         '高雄市政府經濟發展局' '47005' '新北市政府地政局' '125432' '123714'; do
   grep -qF "$s" "$R/LICENSES/CC-BY-SA-4.0-attribution.txt" || fail "the attribution file does not have: $s"
 done
 # The models (hashes against data/*.sha256, and each is a row of models.tsv) are checked by check-models.sh above; the attribution file names each.
