@@ -35,6 +35,12 @@ class Constants(unittest.TestCase):
         m = re.search(r"const ROWS: \[&str; 4\] = \[(.*?)\];", src)
         self.assertEqual(re.findall(r'"([^"]*)"', m.group(1)), F.ROWS)
         self.assertEqual(int(re.search(r"pub const FUZZY_SOUND: u32 = (0b[01]+)", src).group(1), 2), F.FUZZY_SOUND)
+        self.assertEqual(int(re.search(r"pub const FUZZY_ADJACENT: u32 = 1 << (\d+);", src).group(1)), F.FUZZY_ADJACENT.bit_length() - 1)
+        self.assertEqual(int(re.search(r"pub const FUZZY_ONE_SYM: u32 = 1 << (\d+);", src).group(1)), F.FUZZY_ONE_SYM.bit_length() - 1)
+        self.assertIn("pub const FUZZY_ALL: u32 = FUZZY_SOUND | FUZZY_ADJACENT | FUZZY_ONE_SYM;", src)
+        self.assertEqual(F.FUZZY_ALL, 0b11_1111)
+        self.assertEqual(float(re.search(r"pub const DELTA_ONE_SYM: f64 = ([0-9.]+);", src).group(1)), F.DELTA_ONE_SYM)
+        self.assertEqual(int(re.search(r"pub const ONE_SYM_SINGLE_TOTAL: usize = (\d+);", src).group(1)), 24)
 
     def test_neighbours_table(self):
         """Every symbol key's neighbours, computed again from the Rust ROWS and the Rust key-to-symbol map."""
@@ -94,6 +100,18 @@ class Tables(unittest.TestCase):
         t = F.Tolerance(["ㄅㄚ", "ㄉㄚ"], ["ㄅㄚ"])
         self.assertEqual(t.adjacent("ㄉㄚ"), ["ㄅㄚ"])
         self.assertEqual(t.adjacent("ㄅㄚ"), [])
+
+    def test_one_sym_replaces_a_symbol_within_its_column(self):
+        """The examples of `one_symbol_replaces_within_the_column` in core/src/fuzzy.rs."""
+        syls = ["ㄒㄧㄚˇ", "ㄒㄧㄤˇ", "ㄒㄧㄝˇ", "ㄒㄧㄠˇ", "ㄒㄧㄡˇ", "ㄒㄧㄢˇ", "ㄒㄧㄣˇ", "ㄒㄧㄥˇ", "ㄅㄧ", "ㄅㄨ", "ㄅㄚ", "ㄉㄚ"]
+        t = F.Tolerance(syls, syls)
+        self.assertEqual(t.one_sym("ㄒㄧㄟˇ"), sorted(["ㄒㄧㄚˇ", "ㄒㄧㄤˇ", "ㄒㄧㄝˇ", "ㄒㄧㄠˇ", "ㄒㄧㄡˇ", "ㄒㄧㄢˇ", "ㄒㄧㄣˇ", "ㄒㄧㄥˇ"]))
+        self.assertEqual(t.one_sym("ㄅㄩ"), ["ㄅㄧ", "ㄅㄨ"], "the medial column only; no final is added")
+        self.assertEqual(t.one_sym("ㄒㄧㄤˇ"), [], "a syllable the lexicon has gets no entry")
+        self.assertEqual(t.one_sym("ㄅㄧㄚ"), [], "no column is added")
+        self.assertEqual(t.one_sym("ㄆㄚ"), ["ㄅㄚ", "ㄉㄚ"], "any other initial, not just a neighbour")
+        t = F.Tolerance(["ㄅㄚ", "ㄉㄚ"], ["ㄅㄚ"])
+        self.assertEqual(t.one_sym("ㄆㄚ"), ["ㄅㄚ"], "only syllables with a one-syllable entry are alternatives")
 
 
 if __name__ == "__main__":
