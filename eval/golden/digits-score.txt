@@ -1,16 +1,16 @@
 # digits-score golden (reference/proto/golden_digits.py). Python is the baseline; Rust must match the scores as f64 bits.
 # digits.tsv sha256=a75a328ba4e30d13d5773cdc6f4c5e61a606bfc35e7459d16114c288dc6a6800
 # models: bigram.sjlm sha256=e3fb60561ea0c9a1908e8c4fc2cd8c28c36ffacd015ba45c17223a046148eb5a classes.sjc sha256=4c1071f2d6fb609c47724ddb1aace69f9b458c2cc69026ea9fe4d4b749a8ff43 kn.sjkn sha256=880ee87c6cbedf4097a8f73540de335a5bfe6abb48413513a83e7f75254e985a
-# lexicon: mcbpmf-data.txt sha256=25b3ecb0033c4177831480971fc26e8f2086ca02bce8615ff28e97ac59639553 overlay-add.tsv sha256=f079dcd163f7b208340085356ac39c05e8916ec610fdcab8ddfe222b3f4a1173 sandhi-add.tsv sha256=50855a26f60d3a54b7c91120ab1625b9ab48cf31c58672472687774b1fcb73ee names-add.tsv sha256=e8597881fa7c03f6fff4ddb433674e095b10a2efc57a52cb18bfa5fc0901702d demote.tsv sha256=973cbf433561c20a3c15ef64b1d7cac80828ce469d623a44cfb1c4968c101920 variant-order.tsv sha256=c9ef138e7491bd53a912bcd312b0b533dcff62c5ed3d3fb90348d4bdda6439b3
+# lexicon: mcbpmf-data.txt sha256=25b3ecb0033c4177831480971fc26e8f2086ca02bce8615ff28e97ac59639553 overlay-add.tsv sha256=16d66e6a58dda66cb6dd45e988f6a1634adea41486b5758cb941c7180b85ba0c sandhi-add.tsv sha256=50855a26f60d3a54b7c91120ab1625b9ab48cf31c58672472687774b1fcb73ee names-add.tsv sha256=e8597881fa7c03f6fff4ddb433674e095b10a2efc57a52cb18bfa5fc0901702d demote.tsv sha256=973cbf433561c20a3c15ef64b1d7cac80828ce469d623a44cfb1c4968c101920 variant-order.tsv sha256=c9ef138e7491bd53a912bcd312b0b533dcff62c5ed3d3fb90348d4bdda6439b3
 # theta=3.0 beta=1.0 gamma=1.0 mode=score max_buffer=4
 # generated on Darwin arm64, python 3.15.2
 # format: see the module docstring of reference/proto/golden_digits.py
 ## 1	left=	keys=1⏎	chars=
-0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.2335255841510717	choice=0,1	cls=Z
+0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.233586754680026	choice=0,1	cls=Z
 1	⏎	flush=1	ctx=-	buf=	splits=	choice=-	cls=DS
 ## 2	left=	keys=2026su06⏎	chars=年
-0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.119149132246009	choice=0,1	cls=Z
-1	0	flush=0	ctx=<s>	buf=20	splits=2,0,-2.6811887400253003;1,1,-6.283535642759471;0,2,-1.8223306947640514	choice=0,2	cls=ZZ
+0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.1192071917911774	choice=0,1	cls=Z
+1	0	flush=0	ctx=<s>	buf=20	splits=2,0,-2.6811887400253003;1,1,-6.283535642759471;0,2,-1.8223406523746823	choice=0,2	cls=ZZ
 2	2	flush=0	ctx=<s>	buf=202	splits=3,0,-3.675415934763953;2,1,-5.002838931754994	choice=3,0	cls=DDD
 3	6	flush=0	ctx=<s>	buf=2026	splits=4,0,-5.061923386929491	choice=4,0	cls=DDDD
 4	s	flush=0	ctx=<s>	buf=2026	splits=4,1,-5.268452294100262	choice=4,1	cls=DDDDZ
@@ -23,53 +23,53 @@
 1	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DS
 ## 4	left=下午	keys=32u03⏎	chars=點
 0	3	flush=0	ctx=下午	buf=	splits=	choice=-	cls=D
-1	2	flush=0	ctx=下午	buf=2	splits=1,0,-2.462674817685419;0,1,-2.7404425853294225	choice=1,0	cls=DD
-2	u	flush=0	ctx=下午	buf=2	splits=1,1,-8.64053576907679;0,2,-2.740446271886073	choice=0,2	cls=DZZ
+1	2	flush=0	ctx=下午	buf=2	splits=1,0,-2.462674817685419;0,1,-2.740442585329424	choice=1,0	cls=DD
+2	u	flush=0	ctx=下午	buf=2	splits=1,1,-8.640535769149402;0,2,-2.740446271886073	choice=0,2	cls=DZZ
 3	0	flush=0	ctx=-	buf=	splits=	choice=-	cls=DZZZ
 4	3	flush=0	ctx=-	buf=	splits=	choice=-	cls=DZZZZ
 5	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DZZZZS
 ## 5	left=	keys=84⏎	chars=
-0	8	flush=0	ctx=<s>	buf=8	splits=1,0,-2.162319940244133;0,1,-2.426410022886668	choice=1,0	cls=D
+0	8	flush=0	ctx=<s>	buf=8	splits=1,0,-2.162319940244133;0,1,-2.42643933028208	choice=1,0	cls=D
 1	4	flush=0	ctx=<s>	buf=84	splits=2,0,-3.5548004777525355;0,2,-2.758099371796114	choice=0,2	cls=ZZ
 2	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZS
 ## 6	left=	keys=84␣⏎	chars=
-0	8	flush=0	ctx=<s>	buf=8	splits=1,0,-2.162319940244133;0,1,-2.426410022886668	choice=1,0	cls=D
+0	8	flush=0	ctx=<s>	buf=8	splits=1,0,-2.162319940244133;0,1,-2.42643933028208	choice=1,0	cls=D
 1	4	flush=0	ctx=<s>	buf=84	splits=2,0,-3.5548004777525355;0,2,-2.758099371796114	choice=0,2	cls=ZZ
 2	␣	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZS
 3	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZSS
 ## 7	left=	keys=504⏎	chars=
-0	5	flush=0	ctx=<s>	buf=5	splits=1,0,-2.165394846599943;0,1,-1.0952682476386635	choice=0,1	cls=Z
-1	0	flush=0	ctx=<s>	buf=50	splits=2,0,-3.070861399992438;1,1,-6.673208302726609;0,2,-2.668128521835906	choice=0,2	cls=ZZ
+0	5	flush=0	ctx=<s>	buf=5	splits=1,0,-2.165394846599943;0,1,-1.0953168825404724	choice=0,1	cls=Z
+1	0	flush=0	ctx=<s>	buf=50	splits=2,0,-3.070861399992438;1,1,-6.673208302726609;0,2,-2.668138507367045	choice=0,2	cls=ZZ
 2	4	flush=0	ctx=<s>	buf=504	splits=3,0,-4.489217524606617;1,2,-7.280945419426148;0,3,-2.7779610922736713	choice=0,3	cls=ZZZ
 3	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZS
 ## 8	left=	keys=1984⏎	chars=
-0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.2335255841510717	choice=0,1	cls=Z
+0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.233586754680026	choice=0,1	cls=Z
 1	9	flush=0	ctx=<s>	buf=19	splits=2,0,-2.7348775741766516;1,1,-6.3676081571226835;0,2,-2.667319793216768	choice=0,2	cls=ZZ
-2	8	flush=0	ctx=<s>	buf=198	splits=3,0,-4.115702522526632;2,1,-7.510557087931308	choice=3,0	cls=DDD
+2	8	flush=0	ctx=<s>	buf=198	splits=3,0,-4.115702522526632;2,1,-7.510557087931309	choice=3,0	cls=DDD
 3	4	flush=0	ctx=<s>	buf=1984	splits=4,0,-5.477166164820423;2,2,-7.572009579652823	choice=4,0	cls=DDDD
 4	⏎	flush=4	ctx=-	buf=	splits=	choice=-	cls=DDDDS
 ## 9	left=	keys=20u⏎	chars=
-0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.119149132246009	choice=0,1	cls=Z
-1	0	flush=0	ctx=<s>	buf=20	splits=2,0,-2.6811887400253003;1,1,-6.283535642759471;0,2,-1.8223306947640514	choice=0,2	cls=ZZ
+0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.1192071917911774	choice=0,1	cls=Z
+1	0	flush=0	ctx=<s>	buf=20	splits=2,0,-2.6811887400253003;1,1,-6.283535642759471;0,2,-1.8223406523746823	choice=0,2	cls=ZZ
 2	u	flush=0	ctx=<s>	buf=20	splits=2,1,-5.243202860716351	choice=2,1	cls=DDZ
 3	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDZS
 ## 10	left=	keys=101o4⏎	chars=倍
-0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.2335255841510717	choice=0,1	cls=Z
-1	0	flush=0	ctx=<s>	buf=10	splits=2,0,-2.541528318274241;1,1,-6.143875221008412;0,2,-2.6064058386056184	choice=2,0	cls=DD
-2	1	flush=0	ctx=<s>	buf=101	splits=3,0,-3.3960950912618353;2,1,-5.199959490577045	choice=3,0	cls=DDD
+0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.233586754680026	choice=0,1	cls=Z
+1	0	flush=0	ctx=<s>	buf=10	splits=2,0,-2.541528318274241;1,1,-6.143875221008412;0,2,-2.6064062256782403	choice=2,0	cls=DD
+2	1	flush=0	ctx=<s>	buf=101	splits=3,0,-3.3960950912618353;2,1,-5.19995949058471	choice=3,0	cls=DDD
 3	o	flush=0	ctx=<s>	buf=101	splits=3,1,-20.959547337014094;2,2,-6.251814705189306	choice=2,2	cls=DDZZ
 4	4	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDZZZ
 5	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDZZZS
 ## 11	left=	keys=100m06⏎	chars=元
-0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.2335255841510717	choice=0,1	cls=Z
-1	0	flush=0	ctx=<s>	buf=10	splits=2,0,-2.541528318274241;1,1,-6.143875221008412;0,2,-2.6064058386056184	choice=2,0	cls=DD
+0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.233586754680026	choice=0,1	cls=Z
+1	0	flush=0	ctx=<s>	buf=10	splits=2,0,-2.541528318274241;1,1,-6.143875221008412;0,2,-2.6064062256782403	choice=2,0	cls=DD
 2	0	flush=0	ctx=<s>	buf=100	splits=3,0,-3.4728704587725128;2,1,-6.987019565641102	choice=3,0	cls=DDD
 3	m	flush=0	ctx=<s>	buf=100	splits=3,1,-5.240834168660745	choice=3,1	cls=DDDZ
 4	0	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDZZ
 5	6	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDZZZ
 6	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDZZZS
 ## 12	left=	keys=1m,4⏎	chars=月
-0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.2335255841510717	choice=0,1	cls=Z
+0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.233586754680026	choice=0,1	cls=Z
 1	m	flush=0	ctx=<s>	buf=1	splits=1,1,-3.308468665382074	choice=1,1	cls=DZ
 2	,	flush=0	ctx=-	buf=	splits=	choice=-	cls=DZZ
 3	4	flush=0	ctx=-	buf=	splits=	choice=-	cls=DZZZ
@@ -77,45 +77,45 @@
 ## 13	left=	keys=3.14⏎	chars=
 0	3	flush=0	ctx=<s>	buf=	splits=	choice=-	cls=D
 1	.	flush=0	ctx=<s>	buf=.	splits=1,0,-4.1740340450172475;0,1,-5.693507420235534	choice=1,0	cls=DD
-2	1	flush=0	ctx=<s>	buf=.1	splits=2,0,-5.028600818004842;1,1,-6.832465217320053	choice=2,0	cls=DDD
+2	1	flush=0	ctx=<s>	buf=.1	splits=2,0,-5.028600818004842;1,1,-6.832465217327718	choice=2,0	cls=DDD
 3	4	flush=0	ctx=<s>	buf=.14	splits=3,0,-6.390064460298632	choice=3,0	cls=DDDD
 4	⏎	flush=3	ctx=-	buf=	splits=	choice=-	cls=DDDDS
 ## 14	left=	keys=25␣⏎	chars=
-0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.119149132246009	choice=0,1	cls=Z
+0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.1192071917911774	choice=0,1	cls=Z
 1	5	flush=0	ctx=<s>	buf=25	splits=2,0,-3.1337464542328197;1,1,-4.282887457696937	choice=2,0	cls=DD
 2	␣	flush=0	ctx=<s>	buf=25	splits=1,2,-5.299622405392213;2,0,-3.6358346889620012	choice=2,0	cls=DDS
 3	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDSS
 ## 15	left=	keys=2.␣⏎	chars=
-0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.119149132246009	choice=0,1	cls=Z
-1	.	flush=0	ctx=<s>	buf=2.	splits=2,0,-3.800519746298534;1,1,-5.31999312151682;0,2,-2.3614795918158236	choice=0,2	cls=ZZ
+0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.1192071917911774	choice=0,1	cls=Z
+1	.	flush=0	ctx=<s>	buf=2.	splits=2,0,-3.800519746298534;1,1,-5.31999312151682;0,2,-2.361510132777681	choice=0,2	cls=ZZ
 2	␣	flush=0	ctx=<s>	buf=2.	splits=1,2,-5.320606965333118;0,3,-2.3932553846437306;2,0,-4.302607981027715	choice=0,3	cls=ZZZ
 3	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZS
 ## 16	left=	keys=1258901258⏎	chars=
-0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.2335255841510717	choice=0,1	cls=Z
+0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.233586754680026	choice=0,1	cls=Z
 1	2	flush=0	ctx=<s>	buf=12	splits=2,0,-2.604413372514623;1,1,-4.020034165371244	choice=2,0	cls=DD
 2	5	flush=0	ctx=<s>	buf=125	splits=3,0,-3.9883132272204147;2,1,-5.04925643481895	choice=3,0	cls=DDD
 3	8	flush=0	ctx=<s>	buf=1258	splits=4,0,-5.3122456932500075;3,1,-8.92187175912278;2,2,-7.427865684397021	choice=4,0	cls=DDDD
 4	9	flush=1	ctx=<s>	buf=2589	splits=4,0,-7.233813927495799;3,1,-9.52969645437149	choice=4,0	cls=DDDDD
 5	0	flush=1	ctx=<s>	buf=5890	splits=4,0,-8.218132018955664;3,1,-11.582375609229722	choice=4,0	cls=DDDDDD
-6	1	flush=1	ctx=<s>	buf=8901	splits=4,0,-9.00217080669637;3,1,-11.086950769247569	choice=4,0	cls=DDDDDDD
+6	1	flush=1	ctx=<s>	buf=8901	splits=4,0,-9.00217080669637;3,1,-11.086950769255235	choice=4,0	cls=DDDDDDD
 7	2	flush=1	ctx=<s>	buf=9012	splits=4,0,-9.980877765964744;3,1,-11.359667224705346	choice=4,0	cls=DDDDDDDD
 8	5	flush=1	ctx=<s>	buf=0125	splits=4,0,-11.27902284711395;3,1,-12.705855916442854	choice=4,0	cls=DDDDDDDDD
 9	8	flush=1	ctx=<s>	buf=1258	splits=4,0,-12.701171241948309;3,1,-15.976375813654307;2,2,-15.084465166020927	choice=4,0	cls=DDDDDDDDDD
 10	⏎	flush=4	ctx=-	buf=	splits=	choice=-	cls=DDDDDDDDDDS
 ## 17	left=	keys=2026/10/15⏎	chars=
-0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.119149132246009	choice=0,1	cls=Z
-1	0	flush=0	ctx=<s>	buf=20	splits=2,0,-2.6811887400253003;1,1,-6.283535642759471;0,2,-1.8223306947640514	choice=0,2	cls=ZZ
+0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.1192071917911774	choice=0,1	cls=Z
+1	0	flush=0	ctx=<s>	buf=20	splits=2,0,-2.6811887400253003;1,1,-6.283535642759471;0,2,-1.8223406523746823	choice=0,2	cls=ZZ
 2	2	flush=0	ctx=<s>	buf=202	splits=3,0,-3.675415934763953;2,1,-5.002838931754994	choice=3,0	cls=DDD
 3	6	flush=0	ctx=<s>	buf=2026	splits=4,0,-5.061923386929491	choice=4,0	cls=DDDD
 4	/	flush=1	ctx=<s>	buf=026/	splits=4,0,-8.740912672653028;3,1,-24.273216865055026	choice=4,0	cls=DDDDD
-5	1	flush=1	ctx=<s>	buf=26/1	splits=4,0,-9.648455396602216;3,1,-11.302414279322893	choice=4,0	cls=DDDDDD
+5	1	flush=1	ctx=<s>	buf=26/1	splits=4,0,-9.648455396602216;3,1,-11.30241427933056	choice=4,0	cls=DDDDDD
 6	0	flush=1	ctx=<s>	buf=6/10	splits=4,0,-10.509269551853599;3,1,-14.304334221958179;2,2,-12.011823331307786	choice=4,0	cls=DDDDDDD
 7	/	flush=1	ctx=<s>	buf=/10/	splits=4,0,-13.375861764261748;3,1,-30.208182678618066	choice=4,0	cls=DDDDDDDD
-8	1	flush=1	ctx=<s>	buf=10/1	splits=4,0,-14.144673763692758;3,1,-16.314428024738337	choice=4,0	cls=DDDDDDDDD
+8	1	flush=1	ctx=<s>	buf=10/1	splits=4,0,-14.144673763692758;3,1,-16.314428024746	choice=4,0	cls=DDDDDDDDD
 9	5	flush=1	ctx=<s>	buf=0/15	splits=4,0,-15.569897064882927;3,1,-16.511190278782788	choice=4,0	cls=DDDDDDDDDD
 10	⏎	flush=4	ctx=-	buf=	splits=	choice=-	cls=DDDDDDDDDDS
 ## 18	left=	keys=1-2⏎	chars=
-0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.2335255841510717	choice=0,1	cls=Z
+0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.233586754680026	choice=0,1	cls=Z
 1	-	flush=0	ctx=<s>	buf=1-	splits=2,0,-3.8081985874432247;1,1,-6.066578157791311	choice=2,0	cls=DD
 2	2	flush=0	ctx=<s>	buf=1-2	splits=3,0,-4.802425782181878;2,1,-6.129848779172919	choice=3,0	cls=DDD
 3	⏎	flush=3	ctx=-	buf=	splits=	choice=-	cls=DDDS
@@ -123,7 +123,7 @@
 0	3	flush=0	ctx=價格	buf=	splits=	choice=-	cls=D
 1	0	flush=0	ctx=價格	buf=0	splits=1,0,-4.34474802450844;0,1,-9.750709481438385	choice=1,0	cls=DD
 2	0	flush=0	ctx=價格	buf=00	splits=2,0,-5.276090165006711;1,1,-10.593853826071076	choice=2,0	cls=DDD
-3	m	flush=0	ctx=價格	buf=00	splits=2,1,-6.471153253864383	choice=2,1	cls=DDDZ
+3	m	flush=0	ctx=價格	buf=00	splits=2,1,-6.4711532538644	choice=2,1	cls=DDDZ
 4	0	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDZZ
 5	6	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDZZZ
 6	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDZZZS
@@ -133,18 +133,18 @@
 2	4	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZ
 3	g	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZZ
 4	4	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZZZ
-5	1	flush=0	ctx=測試	buf=1	splits=1,0,-3.012589203122623;0,1,-1.4157698874633438	choice=0,1	cls=ZZZZZZ
-6	2	flush=0	ctx=測試	buf=12	splits=2,0,-3.9809408107555;1,1,-7.0786126100142654	choice=2,0	cls=ZZZZZDD
+5	1	flush=0	ctx=測試	buf=1	splits=1,0,-3.012589203122623;0,1,-1.4157883394226933	choice=0,1	cls=ZZZZZZ
+6	2	flush=0	ctx=測試	buf=12	splits=2,0,-3.9809408107555;1,1,-7.078612610113449	choice=2,0	cls=ZZZZZDD
 7	3	flush=0	ctx=測試	buf=123	splits=3,0,-5.348682304212867	choice=3,0	cls=ZZZZZDDD
 8	⏎	flush=3	ctx=-	buf=	splits=	choice=-	cls=ZZZZZDDDS
 ## 21	left=你	keys=5j03⏎	chars=轉
-0	5	flush=0	ctx=你	buf=5	splits=1,0,-3.9405446445130883;0,1,-1.0923437127816753	choice=0,1	cls=Z
-1	j	flush=0	ctx=你	buf=5	splits=1,1,-7.716050608717447;0,2,-1.9825689635711679	choice=0,2	cls=ZZ
+0	5	flush=0	ctx=你	buf=5	splits=1,0,-3.9405446445130883;0,1,-1.0923458170987963	choice=0,1	cls=Z
+1	j	flush=0	ctx=你	buf=5	splits=1,1,-7.716050608759414;0,2,-1.9825724300609127	choice=0,2	cls=ZZ
 2	0	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZ
 3	3	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZZ
 4	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZZS
 ## 22	left=	keys=1␣⏎	chars=
-0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.2335255841510717	choice=0,1	cls=Z
+0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.233586754680026	choice=0,1	cls=Z
 1	␣	flush=0	ctx=<s>	buf=1	splits=1,0,-2.2004722083707313	choice=1,0	cls=DS
 2	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DSS
 ## 23	left=	keys=3⏎	chars=
@@ -161,39 +161,39 @@
 2	5	flush=0	ctx=<s>	buf=0.5	splits=3,0,-5.121534546763944;2,1,-6.18247775436248	choice=3,0	cls=DDD
 3	⏎	flush=3	ctx=-	buf=	splits=	choice=-	cls=DDDS
 ## 26	left=我們	keys=2026su062k7⏎	chars=年的
-0	2	flush=0	ctx=我們	buf=2	splits=1,0,-3.758545822787953;0,1,-1.0964940058433865	choice=0,1	cls=Z
-1	0	flush=0	ctx=我們	buf=20	splits=2,0,-4.664012376180448;1,1,-9.893882574054713;0,2,-2.4327371311579573	choice=0,2	cls=ZZ
-2	2	flush=0	ctx=我們	buf=202	splits=3,0,-5.658239570919102;2,1,-8.553770222005259	choice=3,0	cls=DDD
+0	2	flush=0	ctx=我們	buf=2	splits=1,0,-3.758545822787953;0,1,-1.09650206069836	choice=0,1	cls=Z
+1	0	flush=0	ctx=我們	buf=20	splits=2,0,-4.664012376180448;1,1,-9.893882574054713;0,2,-2.43274415044472	choice=0,2	cls=ZZ
+2	2	flush=0	ctx=我們	buf=202	splits=3,0,-5.658239570919102;2,1,-8.553770222104443	choice=3,0	cls=DDD
 3	6	flush=0	ctx=我們	buf=2026	splits=4,0,-7.044747023084641	choice=4,0	cls=DDDD
-4	s	flush=0	ctx=我們	buf=2026	splits=4,1,-9.088592502294384	choice=4,1	cls=DDDDZ
+4	s	flush=0	ctx=我們	buf=2026	splits=4,1,-9.088592502294722	choice=4,1	cls=DDDDZ
 5	u	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDDZZ
 6	0	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDDZZZ
 7	6	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDDZZZZ
-8	2	flush=0	ctx=年	buf=2	splits=1,0,-1.1463239853985923;0,1,-0.8991965062044746	choice=0,1	cls=DDDDZZZZZ
-9	k	flush=0	ctx=年	buf=2	splits=1,1,-12.17546723466563;0,2,-1.1519956176973467	choice=0,2	cls=DDDDZZZZZZ
+8	2	flush=0	ctx=年	buf=2	splits=1,0,-1.1463239853985923;0,1,-0.8991998685257185	choice=0,1	cls=DDDDZZZZZ
+9	k	flush=0	ctx=年	buf=2	splits=1,1,-12.175467238289901;0,2,-1.1519967172708239	choice=0,2	cls=DDDDZZZZZZ
 10	7	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDDZZZZZZZ
 11	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDDZZZZZZZS
 ## 27	left=	keys=10⏎	chars=
-0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.2335255841510717	choice=0,1	cls=Z
-1	0	flush=0	ctx=<s>	buf=10	splits=2,0,-2.541528318274241;1,1,-6.143875221008412;0,2,-2.6064058386056184	choice=2,0	cls=DD
+0	1	flush=0	ctx=<s>	buf=1	splits=1,0,-1.6360617648817457;0,1,-1.233586754680026	choice=0,1	cls=Z
+1	0	flush=0	ctx=<s>	buf=10	splits=2,0,-2.541528318274241;1,1,-6.143875221008412;0,2,-2.6064062256782403	choice=2,0	cls=DD
 2	⏎	flush=2	ctx=-	buf=	splits=	choice=-	cls=DDS
 ## 28	left=下午	keys=2⏎	chars=
-0	2	flush=0	ctx=下午	buf=2	splits=1,0,-1.1208089113338282;0,1,-1.309971656455136	choice=1,0	cls=D
+0	2	flush=0	ctx=下午	buf=2	splits=1,0,-1.1208089113338282;0,1,-1.3099924808519468	choice=1,0	cls=D
 1	⏎	flush=1	ctx=-	buf=	splits=	choice=-	cls=DS
 ## 29	left=下午	keys=20⏎	chars=
-0	2	flush=0	ctx=下午	buf=2	splits=1,0,-1.1208089113338282;0,1,-1.309971656455136	choice=1,0	cls=D
-1	0	flush=0	ctx=下午	buf=20	splits=2,0,-2.0262754647263232;1,1,-9.404233933262807;0,2,-3.2415790783214513	choice=2,0	cls=DD
+0	2	flush=0	ctx=下午	buf=2	splits=1,0,-1.1208089113338282;0,1,-1.3099924808519468	choice=1,0	cls=D
+1	0	flush=0	ctx=下午	buf=20	splits=2,0,-2.0262754647263232;1,1,-9.404233933262807;0,2,-3.2416513053172644	choice=2,0	cls=DD
 2	⏎	flush=2	ctx=-	buf=	splits=	choice=-	cls=DDS
 ## 30	left=	keys=2020␣⏎	chars=
-0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.119149132246009	choice=0,1	cls=Z
-1	0	flush=0	ctx=<s>	buf=20	splits=2,0,-2.6811887400253003;1,1,-6.283535642759471;0,2,-1.8223306947640514	choice=0,2	cls=ZZ
+0	2	flush=0	ctx=<s>	buf=2	splits=1,0,-1.7757221866328048;0,1,-1.1192071917911774	choice=0,1	cls=Z
+1	0	flush=0	ctx=<s>	buf=20	splits=2,0,-2.6811887400253003;1,1,-6.283535642759471;0,2,-1.8223406523746823	choice=0,2	cls=ZZ
 2	2	flush=0	ctx=<s>	buf=202	splits=3,0,-3.675415934763953;2,1,-5.002838931754994	choice=3,0	cls=DDD
 3	0	flush=0	ctx=<s>	buf=2020	splits=4,0,-4.549865592941837;3,1,-8.278786200278525;2,2,-6.690951421273761	choice=4,0	cls=DDDD
 4	␣	flush=0	ctx=<s>	buf=2020	splits=3,2,-8.401848934351552;2,3,-7.095402721069549;4,0,-4.600180405311366	choice=4,0	cls=DDDDS
 5	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=DDDDSS
 ## 31	left=比賽用嗎	keys=1ul3⏎	chars=表
-0	1	flush=0	ctx=嗎	buf=1	splits=1,0,-1.9167278944195933;0,1,-2.225881474930286	choice=1,0	cls=D
-1	u	flush=0	ctx=嗎	buf=1	splits=1,1,-4.53170152918886;0,2,-3.128797599818519	choice=0,2	cls=ZZ
+0	1	flush=0	ctx=嗎	buf=1	splits=1,0,-1.9167278944195933;0,1,-2.2258921809495575	choice=1,0	cls=D
+1	u	flush=0	ctx=嗎	buf=1	splits=1,1,-4.531701529261471;0,2,-3.128826711818366	choice=0,2	cls=ZZ
 2	l	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZ
 3	3	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZZ
 4	⏎	flush=0	ctx=-	buf=	splits=	choice=-	cls=ZZZZS

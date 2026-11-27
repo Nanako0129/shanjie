@@ -634,6 +634,47 @@ final class ShellTests: XCTestCase {
         XCTAssertEqual(again.client.marked, "ㄋㄔ", "a new shell reads the stored on")
     }
 
+    /// 標點排列 (docs/spec/keys-and-composition.md §8.1): a new shell reads the stored choice and sends it to its engine, a rebuilt engine (a layout switch,
+    /// a word pack switch) gets it again, and a change from the settings window reaches the engine of an owner session at the next key.
+    func testPunctLayoutStoresRebuildsAndSurvivesRestart() {
+        let store = MemoryLayoutStore(punctLayout: "mcbopomofo")
+        let make = {
+            Shell(resources: self.resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: store,
+                  learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(false), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore())
+        }
+        /// What `key` then Enter sends.
+        func sent(_ c: Controller, _ key: Character) -> String {
+            let before = c.client.text
+            c.type(String(key))
+            c.press(Keys.enter)
+            return String(c.client.text.dropFirst(before.count))
+        }
+        let shell = make()
+        let c = Controller(shell)
+        c.session.activate()
+        XCTAssertEqual(sent(c, "'"), "、", "a new shell reads the stored choice")
+        c.session.perform(.layout(.eten))  // a layout switch rebuilds the engine; in Eten ' is a Zhuyin key, \ is not
+        XCTAssertEqual(sent(c, "\\"), "＼", "the engine rebuilt by a layout switch got the setting")
+        c.session.perform(.layout(.standard))
+        XCTAssertEqual(sent(c, "'"), "、", "and the one rebuilt by the switch back")
+        c.session.perform(.toggleAcgPack)  // a word pack switch rebuilds it too
+        XCTAssertEqual(sent(c, "'"), "、", "the engine rebuilt by a word pack switch got the setting")
+        // With an owner session and a composition open, from the settings window.
+        let model = SettingsModel(shell: shell)
+        c.type("su3")
+        XCTAssertNotNil(shell.owner)
+        model.setPunctLayout(.apple)
+        XCTAssertEqual(store.punctLayout, "apple")
+        XCTAssertEqual(sent(c, "'"), "你‘", "the next key follows the change")
+        XCTAssertEqual(sent(c, "'"), "‘")
+        model.setPunctLayout(.mcbopomofo)
+        XCTAssertEqual(sent(c, "'"), "、")
+        model.setPunctLayout(.apple)
+        let again = Controller(make())
+        again.session.activate()
+        XCTAssertEqual(sent(again, "'"), "‘", "a new shell reads the stored macOS 注音")
+    }
+
     private func englishController(vertical: Bool = false) -> Controller {
         Controller(Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore(),
                   learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(), abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(true, overwrite: true), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(), glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(vertical), rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(), appProfileStore: MemoryAppProfileStore(), spacingStore: MemorySpacingStore()))

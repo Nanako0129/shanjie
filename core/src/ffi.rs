@@ -440,6 +440,7 @@ pub unsafe extern "C" fn shanjie_engine_reset(
         let mode = match mode {
             0 => ResetMode::Commit,
             1 => ResetMode::Discard,
+            2 => ResetMode::CommitFinished,
             _ => return SHANJIE_ERR_INVALID,
         };
         // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
@@ -737,7 +738,39 @@ pub unsafe extern "C" fn shanjie_engine_set_key_scheme(
     rc
 }
 
-/// docs/spec/prediction.md §6. `enabled` 0 or 1 (default 0): whether a symbol in an occupied column opens a new
+/// docs/spec/c-abi.md, docs/spec/keys-and-composition.md §8.1. `layout` 0 (default, Apple Zhuyin's punctuation keys) or 1 (McBopomofo's: ten cells differ). The next key reads
+/// it. Returns the snapshot like `set_candidate_vertical` (nothing shown changes); any other value changes nothing and returns 2.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_punct_layout(
+    engine: *mut ShanjieEngine,
+    layout: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_punct_layout(layout) {
+            // SAFETY: `out` checked non-NULL above.
+            Ok(Some(o)) => unsafe { emit(o, out) },
+            Ok(None) => SHANJIE_ERR_INVALID,
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// docs/spec/prediction.md §6. `enabled` 0 or 1 (default 0): whether a non-advancing symbol opens a new
 /// unfinished unit. Returns the snapshot like `set_prediction`; any other value changes nothing and returns 2.
 ///
 /// # Safety
@@ -759,6 +792,46 @@ pub unsafe extern "C" fn shanjie_engine_set_abbreviation(
         // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
         let e = unsafe { &mut (*engine).0 };
         match e.set_abbreviation(enabled == 1) {
+            Ok(o) => {
+                #[cfg(test)]
+                tests::inject(&o);
+                // SAFETY: `out` checked non-NULL above.
+                unsafe { emit(o, out) }
+            }
+            Err(_) => SHANJIE_ERR_INTERNAL,
+        }
+    });
+    if rc == SHANJIE_ERR_INTERNAL {
+        // SAFETY: forwarded caller contract.
+        unsafe { discard(engine) };
+    }
+    rc
+}
+
+/// docs/spec/prediction.md §3.3, §7. `on` 0 or 1 (default 0): whether each prediction query skips candidates
+/// whose character count exceeds the queried unit count. Returns 0 and the snapshot (recomputing the prediction row
+/// when the composition is non-empty and prediction is on; otherwise only remembers `on`); `on` outside 0..=1 leaves
+/// state unchanged and returns 2; NULL `engine` or `out` returns 1.
+///
+/// # Safety
+/// `engine` is NULL or a live handle; `out` is NULL or valid for one pointer write.
+#[no_mangle]
+pub unsafe extern "C" fn shanjie_engine_set_candidate_length_cap(
+    engine: *mut ShanjieEngine,
+    on: u32,
+    out: *mut *mut ShanjieOutput,
+) -> i32 {
+    let rc = guard(|| {
+        // SAFETY: forwarded caller contract.
+        if !unsafe { clear_out(out) } || engine.is_null() {
+            return SHANJIE_ERR_NULL;
+        }
+        if on > 1 {
+            return SHANJIE_ERR_INVALID;
+        }
+        // SAFETY: live handle, single-threaded use (docs/spec/c-abi.md §1).
+        let e = unsafe { &mut (*engine).0 };
+        match e.set_candidate_length_cap(on == 1) {
             Ok(o) => {
                 #[cfg(test)]
                 tests::inject(&o);
@@ -1846,13 +1919,25 @@ mod tests {
             unsafe { shanjie_output_free(o) };
         }
 
-        // engine_set_abbreviation (docs/spec/prediction.md §6): codes like set_prediction.
+        // engine_set_abbreviation / engine_set_candidate_length_cap (docs/spec/prediction.md §6, §7): codes like set_prediction.
         o = sentinel();
         assert!(unsafe { shanjie_engine_set_abbreviation(e, 1, ptr::null_mut()) } == 1, "set_abbreviation out NULL");
         assert!(unsafe { shanjie_engine_set_abbreviation(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "set_abbreviation engine NULL");
         for v in [2, u32::MAX] {
             o = sentinel();
             assert!(unsafe { shanjie_engine_set_abbreviation(e, v, &mut o) } == 2 && o.is_null(), "set_abbreviation out of range");
+        }
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_length_cap(e, 1, ptr::null_mut()) } == 1, "set_candidate_length_cap out NULL");
+        assert!(unsafe { shanjie_engine_set_candidate_length_cap(ptr::null_mut(), 1, &mut o) } == 1 && o.is_null(), "set_candidate_length_cap engine NULL");
+        for v in [2, u32::MAX] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_candidate_length_cap(e, v, &mut o) } == 2 && o.is_null(), "set_candidate_length_cap out of range");
+        }
+        for v in [1, 0] {
+            o = sentinel();
+            assert!(unsafe { shanjie_engine_set_candidate_length_cap(e, v, &mut o) } == 0 && !o.is_null(), "set_candidate_length_cap 0/1");
+            unsafe { shanjie_output_free(o) };
         }
         for v in [0, 1] {
             o = sentinel();
@@ -1889,7 +1974,7 @@ mod tests {
         assert!(unsafe { shanjie_engine_reset(e, 0, ptr::null_mut()) } == 1, "reset out NULL");
         assert!(unsafe { shanjie_engine_reset(ptr::null_mut(), 0, &mut o) } == 1 && o.is_null(), "reset engine NULL");
         o = sentinel();
-        assert!(unsafe { shanjie_engine_reset(e, 2, &mut o) } == 2 && o.is_null(), "reset mode");
+        assert!(unsafe { shanjie_engine_reset(e, 3, &mut o) } == 2 && o.is_null(), "reset mode");
 
         // Ownership: an output outlives the engine; candidates NULL when closed.
         for c in ['c', 'l', '3'] {
@@ -2144,7 +2229,7 @@ mod tests {
         if !is_child("child_lm") {
             return;
         }
-        let dir = tiny_dir("lm", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\n".as_bytes());
+        let dir = tiny_dir("lm", "ㄒㄧㄣ 鑫 -1.0\nㄒㄧㄣ 心 -4.0\nㄒㄧ 希 -2.0\nㄢ 安 -2.0\nㄒㄧ-ㄢ 西安 -1.5\nㄒㄧㄢ 先 -1.2\n".as_bytes());
         let lm_path = dir.join("tiny.sjlm");
         std::fs::write(&lm_path, tiny_lm()).unwrap();
         let classes_path = dir.join("classes.sjc");
@@ -2215,10 +2300,36 @@ mod tests {
         assert!(rc == 0 && !null && handled == 1 && preedit == "心" && commit.is_empty(), "formal snapshot");
         assert!(enter(e) == "心", "formal commit");
 
-        // set_abbreviation with a model: two initials are two units, turning it off drops them (docs/spec/prediction.md §6).
+        // set_abbreviation with a model: two initials are two units, turning it off drops them; set_candidate_length_cap recomputes the row (docs/spec/prediction.md §3.3, §6, §7).
         let mut o: *mut ShanjieOutput = sentinel();
         assert!(unsafe { shanjie_engine_set_abbreviation(e, 1, &mut o) } == 0 && !o.is_null(), "abbreviation on");
         unsafe { shanjie_output_free(o) };
+        for c in ['v', 'u'] {
+            assert!(send(e, key(CHAR, c)).0 == 0, "typing xi");
+        }
+        let cands_of = |o: *mut ShanjieOutput| -> Vec<String> {
+            unsafe {
+                let n = (*o).candidate_count as usize;
+                (0..n).map(|i| CStr::from_ptr(*(*o).candidates.add(i)).to_str().unwrap().to_string()).collect()
+            }
+        };
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_length_cap(e, 0, &mut o) } == 0 && !o.is_null(), "cap off");
+        let row_off = cands_of(o);
+        unsafe { shanjie_output_free(o) };
+        assert!(row_off.iter().any(|w| w == "西安"), "cap off holds 西安");
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_length_cap(e, 1, &mut o) } == 0 && !o.is_null(), "cap on");
+        let row_on = cands_of(o);
+        unsafe { shanjie_output_free(o) };
+        assert!(!row_on.iter().any(|w| w == "西安") && row_on.iter().any(|w| w == "希") && row_on != row_off, "cap on recomputes row without 西安");
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_length_cap(e, 2, &mut o) } == 2 && o.is_null(), "cap 2 invalid");
+        o = sentinel();
+        assert!(unsafe { shanjie_engine_set_candidate_length_cap(e, 0, &mut o) } == 0 && !o.is_null(), "cap off back");
+        assert!(cands_of(o) == row_off, "cap off restores row");
+        unsafe { shanjie_output_free(o) };
+        assert!(send(e, key(ESC, '\0')).0 == 0, "esc xi");
         assert!(send(e, key(CHAR, 'v')).0 == 0, "typing");
         assert!(send(e, key(CHAR, 'q')).1.chars().count() == 2, "two units");
         o = sentinel();

@@ -88,7 +88,7 @@ Swift 程式放在 `macos/`（`Package.swift`，swift-tools 6.0，平台 macOS 2
 
 - `main.swift` 的 `runServer()` 先跑英文預設值的一次性重設（`docs/spec/english-mixed.md`），建 `NSApplication`、`IMKServer`（名稱取 `InputMethodConnectionName`），之後才建 `Shell`；`Shell` 持有行程唯一的引擎、候選窗與組字擁有者。接著建 `Updates`／`Updater`（`docs/spec/install-and-update.md`）與設定視窗，設好 `onOpenSettings`、`onOpenCandidateSettings`。
 - **平常只有一個引擎**；切換詞包期間最多兩個：現行的，加上建置中或建好了還沒換上的。每個引擎的 footprint 量到 396 MiB，其中模型 256 MiB（2026-11-13，release 核心）；兩個引擎各載一份模型並存時 654–672 MiB，共用路徑不再有第二份模型（共用與各載一份兩條路徑並存時的數字由 `core/examples/pack_switch_bench.rs` 的 `memory` 模式量）。`Shell.init` 先讀鍵盤排列偏好，再呼叫唯一一次同步的 `build()`；先建再切會建兩次。
-- **同步的 `build()`**（第一次建置與換鍵盤排列，從檔案建）依序：釋放舊引擎；用目前的詞包遮罩建引擎（`shanjie_engine_new_packs`，沒有詞包用 `shanjie_engine_new`）；`load_lm(bigram.sjlm)`；成功才 `load_tinylm`，再成功才 `load_colloquial`（小模型與常談表載入失敗只記回傳碼，引擎照常，語意校正不啟用或不帶常談項）；然後把殼持有的每一個設定**每次重送一遍**（重建的引擎一律從核心預設值開始）：避免敏感字詞、即時預測、可省略韻母、中英混打與它的三個選項、ASCII 狀態、模糊輸入旗標、候選窗方向、語意校正與強度、聊天／書面、標點表、選字記憶資料夾。換鍵盤排列先把組字送回擁有者（沒有擁有者就丟棄），再改設定，再 `build()`，這一段在主執行緒阻塞約一秒以上，期間按鍵直通；排列很少切換，先接受。
+- **同步的 `build()`**（第一次建置與換鍵盤排列，從檔案建）依序：釋放舊引擎；用目前的詞包遮罩建引擎（`shanjie_engine_new_packs`，沒有詞包用 `shanjie_engine_new`）；`load_lm(bigram.sjlm)`；成功才 `load_tinylm`，再成功才 `load_colloquial`（小模型與常談表載入失敗只記回傳碼，引擎照常，語意校正不啟用或不帶常談項）；然後把殼持有的每一個設定**每次重送一遍**（重建的引擎一律從核心預設值開始）：避免敏感字詞、即時預測、可省略韻母、中英混打與它的三個選項、ASCII 狀態、模糊輸入旗標、候選窗方向、標點排列（`set_punct_layout`，`docs/spec/keys-and-composition.md` §8.1）、語意校正與強度、聊天／書面、標點表、選字記憶資料夾。換鍵盤排列先把組字送回擁有者（沒有擁有者就丟棄），再改設定，再 `build()`，這一段在主執行緒阻塞約一秒以上，期間按鍵直通；排列很少切換，先接受。
 - 詞包載入失敗的退讓：合併建置失敗時，先建一個不帶詞包的引擎判斷是不是詞包的錯（只有一個啟用的詞包檔案在時沒有「少一個」可試，這個引擎成功就直接留下，`docs/spec/lexicon-and-packs.md` §4.3）；是，就對每個啟用中、檔案也在的詞包依設定順序各試「少這一個」，第一個成功的留下，其餘詞包照開；都不行就建不帶詞包的引擎。偏好值不動，也不顯示錯誤，下一次重建會再試。連不帶詞包的引擎都建不出來時記兩個回傳碼，結束。同步與背景兩條路徑用同一份退讓程式（`PackBuild.run`）。
 - 引擎建不出來：同步建置之後沒有引擎，所有按鍵直通（`Session.handle` 回傳 `false`）；詞包切換的背景建置建不出來則留在現行引擎（見下）。載入 LM 失敗：沒有 LM 的引擎仍可打字，只記回傳碼。
 - **切換詞包不卡**（`Shell.setAcgPack`、`setQuotePack`、`setItPack`、`setBeautyPack`、`setMemePack`）：值沒變什麼都不做；值變了就立刻改開關、寫入偏好、發 `didChangeSettings`，交給背景建置，馬上返回；不送出組字，現行引擎繼續處理按鍵。
@@ -130,7 +130,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - `modifiers`：bit0 Shift、bit1 Control、bit2 Option、bit3 Command、bit4 Caps Lock。
 - **表外的鍵**（數字鍵盤、功能鍵等）與 IMK 傳入的 `nil` 事件不送進核心：組字區有字時先 `finish(mode: 0)` 送出，再回傳「不處理」；組字區空時直接回傳「不處理」。
 - **例外：Page Up／Down**。`KeyMap.pageKeys` 把 `kVK_PageUp`（116）、`kVK_PageDown`（121）對到 14／15，但 `KeyMap.translate` 不含它們；`Session.handle` 只在直排候選窗開著（最後套用的輸出 `candidate_vertical` 為 1）而且沒有任何修飾鍵（Shift、Control、Option、Command、Caps Lock）時才轉送，其餘情況（橫排候選、網格、組字中、未完成音節、預測列、組字區空、帶修飾鍵）都走上一條的表外鍵路徑，行為和沒有這個功能時完全相同。核心收到 14／15 而當下不是直排候選窗時不處理、不改狀態、不送出（`handled` 0）。
-- 英文狀態（單按 Shift 切換）下組字區空時，按鍵直接交給 App，不經過核心（例外：「中英文之間自動加空格」開著時，漢字後面的第一個英數字由殼以 `insertText` 補空白送出，`docs/spec/english-mixed.md` §9「英數狀態」）；組字中且核心有影子時以 `event.characters` 產生字元鍵。例外是帶 Option 的字元鍵（規則 1o 的那些鍵）：字元用 `event.characters(byApplyingModifiers:)` 只套事件的 Shift 取（不用 `charactersIgnoringModifiers`，它在 Option 與 Shift 同時按著時不帶 Shift），組字區空時殼自己送出並吃掉這一鍵，組字中且核心有影子時當字元鍵送進核心，組字中而核心沒有影子時吃掉。見 `docs/spec/keys-and-composition.md` §9.2 與 `docs/spec/english-mixed.md`。
+- 英文狀態（單按 Shift 切換）下組字區空時，按鍵直接交給 App，不經過核心（例外：「中英文之間自動加空格」開著時，漢字後面的第一個英數字由殼以 `insertText` 補空白送出，`docs/spec/english-mixed.md` §9「英數狀態」）；組字中且核心的 ASCII 狀態可用時（標準排列、可省略韻母關，不看中英混打；殼的 `asciiOn`）以 `event.characters` 產生字元鍵。例外是帶 Option 的字元鍵（規則 1o 的那些鍵）：字元用 `event.characters(byApplyingModifiers:)` 只套事件的 Shift 取（不用 `charactersIgnoringModifiers`，它在 Option 與 Shift 同時按著時不帶 Shift），組字區空時殼自己送出並吃掉這一鍵，組字中且 ASCII 狀態可用時當字元鍵送進核心，組字中而 ASCII 狀態不可用時吃掉。見 `docs/spec/keys-and-composition.md` §9.2 與 `docs/spec/english-mixed.md`。
 - 中文狀態下帶 Option 的字元鍵照上面的表送進核心（`ch` 是鍵位不按 Shift 的字元，`modifiers` 帶 bit2，有 Shift 再帶 bit0），由核心的規則 1o 處理（`docs/spec/keys-and-composition.md` §4.1、§8.1）。
 - 按 Enter 時（候選窗沒開），送進核心前先讓畫面上的組字追上正在跑的語意校正（最多等 `ENTER_RERANK_WAIT_MS`），見 `docs/spec/semantic-rerank.md`。
 
@@ -425,8 +425,8 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 
 | 頁 | 區塊與項目 |
 |---|---|
-| 一般 | 「鍵盤」：鍵盤排列（標準／倚天）。「聊天／書面」：切換方式（依 App 自動／一律聊天／一律書面）、灰色說明、「個別設定的 App」清單 |
-| 選字 | 「選字」：即時預測、在瀏覽器裡第一個字不顯示預測（預測關時反灰）、可省略韻母（`showsAbbreviation` 為 false 時不顯示）、中英混打（實驗）與其說明、快打時鍵序顛倒不當英文、依按鍵順序判斷英文、重打同一個位置算英文（各附說明；三個選項在中英混打關閉或倚天排列時都反灰，「快打時鍵序顛倒不當英文」另在「依按鍵順序判斷英文」關閉時反灰，設定值仍顯示）、單按 Shift 切換中英、中英文之間自動加空格、避免把敏感字詞排在前面、語意校正與「強度」（保守／標準／積極的分段控制，隨語意校正與載入的模型反灰）。「詞包」：動漫與遊戲詞（下一行灰字「資料更新至 YYYY-MM-DD（維基百科）」）、經典台詞、資訊與 AI 詞、美妝與保養詞、迷因與實況用語；所有詞包的開關只在這裡。「模糊輸入」：四個音對（ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ）與「鄰鍵打錯」（倚天排列時反灰，值保留）及一段說明 |
+| 一般 | 「鍵盤」：鍵盤排列（標準／倚天）、標點排列（macOS 注音／小麥注音，原生 `Picker`，偏好鍵 `punctLayout`，`docs/spec/keys-and-composition.md` §8.1；改了下一個鍵就生效）。「聊天／書面」：切換方式（依 App 自動／一律聊天／一律書面）、灰色說明、「個別設定的 App」清單 |
+| 選字 | 「選字」：即時預測、在瀏覽器裡第一個字不顯示預測（預測關時反灰）、可省略韻母（`showsAbbreviation` 為 false 時不顯示）、中英混打（實驗）與其說明、快打時鍵序顛倒不當英文、依按鍵順序判斷英文、重打同一個位置算英文（各附說明；三個選項在中英混打關閉或倚天排列時都反灰，「快打時鍵序顛倒不當英文」另在「依按鍵順序判斷英文」關閉時反灰，設定值仍顯示）、單按 Shift 切換中英、用哪一側的 Shift（左右都可／只有右邊／只有左邊，原生 `Picker`，偏好鍵 `shiftSide`，總開關關著時反灰，`docs/spec/keys-and-composition.md` §9.1）、中英文之間自動加空格、避免把敏感字詞排在前面、語意校正與「強度」（保守／標準／積極的分段控制，隨語意校正與載入的模型反灰）。「詞包」：動漫與遊戲詞（下一行灰字「資料更新至 YYYY-MM-DD（維基百科）」）、經典台詞、資訊與 AI 詞、美妝與保養詞、迷因與實況用語；所有詞包的開關只在這裡。「模糊輸入」：四個音對（ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ）與「鄰鍵打錯」（倚天排列時反灰，值保留）及一段說明 |
 | 外觀 | 候選窗方向（橫排／直排的分段控制）、候選窗玻璃深淺（滑桿，兩端是裝飾用的圖示 `rectangle.on.rectangle`（中空）與 `rectangle.fill.on.rectangle.fill`（實心），放在滑桿兩旁的 `HStack`，VoiceOver 不讀，滑桿本身帶標籤；放在 `Slider` 自己的兩端標籤時兩個在分組的 `Form` 裡都變實心）、範例候選列預覽 |
 | 選字記憶 | 狀態列（學習已暫停（安全輸入）、選字記憶無法存檔）、不要備份選字記憶、清除選字記憶…（走和選單相同的確認視窗） |
 | 診斷 | 「記錄偶發問題的診斷資料」開關與說明、「複製診斷紀錄…」（見 §13.3） |
@@ -486,7 +486,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 | `ascii` | `pushAscii` 真的改了狀態；`applyShiftToggle` 關掉開關、沒有擁有者時直接改 `engineAscii` 的那一支 | bundle ID（session 的 `knownBundle`；沒有擁有者時 `-`）、新狀態 |
 | `flags` | 緊接在同一次 `deactivate` 那一行之後、同一個時刻；只在這個 session 有一段沒作廢的區間、系統的修飾鍵事件數有增加時記（見下面「`flags`」） | bundle ID（同 `deactivate` 那一行：session 記住的 `bundle`）、`all`／`some`／`none` |
 
-`ShiftTap.Outcome`：`toggled`，或不算的原因，每條退出路徑一個值。放開時依序判斷，幾個同時成立時取第一個：(1) 沒看到按下（`noPress`）；(2) 放開的是另一側的鍵（`otherKeyReleased`）；(3) 按下時記下的原因：其他修飾鍵（`modifierAtPress`）先於 Caps Lock（`capsLockAtPress`）；(4) 按下之後另一個修飾鍵動了（`modifierBetween`，只在按下時沒有原因時記）；(5) 另一側 Shift 的狀態和按下時不同（`otherSideChanged`）；(6) Control／Option／Command／Fn 按著（`modifierAtRelease`）；(7) Caps Lock 開著（`capsLockAtRelease`）；(8) 超過 `SHIFT_TAP_MAX`（`tooLong`）；(9) 之間有滑鼠按鍵（`mouse`）。沒看到按下是 `ShiftTap` 被重設，或啟用時 Shift 已按著；兩個 Shift 先後按下時第二次按下取代第一次的紀錄，結果是 `otherKeyReleased` 再 `noPress`。被 `keyDown` 打斷優先於任何原因：打斷了就不記。切換與否和加紀錄之前完全相同（「打過鍵」的標記只決定記不記，不影響切換）。
+`ShiftTap.Outcome`：`toggled`，或不算的原因，每條退出路徑一個值。放開時依序判斷，幾個同時成立時取第一個：(1) 沒看到按下（`noPress`）；(2) 放開的是另一側的鍵（`otherKeyReleased`）；(3) 按下時記下的原因：其他修飾鍵（`modifierAtPress`）先於 Caps Lock（`capsLockAtPress`）；(4) 按下之後另一個修飾鍵動了（`modifierBetween`，只在按下時沒有原因時記）；(5) 另一側 Shift 的狀態和按下時不同（`otherSideChanged`）；(6) Control／Option／Command／Fn 按著（`modifierAtRelease`）；(7) Caps Lock 開著（`capsLockAtRelease`）；(8) 超過 `SHIFT_TAP_MAX`（`tooLong`）；(9) 之間有滑鼠按鍵（`mouse`）；(10) 以上都不成立、原本會切換，但放開的不是「用哪一側的 Shift」選定的那一側（`wrongSide`，取代 `toggled`）。沒看到按下是 `ShiftTap` 被重設，或啟用時 Shift 已按著；兩個 Shift 先後按下時第二次按下取代第一次的紀錄，結果是 `otherKeyReleased` 再 `noPress`。被 `keyDown` 打斷優先於任何原因：打斷了就不記。切換與否和加紀錄之前完全相同（「打過鍵」的標記只決定記不記，不影響切換）。
 
 **`flags`：修飾鍵事件有沒有送到輸入法。** 單按 Shift 完全沒反應時，上面的事件一筆都沒有，分不出是輸入法沒收到那次 Shift，還是收到了卻走了不留紀錄的路徑；`flags` 把系統的 `flagsChanged` 累計數和輸入法收到的數量比成三個值。
 

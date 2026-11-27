@@ -151,7 +151,9 @@
 | `set_prediction` | 1 |
 | `set_candidate_vertical` | 0（橫排） |
 | `set_key_scheme` | 0（現行規則；1 是微軟注音的按鍵習慣，只有 Windows 版的文字服務呼叫） |
+| `set_punct_layout` | 0（蘋果注音的標點鍵；1 是小麥注音的排列，`docs/spec/keys-and-composition.md` §8.1，只有 macOS 的殼呼叫） |
 | `set_abbreviation` | 0 |
+| `set_candidate_length_cap` | 0 |
 | `set_english` | 0 |
 | `set_english_overwrite` | 1 |
 | `set_english_key_order` | 1 |
@@ -194,7 +196,7 @@
   - 各族的碼：`child_lm`（`load_lm` 的碼 1、2、3，失敗時保留原本的模型，`reset` 保留模型與設定）、`rerank_codes_through_the_c_abi`（`load_tinylm`、`set_rerank`、take／run／apply 的所有 NULL 組合、沒有工作時 NULL、還沒 run 就 apply 回 5、同一個工作再 apply 回 5、apply 注入 panic 回 4、引擎釋放後工作仍可 run 與 free）、`r2_rerank_run_panic_is_silent`（第二次 run 在注入點 panic 回 4，不留結果，apply 回 5）、`rerank_level_through_the_c_abi`（強度的碼與遮罩）、`english_codes_through_the_c_abi`（含 `set_ascii`）、`fuzzy_codes_through_the_c_abi`、`candidate_vertical_through_the_c_abi`、`digits_through_the_c_abi`、`expand_and_pick_through_the_c_abi`。
 - **C 標頭冒煙測試**（`core/tests/c/abi_smoke.c`）：`cargo test` 只從 Rust 呼叫匯出函式，看不到標頭與 Rust 結構是否一致，所以要用 C 編譯器實際編譯、連結一次。驅動程式只 include `shanjie.h`，參數是資料目錄（第二個參數是語言模型路徑，第三個是學習資料夾）：
   - 兩種排列各做一次：`shanjie_engine_new` 回 0；依排列送出「你好」的按鍵（標準 `s u 3 c l 3`、倚天 `n e 3 h z 3`），每鍵都 `shanjie_output_free`；Enter 之後 `handled == 1`、`commit` 是「你好」、`preedit` 是空字串、`cursor_utf16 == 0`、`candidate_count == 0`、`candidates == NULL`、`candidate_selected == -1`；再送 `ㄋㄧˇ` 和空白鍵，候選已開（`candidate_count` 在 1–9、`candidates[0]` 不是 NULL、`candidate_selected == 0`）；`shanjie_engine_reset(e, 1, &o)` 之後 `commit`、`preedit` 都是空字串；`shanjie_engine_free(e)`，最後對 `shanjie_engine_free(NULL)`、`shanjie_output_free(NULL)` 各呼叫一次。
-  - 有語言模型的檢查（編號 301–317：`load_lm`、`set_profile`、`reset` 保留模型）、選字記憶（518–521，要第三個參數）、重排（901–918：沒有 n-gram 時 `load_tinylm` 回 3、NULL 回 1、不存在的檔案回 3；`rerank_free(NULL)`）、強度（951–960）、常談表（961–963）、模糊輸入（1101–1107：位元超出回 2 且 `*out` 為 NULL）、共用部分（1201–1215：沒有模型時 `share` 回 3、NULL 回 1、`new_shared` 的碼 1 與 2 且 `*out` 為 NULL、來源引擎釋放後建出的引擎打得出「你好」、詞包檔不存在時照樣建成、`shared_free(NULL)`）。
+  - 有語言模型的檢查（編號 301–317：`load_lm`、`set_profile`、`reset` 保留模型；820–826、860–867：`set_abbreviation` 與 `set_candidate_length_cap` 的回傳碼及預測列重算）、選字記憶（518–521，要第三個參數）、重排（901–918：沒有 n-gram 時 `load_tinylm` 回 3、NULL 回 1、不存在的檔案回 3；`rerank_free(NULL)`）、強度（951–960）、常談表（961–963）、模糊輸入（1101–1107：位元超出回 2 且 `*out` 為 NULL）、共用部分（1201–1215：沒有模型時 `share` 回 3、NULL 回 1、`new_shared` 的碼 1 與 2 且 `*out` 為 NULL、來源引擎釋放後建出的引擎打得出「你好」、詞包檔不存在時照樣建成、`shared_free(NULL)`）。
   - 全部通過時 exit 0；任何一項不符時只印項目編號（不印任何字串內容）並 exit 1。
   - 指令（repo 根目錄，`$T` 是暫存目錄；CI 在 macOS runner 上做同樣的事，另加 `--locked`，並先檢查擷取的連結參數不是空的，因為 macOS 的 `cc` 不帶這些旗標也能連結）：
 

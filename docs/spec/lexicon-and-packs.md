@@ -108,10 +108,11 @@
 
 上面兩條之後，產生的列（維基來源、`萌典補詞`、`lexgap`）再過兩道，被拿掉的詞每一列都拿掉（含變調列）：
 
-- **整詞的簡體寫法**（`phrase_twin`）：詞整個是簡繁詞組表（OpenCC `STPhrases` 加 `tw-conv.tsv` 選定的值）的鍵、值是另一個寫法、那個寫法在基底，而且詞不是萌典詞目，就拿掉（松散→鬆散、取舍→取捨、船只→船隻）；記進 `overlay-removed.tsv`。上一條的簡體判斷（`is_simplified`）只數簡體專用字與標記字，這些詞的每個字台灣也用，句子判成繁體，詞組表就沒被查到。只查整詞的鍵（最長比對會把「花卷市」改成「花捲市」）；目標只在疊加層、不在基底的不動。
-- **審過的錯字寫法**（`data/lexicon/overlay-drop.tsv`，CC0）：每列 `詞<TAB>基底的正確寫法<TAB>備註`，`#` 與空行略過；詞不能在基底、正確寫法要在基底、同一個詞只能一列，不符就中止並指出行號。清單裡的詞不寫，記進 `overlay-variant-removed.tsv`。錯字寫法沒有表可查（「好高鶩遠」的「鶩」與「騖」不是異體字，讀音又和基底的「好高騖遠」不同列），所以是清單，不是規則。
+- **整詞的簡體寫法**（`phrase_twin`）：詞整個是簡繁詞組表（OpenCC `STPhrases` 加 `tw-conv.tsv` 選定的值）的鍵、值是另一個寫法、那個寫法在基底、詞不是萌典詞目，而且不在例外清單 `data/lexicon/overlay-twin-keep.tsv`（見下）裡，就拿掉（松散→鬆散、取舍→取捨、船只→船隻，不論該列讀音）；記進 `overlay-removed.tsv`。上一條的簡體判斷（`is_simplified`）只數簡體專用字與標記字，這些詞的每個字台灣也用，句子判成繁體，詞組表就沒被查到；它們常因單字猜音而與基底目標不同調，所以不以讀音過濾，改由例外清單保住與目標寫法不同義的台灣正常寫法。只查整詞的鍵（最長比對會把「花卷市」改成「花捲市」）；目標只在疊加層、不在基底的不動。
+  - **台灣正常寫法例外清單**（`data/lexicon/overlay-twin-keep.tsv`，CC0，`twin_keep_list`）：每列 `詞<TAB>讀音<TAB>理由`，讀音音節以空白分隔，`#` 與空行略過，檔案不存在時為空表；詞須為 2 字以上純漢字、不在基底、不重複，讀音音節數等於字數且每個音節基底都有、理由非空，不符就中止並指出行號。清單裡的詞即使在簡繁詞組表裡也不拿掉（目前收錄「系上」ㄒㄧˋ ㄕㄤˋ、「挨到」ㄞ ㄉㄠˋ，與基底目標「繫上」「捱到」不同義）。
+- **審過的移除清單**（`data/lexicon/overlay-drop.tsv`，CC0）：每列 `詞<TAB>基底的正確寫法或 -<TAB>備註`，`#` 與空行略過；詞不能為空、不能含前後空白、不能為 `-`、不能在基底，同一個詞只能一列；第 2 欄若是同義同詞的基底正確寫法須在基底詞表內（如 `好高鶩遠→好高騖遠`、`羅嗦→囉嗦`），無單一基底正確寫法者（如罕用古詞、誤配讀音、非台用法或單純同音碰撞）填 `-`；第 3 欄備註不能空白；任一不符就中止並指出行號。清單裡的詞每一列（含變調與輕聲列）都不寫，完整建置時記進 `overlay-variant-removed.tsv`（落點欄記第 2 欄的基底詞或 `-`）。這類詞沒有單一字形對照表可查（「好高鶩遠」的「鶩」與「騖」不是異體字，讀音又和基底不同列；誤讀或罕用詞也沒有一般字表規則），所以是審過的清單，不是規則。
 
-`--tails-only` 也套用清單（清單在 repo 裡，不必有 dump）；`--tails-only --refilter` 另外把整詞的簡體寫法規則套到留著的列（要 OpenCC 表與 `SHANJIE_MOEDICT`，缺了就中止），給沒有 dump 的機器用。測試：`tools/test_build_overlay.py` 的 `LateRemovals`（真值表、清單格式、完整建置兩道都走、已提交的檔裡沒有清單的詞；有 OpenCC 表與萌典的機器另外核對已提交的檔沒有任何一列會被整詞規則拿掉，沒有時印 NOTE）。
+`--tails-only` 也套用清單（清單在 repo 裡，不必有 dump，重跑冪等）；`--tails-only --refilter` 另外把整詞的簡體寫法規則（含例外清單 `overlay-twin-keep.tsv`）套到留著的列（呼叫 `build_counts.load_conv()` 與 `moe_titles()`，要 OpenCC 表、`tw-clean` 表或 `SHANJIE_TW_CLEAN=off`（`docs/spec/models.md` §9.8）以及 `SHANJIE_MOEDICT`，缺了就中止），給沒有 dump 的機器用。`load_conv()` 載入轉換表時會同時讀取並核對 `tw-clean` 的雜湊（`docs/spec/models.md` §9.8）：只要 `data/lexicon/tw-conv.tsv` 改過、而本機留著尚未重建的真實 `tw-clean` 表，`build_overlay.py --tails-only --refilter`（以及 `build_names.py`、`build_english.py`、`build_digits.py`、`holdout_guard.py` 等其他 `load_conv()` 呼叫者）會在 `tw-conv.tsv` 雜湊不符時中止；在 `tw-clean` 重建之前須先設 `SHANJIE_TW_CLEAN=off`。測試：`tools/test_build_overlay.py` 的 `LateRemovals`（真值表、`overlay-twin-keep.tsv` 與 `overlay-drop.tsv` 格式檢查與壞列中止、`prune`、`--tails-only` 冪等與 `--refilter`、完整建置兩道都走並遵守例外清單、已提交的檔裡沒有清單的詞且兩份清單無交集；有 OpenCC 表與萌典的機器另外核對已提交的檔沒有任何一列會被整詞規則拿掉，沒有時印 NOTE）與 `ShippedOverlay`。
 
 ### 2.4 讀音
 
@@ -156,7 +157,7 @@
 ### 2.10 網路用語（`data/lexicon/slang-add.tsv`）
 
 - 欄位：詞、讀音、來源，可選的第四欄「加分」；標籤 `slang`；CC BY-SA 4.0（來源見下）；是建置輸入，不隨 App 內附（內容已在 `overlay-add.tsv`）。
-- 建置（`tail_rows`）：接在手動詞後面，檢查規則同手動詞（詞也不能是手動詞、名單層或任何詞包（`data/packs/*-add.tsv`）的詞），分數 = `length_scores` + `MANUAL_BONUS` + 加分。沒有這個檔時輸出與沒有網路用語的疊加層逐位元組相同。
+- 建置（`tail_rows`）：接在手動詞後面，檢查規則同手動詞（詞也不能是手動詞、名單層或任何詞包（`data/packs/*-add.tsv`）的詞），分數 = `length_scores` + `MANUAL_BONUS` + 加分。沒有這個檔時輸出與沒有網路用語的疊加層逐位元組相同。只改檔尾時可用 `build_overlay.py --tails-only` 重產；若同時帶 `--refilter` 或跑完整建置（及 `build_names.py`、`build_english.py`、`build_digits.py`、`holdout_guard.py` 等其他 `build_counts.load_conv()` 呼叫者），在 `data/lexicon/tw-conv.tsv` 異動後而本機的真實 `tw-clean` 表尚未重建前，須先設 `SHANJIE_TW_CLEAN=off`，否則會因 `tw-conv.tsv` 雜湊不符而中止（§2.3、`docs/spec/models.md` §9.8）。
 - 同一個讀音有好幾個網路用語時，檔案裡排前面的留第一，同讀音第 k 個（k 從 0 起）的列再扣 k × `SLANG_BEHIND`（1.0），只當候選；所以檔案順序有意義，新增詞要插在對的位置（用量多的在前）。
 - 加分：只能放在同讀音的第一列，必須是 0.5 的倍數且 0 < 加分 ≤ `BOOST_MAX`（3.0）；放在被扣分的列上會讓它與第一名打平或超過，建置中止。用途：詞庫分數輸給「沒人這樣講的組合」時抬高。核心把模型看過的疊加層詞封頂在語料頻率，所以加分只對模型沒看過的詞有效。
 - 收錄準則（來源檔的內容準則，建置工具不檢查）：來源是公開維基與維基詞典的條目標題（CC BY-SA 4.0）、網路社群百科的條目標題（Fandom，文字 CC BY-SA 3.0，依後續版本條款以 4.0 散布）、外部語言模型建議的字串（只取字串）、人工補的詞（CC0）；只取詞的字串，不取解釋文字。台灣公開論壇的文章與推文用量只用來確認收錄與排序，只取詞的字串與計數、不含原文：直接從語料挖出的字串要分區 ≥ 3、文章 ≥ 10，人或模型挑過的候選要分區 ≥ 2、文章 ≥ 3（最早一批較嚴：分區 ≥ 5、文章 ≥ 20）。只收台灣在用的說法，不收只在中國大陸用的、人名與網名（歸名單層）、有明確單一出處的台詞（歸經典台詞詞包）。同音時，原本的第一名（X）的文章數 ≥ 候選就不收（文章數多的留第一）；X 是沒人這樣講的組合時才在第四欄加分。挖掘與分類的腳本不隨 repo 散布，`slang-add.tsv` 是人工審過、提交進 repo 的輸入。
@@ -166,7 +167,7 @@
 
 - `python3 tools/build_overlay.py`：產生並寫入（需要 dump；萌典補詞需要 `--moedict-supplement` 給語料檔；§2.7、§2.8 與 `--lexgap`（§2.1）的旗標預設關，不帶旗標的輸出只含維基來源的列，所以和含 `萌典補詞` 列的提交檔不同）。
 - `python3 tools/build_overlay.py --check`：重新產生並與提交的檔案比對（旗標要和建出提交檔的那一組相同）；不同 exit 1。
-- `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang`、`colloq` 的列，重算 `colloq` 列（`docs/spec/decoder.md` §8.7，接在產生的列之後）與檔尾；改了手動詞、網路用語或 `overlay-drop.tsv` 時用（`--refilter` 見 §2.3）。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
+- `python3 tools/build_overlay.py --tails-only`：不讀 dump，保留 `overlay-add.tsv` 中標籤不是 `manual`、`slang`、`colloq` 的列，重算 `colloq` 列（`docs/spec/decoder.md` §8.7，接在產生的列之後）與檔尾；改了手動詞、網路用語或 `overlay-drop.tsv` 時用（`--refilter` 及 `tw-conv.tsv` 異動後未重建 `tw-clean` 須設 `SHANJIE_TW_CLEAN=off` 見 §2.3 與 `docs/spec/models.md` §9.8）。不能和 `--lexgap` 一起用（`lexgap` 的列要完整建置才能核對；一起給、或 `--lexgap` 給空字串，都是用法錯誤、exit 2）。
 - 沒有 dump 的機器：`tools/test_build_overlay.py` 核對檔尾、粵語詞與各旗標的行為（`make test-python` 與 CI 的「Overlay manual words and readings」步驟都跑）。
 
 ### 2.12 重排保護詞（`data/lexicon/rerank-protect.tsv`）

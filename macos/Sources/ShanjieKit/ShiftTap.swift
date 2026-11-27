@@ -2,7 +2,7 @@ import Foundation
 
 /// docs/spec/keys-and-composition.md §9.1: whether a Shift press and release was a lone tap. No AppKit: the tests feed it events.
 ///
-/// A tap is a Shift (left or right) that went down with no other modifier and Caps Lock off, and came up with no key pressed, no other
+/// A tap is a Shift (left or right; `side` says which of them switches) that went down with no other modifier and Caps Lock off, and came up with no key pressed, no other
 /// modifier used, no change of the other Shift's bit and no mouse button pressed in between, within `ShiftTap.SHIFT_TAP_MAX`.
 public struct ShiftTap {
     /// SHIFT_TAP_MAX: the longest press that still counts as a tap. There is no reference measurement of it (neither Windows' Microsoft
@@ -12,6 +12,25 @@ public struct ShiftTap {
 
     /// kVK_Shift, kVK_RightShift.
     static let shiftKeys: Set<UInt16> = [56, 60]
+
+    /// Which Shift key's lone tap switches (docs/spec/keys-and-composition.md §9.1, the 用哪一側的 Shift choice); the raw value is the stored preference.
+    public enum Side: String, CaseIterable, Sendable {
+        case both, right, left
+
+        /// The stored preference: absent or unknown is `both`.
+        public init(stored: String?) { self = stored.flatMap(Side.init(rawValue:)) ?? .both }
+
+        func takes(_ keyCode: UInt16) -> Bool {
+            switch self {
+            case .both: return true
+            case .left: return keyCode == 56
+            case .right: return keyCode == 60
+            }
+        }
+    }
+
+    /// The side whose tap switches. The other side is tracked all the same (its bit, its press); only its release never switches.
+    public var side = Side.both
 
     /// What a Shift release was (docs/spec/macos-shell.md §13.1): `toggled`, or the one reason it was not a tap, one per exit path.
     public enum Outcome: String, CaseIterable, Sendable {
@@ -25,6 +44,8 @@ public struct ShiftTap {
         case noPress, otherKeyReleased
         /// At the release, with no flagsChanged of it in between: Control, Option, Command or Fn down; Caps Lock on.
         case modifierAtRelease, capsLockAtRelease
+        /// Every other reason passed (it would have been `toggled`), but the key released is not the chosen `side`.
+        case wrongSide
     }
 
     /// The Shift key now down, the time it went down, whether the other Shift's bit was set then, the first reason the press can no
@@ -39,7 +60,7 @@ public struct ShiftTap {
     /// side would keep it set for good. The toggle decision never reads it.
     private var typedSinceAllUp = false
 
-    public init() {}
+    public init(side: Side = .both) { self.side = side }
 
     /// A `keyDown` anywhere: Shift+letter, Shift+arrow and the like are not a tap. `shiftHeld`: the key's flags have Shift (a Shift held
     /// since before this tap saw its press).
@@ -98,6 +119,7 @@ public struct ShiftTap {
         if now - p.at > Self.SHIFT_TAP_MAX { return .tooLong }
         // A click since the press is `mouseAgo` seconds old at most `processedAt - p.at`; the event's own timestamps would miss a click
         // between a late-handled release and the release itself.
-        return mouseAgo() > processedAt - p.at ? .toggled : .mouse
+        guard mouseAgo() > processedAt - p.at else { return .mouse }
+        return side.takes(keyCode) ? .toggled : .wrongSide
     }
 }

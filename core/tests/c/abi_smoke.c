@@ -14,6 +14,13 @@ static int str_eq(const char *a, const char *b) {
   return *a == *b;
 }
 
+static int has_cand(const ShanjieOutput *o, const char *w) {
+  for (uint32_t i = 0; o && i < o->candidate_count; i++) {
+    if (str_eq(o->candidates[i], w)) return 1;
+  }
+  return 0;
+}
+
 static ShanjieKey ch_key(char c) { ShanjieKey k = {1u, (uint32_t)(unsigned char)c, 0u}; return k; }
 static ShanjieKey kind_key(uint32_t kind) { ShanjieKey k = {kind, 0u, 0u}; return k; }
 
@@ -247,12 +254,51 @@ static int run_lm(const char *dir, const char *lm, const char *missing) {
   o = 0;
   CHECK(854, shanjie_engine_set_key_scheme(e, 0, &o) == 0 && o != 0 && o->handled == 1);
   shanjie_output_free(o);
-  /* set_abbreviation (docs/spec/prediction.md §6): codes like set_prediction; with it on, s then t are two units (preedit ㄋㄔ), and turning it off drops them. */
+  /* set_punct_layout (docs/spec/keys-and-composition.md §8.1): codes like set_key_scheme; with 1 the ' key is U+3001. */
+  o = 0;
+  CHECK(860, shanjie_engine_set_punct_layout(0, 1, &o) == 1 && o == 0);
+  CHECK(861, shanjie_engine_set_punct_layout(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(862, shanjie_engine_set_punct_layout(e, 2, &o) == 2 && o == 0);
+  CHECK(863, shanjie_engine_set_punct_layout(e, 1, &o) == 0 && o != 0 && o->handled == 1 && str_eq(o->preedit, ""));
+  shanjie_output_free(o);
+  o = type_last(e, "'s"); /* the mark, then an unfinished syllable */
+  CHECK(864, o != 0 && str_eq(o->preedit, "\xe3\x80\x81\xe3\x84\x8b"));
+  shanjie_output_free(o);
+  /* reset mode 2 (docs/spec/keys-and-composition.md §7.2): the unfinished syllable goes and the rest is sent; mode 3 is refused. */
+  o = 0;
+  CHECK(865, shanjie_engine_reset(e, 2, &o) == 0 && o != 0 && str_eq(o->commit, "\xe3\x80\x81") && str_eq(o->preedit, ""));
+  shanjie_output_free(o);
+  o = &dummy;
+  CHECK(866, shanjie_engine_reset(e, 3, &o) == 2 && o == 0);
+  CHECK(867, shanjie_engine_set_punct_layout(e, 0, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  /* set_abbreviation / set_candidate_length_cap (docs/spec/prediction.md §3.3, §6, §7): codes like set_prediction; with abbreviation on, s then t are two units (preedit ㄋㄔ) and turning it off drops them; toggling candidate_length_cap recomputes the row. */
   o = 0;
   CHECK(820, shanjie_engine_set_abbreviation(0, 1, &o) == 1 && o == 0);
   CHECK(821, shanjie_engine_set_abbreviation(e, 1, 0) == 1);
   o = &dummy;
   CHECK(822, shanjie_engine_set_abbreviation(e, 2, &o) == 2 && o == 0);
+  o = &dummy;
+  CHECK(870, shanjie_engine_set_candidate_length_cap(0, 1, &o) == 1 && o == 0);
+  CHECK(871, shanjie_engine_set_candidate_length_cap(e, 1, 0) == 1);
+  o = &dummy;
+  CHECK(872, shanjie_engine_set_candidate_length_cap(e, 2, &o) == 2 && o == 0);
+  o = &dummy;
+  CHECK(873, shanjie_engine_set_candidate_length_cap(e, 0xffffffffu, &o) == 2 && o == 0);
+  o = type_last(e, "vu0"); /* ㄒㄧㄢ: cap 0 holds 現在 (\xe7\x8f\xbe\xe5\x9c\xa8), cap 1 keeps only 1-char words */
+  CHECK(874, o != 0 && has_cand(o, "\xe7\x8f\xbe\xe5\x9c\xa8"));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(875, shanjie_engine_set_candidate_length_cap(e, 1, &o) == 0 && o != 0 && o->candidate_count >= 1 && !has_cand(o, "\xe7\x8f\xbe\xe5\x9c\xa8"));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(876, shanjie_engine_set_candidate_length_cap(e, 0, &o) == 0 && o != 0 && has_cand(o, "\xe7\x8f\xbe\xe5\x9c\xa8"));
+  shanjie_output_free(o);
+  o = 0;
+  CHECK(877, shanjie_engine_reset(e, 1, &o) == 0 && o != 0);
+  shanjie_output_free(o);
+  o = 0;
   CHECK(823, shanjie_engine_set_abbreviation(e, 1, &o) == 0 && o != 0);
   shanjie_output_free(o);
   o = type_last(e, "st");

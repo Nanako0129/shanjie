@@ -2241,12 +2241,43 @@ fn abbreviation_needs_a_model_and_stops_at_the_unit_cap() {
     let mut e = Engine::with_lexicon(shared().lex.clone(), L);
     e.set_abbreviation(true).unwrap();
     assert_eq!(typ(&mut e, &[], "ㄋㄔ").preedit, "ㄔ");
-    // The cap: ten presses make ten units, the next ones replace the last unit.
+    // §1.1: ten units hit ABBR_MAX_UNITS; same-column and backward keys are eaten with composition and row unchanged,
+    // while a forward symbol into an empty column still joins the tenth unit.
     let mut e = abbr_engine("");
-    let o = send(&mut e, (0..12).map(|_| Key::ch('s', 0)).collect());
-    assert_eq!(o.preedit, "ㄋ".repeat(ABBR_MAX_UNITS));
-    let o = e.key(Key::ch('t', 0)).unwrap();
-    assert_eq!(o.preedit, format!("{}ㄔ", "ㄋ".repeat(ABBR_MAX_UNITS - 1)));
+    let ten = send(&mut e, (0..ABBR_MAX_UNITS).map(|_| Key::ch('u', 0)).collect()); // ten ㄧ (medial, col 1)
+    assert_eq!(ten.preedit, "ㄧ".repeat(ABBR_MAX_UNITS));
+    assert_eq!(e.pending_units(), vec!["ㄧ".to_string(); ABBR_MAX_UNITS]);
+    for c in ['u', 'e'] {
+        // 'u' (ㄧ, same col 1) and 'e' (ㄍ, backward col 0) would open an 11th unit -> eaten, unchanged.
+        let after = e.key(Key::ch(c, 0)).unwrap();
+        assert!(after == ten, "{c} eaten at ABBR_MAX_UNITS");
+        assert_eq!(e.pending_units(), vec!["ㄧ".to_string(); ABBR_MAX_UNITS]);
+    }
+    let joined = e.key(Key::ch('0', 0)).unwrap(); // '0' (ㄢ, col 2 > col 1): joins the 10th unit
+    assert_eq!(joined.preedit, format!("{}ㄧㄢ", "ㄧ".repeat(ABBR_MAX_UNITS - 1)));
+    let mut want = vec!["ㄧ".to_string(); ABBR_MAX_UNITS - 1];
+    want.push("ㄧㄢ".to_string());
+    assert_eq!(e.pending_units(), want);
+    // Backward key after ㄧㄢ at 10 units is also eaten.
+    let after_back = e.key(Key::ch('e', 0)).unwrap();
+    assert!(after_back == joined);
+    assert_eq!(e.pending_units(), want);
+
+    // MAX_SYLLABLES (128) cap: 126 completed syllables + 2 unfinished units == 128 -> backward key eaten;
+    // 127 completed syllables + 1 unfinished unit == 128 -> single unit follows ordinary replacement rule.
+    let mut e = abbr_engine("");
+    let prefix = vec!["ㄋㄧˇ"; MAX_SYLLABLES - 2];
+    let at_128 = typ(&mut e, &prefix, "ㄧㄍ");
+    assert_eq!(e.pending_units(), vec!["ㄧ", "ㄍ"]);
+    let eaten = e.key(Key::ch('s', 0)).unwrap(); // 's' (ㄋ, col 0 == col 0): eaten
+    assert!(eaten == at_128);
+    assert_eq!(e.pending_units(), vec!["ㄧ", "ㄍ"]);
+    let mut e = abbr_engine("");
+    let prefix_127 = vec!["ㄋㄧˇ"; MAX_SYLLABLES - 1];
+    typ(&mut e, &prefix_127, "ㄋ");
+    assert_eq!(e.pending_units(), vec!["ㄋ"]);
+    typ(&mut e, &[], "ㄔ"); // only 1 unit at 128: ordinary replacement
+    assert_eq!(e.pending_units(), vec!["ㄔ"]);
 }
 
 #[test]
@@ -2339,6 +2370,377 @@ fn abbreviation_picks_are_learned_like_prefix_picks_and_come_first_next_time() {
     e.set_left_context(A.0);
     let again = row(&typ(&mut e, &[], "ㄋㄔ"));
     assert_eq!(again[0], word, "{base:?} -> {again:?}");
+}
+
+#[test]
+fn abbreviation_cuts_follow_r3_and_match_64_cap() {
+    use core::predict::{abbr_column, abbr_cuts, ABBR_MAX_CUTS};
+    let s = shared();
+    let idx = s.capped.predict_index(&s.lm);
+    let cuts = |sym: &str, completed: usize| {
+        let chars: Vec<char> = sym.chars().collect();
+        abbr_cuts(&chars, completed, ABBR_MAX_UNITS, MAX_SYLLABLES, |c| idx.has_toneless_syllable(c))
+    };
+    let u = |t: &str| t.split(' ').map(String::from).collect::<Vec<_>>();
+
+    // §2.2: exact R3 cut lists and order for 西安 C, 得意 A, 一個 A, 腳 C.
+    assert_eq!(cuts("ㄒㄧㄢ", 0), (vec![u("ㄒㄧㄢ"), u("ㄒ ㄧ ㄢ")], false));
+    assert_eq!(cuts("ㄉㄧ", 0), (vec![u("ㄉㄧ"), u("ㄉ ㄧ")], false));
+    assert_eq!(cuts("ㄧㄍ", 0), (vec![u("ㄧ ㄍ")], false));
+    assert_eq!(cuts("ㄐㄧㄠ", 0), (vec![u("ㄐㄧㄠ"), u("ㄐ ㄧ ㄠ")], false));
+
+    // A forward 3-symbol run that is NOT a toneless syllable in Index::syls (ㄅㄩㄢ, ㄈㄩㄢ) keeps all 4 cuts.
+    for non_syl in ["ㄅㄩㄢ", "ㄈㄩㄢ"] {
+        let chars: Vec<char> = non_syl.chars().collect();
+        assert!(!idx.has_toneless_syllable(&chars), "{non_syl}");
+    }
+    assert_eq!(cuts("ㄅㄩㄢ", 0), (vec![u("ㄅㄩㄢ"), u("ㄅㄩ ㄢ"), u("ㄅ ㄩㄢ"), u("ㄅ ㄩ ㄢ")], false));
+
+    // Independent R3 reference (by unit end positions, as cli/src/main.rs does).
+    let ref_r3_cuts = |symbols: &[char]| -> (Vec<Vec<String>>, bool) {
+        let free = |i: usize| abbr_column(symbols[i]) > abbr_column(symbols[i - 1]);
+        let mut segs: Vec<(usize, usize)> = Vec::new();
+        let mut st = 0;
+        for i in 1..=symbols.len() {
+            if i == symbols.len() || !free(i) {
+                if i - st >= 3 && idx.has_toneless_syllable(&symbols[st..i]) {
+                    segs.push((st, i - st));
+                }
+                st = i;
+            }
+        }
+        let opt: Vec<usize> = (1..symbols.len()).rev().filter(|&i| free(i)).collect();
+        let forced = symbols.len() - 1 - opt.len();
+        let mut out: Vec<Vec<String>> = Vec::new();
+        for j in 0..=opt.len() {
+            if forced + 1 + j > ABBR_MAX_UNITS {
+                break;
+            }
+            let mut pick: Vec<usize> = (0..j).collect();
+            loop {
+                let mut cut: Vec<String> = Vec::new();
+                for (i, &c) in symbols.iter().enumerate() {
+                    if i == 0 || !free(i) || pick.iter().any(|&p| opt[p] == i) {
+                        cut.push(String::new());
+                    }
+                    cut.last_mut().unwrap().push(c);
+                }
+                let mut ends = Vec::with_capacity(cut.len());
+                let mut pos = 0;
+                for unit in &cut {
+                    pos += unit.chars().count();
+                    ends.push(pos);
+                }
+                let ok = segs.iter().all(|&(a, len)| {
+                    let n = ends.iter().filter(|&&p| a < p && p <= a + len).count();
+                    n == 1 || n == len
+                });
+                if ok {
+                    if out.len() == ABBR_MAX_CUTS {
+                        return (out, true);
+                    }
+                    out.push(cut);
+                }
+                let Some(t) = (0..j).rev().find(|&t| pick[t] != t + opt.len() - j) else { break };
+                pick[t] += 1;
+                for k in t + 1..j {
+                    pick[k] = pick[k - 1] + 1;
+                }
+            }
+        }
+        (out, false)
+    };
+
+    // Synthetic capped inputs: "ㄅㄩㄢ" x 4 and every line of eval/golden/abbr-time-keys-capped.txt hit 64 cuts with capped == true.
+    let capped_file = std::fs::read_to_string(root().join("eval/golden/abbr-time-keys-capped.txt")).unwrap();
+    let mut lines_checked = 0usize;
+    for line in std::iter::once("|ㄅㄩㄢㄅㄩㄢㄅㄩㄢㄅㄩㄢ").chain(capped_file.lines().filter(|l| !l.is_empty())) {
+        let sym = line.split_once('|').unwrap().1;
+        let (got, capped) = cuts(sym, 0);
+        let (want, want_capped) = ref_r3_cuts(&sym.chars().collect::<Vec<_>>());
+        assert!(capped && want_capped && got.len() == ABBR_MAX_CUTS, "{sym}");
+        assert_eq!(got, want, "{sym}");
+        lines_checked += 1;
+    }
+    assert!(lines_checked >= 2);
+
+    // R3 filters before the 64-cut cap: "ㄒㄧㄢ" x 4 has only 1 + 4 + 6 + 4 = 15 cuts within ABBR_MAX_UNITS = 10, not capped.
+    let four_xian = "ㄒㄧㄢ".repeat(4);
+    let (got_xian, cap_xian) = cuts(&four_xian, 0);
+    assert!(!cap_xian && got_xian.len() == 15);
+    assert_eq!((got_xian, cap_xian), ref_r3_cuts(&four_xian.chars().collect::<Vec<_>>()));
+
+    // MAX_SYLLABLES upper bound also filters before truncating: 2 slots left keeps ["ㄒㄧㄢ"] (1 unit) and drops ["ㄒ", "ㄧ", "ㄢ"] (3 units).
+    assert_eq!(cuts("ㄒㄧㄢ", MAX_SYLLABLES - 2), (vec![u("ㄒㄧㄢ")], false));
+}
+
+#[test]
+fn abbreviation_learned_pick_from_another_cut_keeps_its_weight() {
+    // Type ㄉ ㄧ: composer keeps a single unit ["ㄉㄧ"], while R3 also keeps the second cut ["ㄉ", "ㄧ"].
+    // "得意" (ㄉㄜˊ-ㄧˋ) cannot match ["ㄉㄧ"] in Mode::P and comes only from ["ㄉ", "ㄧ"] in Mode::PA.
+    let left = "覺得";
+    let mut e = learner_engine(Profile::Chat, None);
+    e.set_abbreviation(true).unwrap();
+    e.set_left_context(left);
+    let initial = row(&typ(&mut e, &[], "ㄉㄧ"));
+    assert_eq!(e.pending_units(), vec!["ㄉㄧ"]);
+    assert_ne!(initial.first().map(String::as_str), Some("得意"), "precondition: {initial:?}");
+    e.reset(ResetMode::Discard);
+    teach(&mut e, left, "ㄉㄜㄧ", "得意");
+    assert_eq!(e.learner().records().len(), 1);
+    assert_eq!(e.learner().records()[0].reading, vec!["ㄉㄜˊ", "ㄧˋ"]);
+    e.set_left_context(left);
+    let again = row(&typ(&mut e, &[], "ㄉㄧ"));
+    assert_eq!(e.pending_units(), vec!["ㄉㄧ"]);
+    assert_eq!(again[0], "得意", "{initial:?} -> {again:?}");
+    // Turning abbreviation off leaves only cut ["ㄉㄧ"], where "得意" cannot appear even with the record.
+    e.reset(ResetMode::Discard);
+    e.set_abbreviation(false).unwrap();
+    e.set_left_context(left);
+    let plain = row(&typ(&mut e, &[], "ㄉㄧ"));
+    assert!(!plain.contains(&"得意".to_string()), "{plain:?}");
+}
+
+#[test]
+fn abbreviation_single_cut_matches_plain_prediction_entry_for_entry() {
+    // §2.2: with abbreviation on, candidate length cap off, and only one cut, the prediction row equals the non-abbreviated row item for item:
+    // (1) typing a single symbol; (2) with completed syllables before cursor; (3) with learned records.
+    for with_learn in [false, true] {
+        let make = |abbr: bool| {
+            let mut e = if with_learn { learner_engine(Profile::Chat, None) } else { engine() };
+            if with_learn {
+                teach(&mut e, A.0, "ㄋ", "奶茶");
+                teach(&mut e, "我要", "ㄒ", "先");
+                e.reset(ResetMode::Discard);
+            }
+            e.set_abbreviation(abbr).unwrap();
+            e
+        };
+        for sym in ["ㄋ", "ㄒ", "ㄧ"] {
+            let (mut on, mut off) = (make(true), make(false));
+            on.set_left_context(A.0);
+            off.set_left_context(A.0);
+            assert_eq!(row(&typ(&mut on, &[], sym)), row(&typ(&mut off, &[], sym)), "sym={sym} learn={with_learn}");
+        }
+        for pend in ["ㄋ", "ㄒ"] {
+            let (mut on, mut off) = (make(true), make(false));
+            on.set_left_context(A.0);
+            off.set_left_context(A.0);
+            let r_on = row(&typ(&mut on, &["ㄋㄧˇ", "ㄏㄠˇ"], pend));
+            let r_off = row(&typ(&mut off, &["ㄋㄧˇ", "ㄏㄠˇ"], pend));
+            assert_eq!(r_on, r_off, "completed syls pend={pend} learn={with_learn}");
+        }
+    }
+}
+
+#[test]
+fn candidate_length_cap_covers_all_composition_branches_and_exemptions() {
+    use core::english_next::EnglishTable;
+
+    // 1. Abbr off, toneless ㄒㄧㄢ (1 unfinished unit -> cap 1): no >=2-char words.
+    let mut off = engine();
+    let r_off = row(&typ(&mut off, &[], "ㄒㄧㄢ"));
+    assert!(r_off.iter().any(|w| w.chars().count() >= 2), "precondition: cap off has multi-char completions: {r_off:?}");
+    let mut on = engine();
+    on.set_candidate_length_cap(true).unwrap();
+    let r_on = row(&typ(&mut on, &[], "ㄒㄧㄢ"));
+    assert!(!r_on.is_empty() && r_on.iter().all(|w| w.chars().count() <= 1), "{r_on:?}");
+
+    // 2. Abbr on, toneless ㄒㄧㄢ: R3 cuts are ㄒㄧㄢ (cap 1) and ㄒ/ㄧ/ㄢ (cap 3). No 2-char word ("西安" absent); any 3-char word comes from ㄒ/ㄧ/ㄢ.
+    let mut a_on = abbr_engine("");
+    a_on.set_candidate_length_cap(true).unwrap();
+    let r_xian = row(&typ(&mut a_on, &[], "ㄒㄧㄢ"));
+    assert!(!r_xian.is_empty(), "{r_xian:?}");
+    assert!(!r_xian.contains(&"西安".to_string()), "{r_xian:?}");
+    assert!(r_xian.iter().all(|w| w.chars().count() == 1 || w.chars().count() == 3), "only 1-char or 3-char words allowed: {r_xian:?}");
+    let s = shared();
+    let idx = s.capped.predict_index(&s.lm);
+    let v_bos = core::lm::history("", &s.lm);
+    let cut3_units: Vec<Unit> = ['ㄒ', 'ㄧ', 'ㄢ'].into_iter().map(|c| Unit { chars: vec![c], done: false, tone: None }).collect();
+    let cut3_words: Vec<String> =
+        predict(idx, &s.lm, s.lm.scoring(Profile::Chat), v_bos, &cut3_units, Mode::PA, usize::MAX).into_iter().filter(|x| x.0.chars().count() <= 3).map(|x| x.0).collect();
+    for w in r_xian.iter().filter(|w| w.chars().count() == 3) {
+        assert!(cut3_words.contains(w), "3-char word {w} must come from ㄒ/ㄧ/ㄢ");
+    }
+
+    // 3. Completed syllables only (abbr off): after ㄋㄧˇ -> all <= 1 char; after ㄋㄧˇ ㄏㄠˇ -> start 0 <= 2 chars, start 1 <= 1 char; cap off == baseline.
+    let mut e_cap = engine();
+    e_cap.set_candidate_length_cap(true).unwrap();
+    let r_ni = row(&typ(&mut e_cap, &["ㄋㄧˇ"], ""));
+    assert!(!r_ni.is_empty() && r_ni.iter().all(|w| w.chars().count() <= 1), "{r_ni:?}");
+    let mut e_nocap = engine();
+    let r_ni_off = row(&typ(&mut e_nocap, &["ㄋㄧˇ"], ""));
+    assert!(r_ni_off.iter().any(|w| w.chars().count() >= 2), "precondition: {r_ni_off:?}");
+
+    e_cap.reset(ResetMode::Discard);
+    let r_nihao = row(&typ(&mut e_cap, &["ㄋㄧˇ", "ㄏㄠˇ"], ""));
+    assert!(!r_nihao.is_empty(), "{r_nihao:?}");
+    for (idx_cand, w) in r_nihao.iter().enumerate() {
+        let mut probe = engine();
+        probe.set_candidate_length_cap(true).unwrap();
+        let before = typ(&mut probe, &["ㄋㄧˇ", "ㄏㄠˇ"], "").preedit;
+        assert_eq!(before.chars().count(), 2);
+        probe.key(kind(KeyKind::Tab)).unwrap();
+        for _ in 0..idx_cand {
+            probe.key(kind(KeyKind::Right)).unwrap();
+        }
+        let picked = probe.key(kind(KeyKind::Enter)).unwrap().preedit;
+        let start = picked.chars().count() - w.chars().count();
+        assert!(start <= 1, "unexpected start {start} for {w}");
+        assert!(w.chars().count() <= 2 - start, "start={start} word={w} exceeds {}", 2 - start);
+    }
+    let mut toggled_off = engine();
+    toggled_off.set_candidate_length_cap(true).unwrap();
+    toggled_off.set_candidate_length_cap(false).unwrap();
+    assert_eq!(row(&typ(&mut toggled_off, &["ㄋㄧˇ", "ㄏㄠˇ"], "")), slice_one(("", &[Syl("ㄋㄧˇ"), Syl("ㄏㄠˇ")], "")));
+
+    // 4. Multiple starts (abbr off): 2 completed syllables + 1 unfinished unit -> start 0 <= 3, start 1 <= 2, cursor (start 2) <= 1.
+    let mut seen_starts = std::collections::BTreeSet::new();
+    for (syls, pend) in [(&["ㄋㄧˇ", "ㄏㄠˇ"][..], "ㄇ"), (&["ㄨㄛˇ", "ㄏㄠˇ"][..], "ㄒ")] {
+        let mut m = engine();
+        m.set_candidate_length_cap(true).unwrap();
+        let r_multi = row(&typ(&mut m, syls, pend));
+        assert!(!r_multi.is_empty(), "{syls:?} {pend}");
+        for (idx_cand, w) in r_multi.iter().enumerate() {
+            let mut probe = engine();
+            probe.set_candidate_length_cap(true).unwrap();
+            typ(&mut probe, syls, pend);
+            probe.key(kind(KeyKind::Tab)).unwrap();
+            for _ in 0..idx_cand {
+                probe.key(kind(KeyKind::Right)).unwrap();
+            }
+            let picked = probe.key(kind(KeyKind::Enter)).unwrap().preedit;
+            let start = picked.chars().count() - w.chars().count();
+            assert!(start <= 2, "unexpected start {start} for {w}");
+            let cap_here = (2 - start) + 1;
+            assert!(w.chars().count() <= cap_here, "start={start} word={w} exceeds {cap_here}");
+            seen_starts.insert(start);
+        }
+    }
+    assert_eq!(seen_starts.into_iter().collect::<Vec<_>>(), vec![0, 1, 2], "all three starts 0, 1, 2 exercised");
+
+    // 5. Cut whose top-9 has multiple over-cap words still fills to 9 and equals the R3+lencap mix.
+    let u_xi = vec![Unit { chars: vec!['ㄒ', 'ㄧ'], done: false, tone: None }];
+    let raw_xi = predict(idx, &s.lm, s.lm.scoring(Profile::Chat), v_bos, &u_xi, Mode::P, 9);
+    assert!(raw_xi.iter().filter(|x| x.0.chars().count() > 1).count() >= 2, "precondition: >=2 over-cap words in top 9 of ㄒㄧ: {raw_xi:?}");
+    let mut e_fill = abbr_engine("");
+    e_fill.set_candidate_length_cap(true).unwrap();
+    let got_fill = row(&typ(&mut e_fill, &[], "ㄒㄧ"));
+    assert_eq!(got_fill.len(), 9, "still fills to 9 items: {got_fill:?}");
+    // Compute R3 + lencap mix directly from unlimited `predict` lists: cuts ["ㄒㄧ"] (cap 1) and ["ㄒ", "ㄧ"] (cap 2).
+    let cut_a: Vec<_> = predict(idx, &s.lm, s.lm.scoring(Profile::Chat), v_bos, &u_xi, Mode::P, usize::MAX)
+        .into_iter()
+        .filter(|x| x.0.chars().count() <= 1)
+        .collect();
+    let u_x_i = vec![Unit { chars: vec!['ㄒ'], done: false, tone: None }, Unit { chars: vec!['ㄧ'], done: false, tone: None }];
+    let cut_b: Vec<_> = predict(idx, &s.lm, s.lm.scoring(Profile::Chat), v_bos, &u_x_i, Mode::PA, usize::MAX)
+        .into_iter()
+        .filter(|x| x.0.chars().count() <= 2)
+        .collect();
+    let mut best: std::collections::HashMap<String, (f64, bool, Vec<String>)> = std::collections::HashMap::new();
+    for list in [&cut_a, &cut_b] {
+        for (w, sc, succ, rd) in list {
+            let better = |o: &(f64, bool, Vec<String>)| (*succ && !o.1) || (*succ == o.1 && *sc > o.0);
+            if best.get(w).is_none_or(better) {
+                best.insert(w.clone(), (*sc, *succ, rd.clone()));
+            }
+        }
+    }
+    let mut mixed: Vec<_> = best.into_iter().collect();
+    mixed.sort_by(|a, b| {
+        b.1.1
+            .cmp(&a.1.1)
+            .then(b.1.0.partial_cmp(&a.1.0).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| a.0.chars().count().cmp(&b.0.chars().count()))
+            .then_with(|| a.1.2.join("-").cmp(&b.1.2.join("-")))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    let want_fill: Vec<String> = mixed.into_iter().take(9).map(|(w, _)| w).collect();
+    assert_eq!(got_fill, want_fill);
+
+    // 6 & 7. Digits context: no unit -> identical to cap off; 1 unfinished unit ("3" + ㄍ) -> no >=2-char words.
+    let make_digit = |cap: bool| {
+        let mut e = engine();
+        e.set_digit_table(Some(digit_table()));
+        e.set_english(true).unwrap();
+        e.set_candidate_length_cap(cap).unwrap();
+        e
+    };
+    let (mut d_off, mut d_on) = (make_digit(false), make_digit(true));
+    let r_d_off = row(&d_off.key(Key::ch('3', 0)).unwrap());
+    let r_d_on = row(&d_on.key(Key::ch('3', 0)).unwrap());
+    assert!(!r_d_on.is_empty() && r_d_on == r_d_off, "digits with 0 units exempt from cap");
+    let g_key = Key::ch(L.key_of_symbol('ㄍ').unwrap(), 0);
+    let r_dg_on = row(&d_on.key(g_key).unwrap());
+    assert!(!r_dg_on.is_empty() && r_dg_on.iter().all(|w| w.chars().count() <= 1), "{r_dg_on:?}");
+
+    // 8. English word context: no unit -> identical to cap off (keeps 2-char "說明"); 1 unfinished unit (ㄕ) -> no >=2-char words.
+    let etable = Arc::new(EnglishTable::parse("E\tjoe\t200\nW\tjoe\t說明\t80\nW\tjoe\t說\t20\n").unwrap());
+    let make_en = |cap: bool| {
+        let mut e = engine();
+        e.set_english_next(Some(etable.clone()));
+        e.set_english(true).unwrap();
+        e.set_candidate_length_cap(cap).unwrap();
+        for ch in ['j', 'o', 'e'] {
+            e.key(Key::ch(ch, MOD_SHIFT)).unwrap();
+        }
+        e.key(kind(KeyKind::Space)).unwrap()
+    };
+    let (o_en_off, o_en_on) = (make_en(false), make_en(true));
+    assert!(row(&o_en_on).contains(&"說明".to_string()) && row(&o_en_on) == row(&o_en_off), "0-unit English follower row exempt");
+    let mut e_en_off = engine();
+    e_en_off.set_english_next(Some(etable.clone()));
+    e_en_off.set_english(true).unwrap();
+    for ch in ['j', 'o', 'e'] {
+        e_en_off.key(Key::ch(ch, MOD_SHIFT)).unwrap();
+    }
+    e_en_off.key(kind(KeyKind::Space)).unwrap();
+    let mut e_en_on = engine();
+    e_en_on.set_english_next(Some(etable));
+    e_en_on.set_english(true).unwrap();
+    e_en_on.set_candidate_length_cap(true).unwrap();
+    for ch in ['j', 'o', 'e'] {
+        e_en_on.key(Key::ch(ch, MOD_SHIFT)).unwrap();
+    }
+    e_en_on.key(kind(KeyKind::Space)).unwrap();
+    let sh_key = Key::ch(L.key_of_symbol('ㄕ').unwrap(), 0);
+    let r_esh_off = row(&e_en_off.key(sh_key).unwrap());
+    let r_esh_on = row(&e_en_on.key(sh_key).unwrap());
+    assert!(r_esh_off.contains(&"說明".to_string()));
+    assert!(!r_esh_on.is_empty() && r_esh_on.contains(&"說".to_string()) && r_esh_on.iter().all(|w| w.chars().count() <= 1), "{r_esh_on:?}");
+
+    // 9. Empty composition (after Enter commit): cap on == cap off.
+    let (mut c_off, mut c_on) = (engine(), engine());
+    c_on.set_candidate_length_cap(true).unwrap();
+    typ(&mut c_off, &["ㄋㄧˇ", "ㄏㄠˇ"], "");
+    typ(&mut c_on, &["ㄋㄧˇ", "ㄏㄠˇ"], "");
+    let after_off = c_off.key(kind(KeyKind::Enter)).unwrap();
+    let after_on = c_on.key(kind(KeyKind::Enter)).unwrap();
+    assert_eq!(row(&after_on), row(&after_off));
+}
+
+#[test]
+fn set_candidate_length_cap_recomputes_when_composing_and_remembers_otherwise() {
+    let mut e = engine();
+    // Empty composition: remembers setting, returns empty snapshot.
+    let snap_empty = e.set_candidate_length_cap(true).unwrap();
+    assert!(snap_empty.preedit.is_empty() && row(&snap_empty).is_empty());
+    let o_capped = typ(&mut e, &[], "ㄒㄧㄢ");
+    assert!(row(&o_capped).iter().all(|w| w.chars().count() <= 1));
+    // Non-empty composition with prediction on: toggling recomputes immediately in the returned snapshot.
+    let o_uncapped = e.set_candidate_length_cap(false).unwrap();
+    assert!(row(&o_uncapped).iter().any(|w| w.chars().count() >= 2));
+    let o_recapped = e.set_candidate_length_cap(true).unwrap();
+    assert_eq!(row(&o_recapped), row(&o_capped));
+
+    // With prediction off: remembers without recomputing; turning prediction back on uses the remembered cap.
+    let mut e2 = engine();
+    typ(&mut e2, &[], "ㄒㄧㄢ");
+    e2.set_prediction(false).unwrap();
+    let snap_off = e2.set_candidate_length_cap(true).unwrap();
+    assert!(row(&snap_off).is_empty());
+    let snap_back = e2.set_prediction(true).unwrap();
+    assert!(!row(&snap_back).is_empty() && row(&snap_back).iter().all(|w| w.chars().count() <= 1));
 }
 
 #[test]
