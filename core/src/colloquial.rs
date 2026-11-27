@@ -82,6 +82,11 @@ impl ColloquialTable {
         let n1 = (lm.total() + lm.identity().1 as u64) as f64;
         Ok(ColloquialTable { lm, n1 })
     }
+
+    #[cfg(test)]
+    pub(crate) fn is_mapped(&self) -> bool {
+        self.lm.is_mapped()
+    }
 }
 
 pub struct Colloquial {
@@ -397,5 +402,61 @@ mod tests {
             assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], cell, (0.3, 2.0, 0.25), &[], &[]), 0);
             assert_eq!(guarded_pick(&ng, &ll, &[0.0, f64::NAN], cell, (0.5, 2.0, 0.25), &[], &[]), 1, "the plain triple decides: gain 0.5 * 1.2 - 0.3 = 0.3");
         }
+    }
+
+    #[test]
+    fn colloquial_table_maps_sjlm() {
+        let mut model = b"SJLM0001".to_vec();
+        model.extend(4u32.to_le_bytes());
+        model.extend(10u64.to_le_bytes());
+        model.extend(4u64.to_le_bytes());
+        model.extend(0.75f64.to_le_bytes());
+        for w in ["<s>", "</s>", "你", "好"] {
+            model.extend((w.len() as u16).to_le_bytes());
+            model.extend(w.as_bytes());
+        }
+        for u in [0u64, 0, 6, 4] {
+            model.extend(u.to_le_bytes());
+        }
+        model.extend(2u32.to_le_bytes());
+        for c in [0u32, 2] {
+            model.extend(c.to_le_bytes());
+        }
+        for t in [5u64, 4] {
+            model.extend(t.to_le_bytes());
+        }
+        for o in [0u32, 2, 3] {
+            model.extend(o.to_le_bytes());
+        }
+        model.extend(3u32.to_le_bytes());
+        for n in [2u32, 3, 1] {
+            model.extend(n.to_le_bytes());
+        }
+        for c in [3u32, 2, 2] {
+            model.extend(c.to_le_bytes());
+        }
+
+        let dir = std::env::temp_dir().join(format!("shanjie-colloquial-mmap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("colloquial.sjlm");
+        std::fs::write(&path, &model).unwrap();
+
+        let table = ColloquialTable::load(&path).unwrap();
+        assert!(table.is_mapped(), "ColloquialTable::load must map .sjlm");
+        assert_eq!(table.n1, 15.0, "n1 = N + V + 1 = 10 + 4 + 1");
+
+        let mem_lm = Lm::parse(&model).unwrap();
+        let expected_n1 = (mem_lm.total() + mem_lm.identity().1 as u64) as f64;
+        assert_eq!(table.n1.to_bits(), expected_n1.to_bits());
+
+        let colloq = Colloquial::with_table(Arc::new(table), "ㄋㄧˇ 你 -1.0\nㄏㄠˇ 好 -2.0\n", std::io::empty(), None).unwrap();
+        let pb_ni = (mem_lm.count("你") + 1) as f64 / expected_n1;
+        let pb_hao = (mem_lm.count("好") + 1) as f64 / expected_n1;
+        let expected_lc = mem_lm.prob("<s>", "你", pb_ni).log10() + mem_lm.prob("你", "好", pb_hao).log10() + mem_lm.eos(1.0, "好");
+        assert_eq!(colloq.lc(&["你", "好"]).to_bits(), expected_lc.to_bits());
+
+        drop(colloq);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

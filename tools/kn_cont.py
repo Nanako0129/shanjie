@@ -67,7 +67,20 @@ def main():
     np1 = [x + 1 for x in struct.unpack_from(f"<{V}I", data, 64)]
     zero = sum(1 for x in np1[2:] if x == 1)
     print(f"theta={a.theta} beta={a.beta:g} V={V} N0_ratio={zero / (V - 2):.4f} sumN1={struct.unpack_from('<Q', data, 56)[0]} sha256={hashlib.sha256(data).hexdigest()}")
-    open(a.out, "wb").write(data)
+    # Temp file + rename: a core process may have the old kn.sjkn mapped, and rewriting it in place
+    # would corrupt or SIGBUS that mapping.
+    parent = os.path.dirname(a.out)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp = f"{a.out}.tmp{os.getpid()}"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, a.out)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 if __name__ == "__main__":

@@ -36,13 +36,13 @@
 - Windows 才需要的系統呼叫用 `windows-sys`（`core/Cargo.toml` 的 `[target."cfg(windows)".dependencies]`，版本 0.59，開 `Win32_Foundation`、`Win32_Storage_FileSystem`、`Win32_System_Memory`、`Win32_System_SystemInformation`、`Win32_System_IO`、`Win32_Security`）。`windows-sys` 之外沒有別的 Windows 專用相依。
 - 核心的測試在 macOS、x86_64 Linux 與 x86_64 Windows 上跑；i686 與 aarch64 的 Windows 目標只編譯、不測試（§2.9）。
 
-### 2.2 唯讀 mmap（trigram 表）
+### 2.2 唯讀 mmap（n-gram 模型與伴生表）
 
-`core/src/trigram.rs` 的 `Mapped::open` 有 Unix 與 Windows 兩個版本，語意相同：
+`core/src/trigram.rs` 的 `Mapped::open`（與共用列舉 `MappedBytes`）供通語／常談模型（`.sjlm`）、辨類（`classes.sjc`）、承接（`kn.sjkn`）與兩張 trigram 表（`trigram*.sjt3`）共用，有 Unix 與 Windows 兩個版本，語意相同：
 
-- 在同一個 handle 上驗證「是一般檔、不是空檔」，內容唯讀，失敗回 `Err(())`（呼叫端把它報成 trigram 表的載入錯誤，錯誤不帶內容，R2）。
-- Windows：用 std 的 `OpenOptions` 加 `share_mode(FILE_SHARE_READ)` 開檔（等於 `CreateFileW(GENERIC_READ, FILE_SHARE_READ)`），以 `meta.is_file()`、長度非 0 與 `GetFileType == FILE_TYPE_DISK` 拒絕目錄、裝置、管線與空檔，再 `CreateFileMappingW(PAGE_READONLY)` 與 `MapViewOfFile(FILE_MAP_READ)`；對映物件的 handle 立刻關掉，由 view 撐住 section，`Drop` 時 `UnmapViewOfFile`。
-- 平台差異：Windows 在 view 存在時不讓人刪除、截斷或以 rename 覆蓋該檔，卻擋不住別的程序之後以寫入開檔就地改位元組。所以「對映期間不就地改寫」仍是呼叫端的契約（`open` 是 `unsafe fn`）；更新檔案要等引擎放掉對映之後。
+- 在同一個 handle 上驗證「是一般檔（Windows 再驗 `FILE_TYPE_DISK`）、不是空檔、長度不超過 `isize::MAX`（以 `isize::try_from` 檢查，確保 32 位元 `i686` 目標也滿足 `slice::from_raw_parts` 前提）」，內容唯讀；失敗回 `MapError::Empty`（0 位元組一般檔）或 `MapError::Io`（缺檔、目錄、裝置、管線、超限或對映失敗；錯誤不帶內容，R2）。呼叫端依檔案各自保持原本的錯誤語意：`.sjlm` 與 `classes.sjc` 經 `map_or_empty` 把 `Empty` 轉為空緩衝交給解析器報 `LmError::Format`、`Io` 維持 `LmError::Io`，`kn.sjkn` 依存在檢查後報 `LmError::KnSide`，trigram 表報 `LmError::TriTable`。
+- Windows：用 std 的 `OpenOptions` 加 `share_mode(FILE_SHARE_READ)` 開檔（等於 `CreateFileW(GENERIC_READ, FILE_SHARE_READ)`），先以 `meta.is_file()` 與 `GetFileType == FILE_TYPE_DISK` 拒絕目錄、裝置、管線（避免 0 位元組特殊檔誤判為 `Empty`），再檢查長度非 0 與 `isize::try_from(meta.len())`，然後 `CreateFileMappingW(PAGE_READONLY)` 與 `MapViewOfFile(FILE_MAP_READ)`；對映物件的 handle 立刻關掉，由 view 撐住 section，`Drop` 時 `UnmapViewOfFile`。
+- 平台差異：Windows 在 view 存在時不讓人刪除、截斷或以 rename 覆蓋該檔，卻擋不住別的程序之後以寫入開檔就地改位元組。所以「對映期間不就地改寫」仍是呼叫端的契約（`open` 是 `unsafe fn`）；更新上述任一模型或伴生檔要等引擎放掉對映之後。
 
 ### 2.3 小模型與其他檔案讀取
 
@@ -63,10 +63,10 @@
 ### 2.6 測試的平台差異
 
 - 測 symlink 或 Unix 權限行為本身的測試標 `#[cfg(unix)]`（例如 `core/tests/learn_store.rs` 整檔、`ffi.rs` 與 `lm.rs` 的 symlink 步驟）。
-- 同一個測試只有幾步用 symlink 的，只把那幾步標 `#[cfg(unix)]`，其餘照跑：`lm::tests::load_opts_maps_the_trigram_table`（驗證 trigram 真的有 mmap、與讀進記憶體的分數逐位元相同、空檔／截斷／壞檔頭／目錄都拒絕）與 `ffi.rs` 的 `child_lm_tables`（損壞、截斷，懸空 symlink 只在 Unix）。
+- 同一個測試只有幾步用 symlink 的，只把那幾步標 `#[cfg(unix)]`，其餘照跑：`lm::tests::load_opts_maps_the_trigram_table`（驗證 trigram 真的有 mmap、與讀進記憶體的分數逐位元相同、空檔／截斷／壞檔頭／目錄都拒絕）、`lm::tests::load_opts_maps_all_ngram_files`（驗證 `.sjlm`、`classes.sjc`、`kn.sjkn` 與兩張 `trigram*.sjt3` 皆經 mmap 載入、逐位元一致與各類錯誤優先序；懸空 symlink 與 FIFO 步驟在 Unix，目錄與壞檔步驟各平台皆跑）、`core/tests/kn_tiny.rs` 的 `load_reads_the_side_file_beside_the_model`（懸空 symlink 步驟只在 Unix）與 `ffi.rs` 的 `child_lm_tables`（損壞、截斷，懸空 symlink 只在 Unix）。
 - 只拿 symlink 組模型資料夾的 fixture（`core/tests/common/toy.rs::lm_path` 等）有 `#[cfg(windows)]` 分支，改用 `fs::copy`；所以 engine_rerank、engine_fuzzy、engine_fuzzy_rerank 在 Windows 上照跑。
 - 會呼叫 `learning_open` 而且預期成功的測試（engine_learn、engine_newword、engine_predict、engine_english、engine_english_next、engine_fuzzy_rerank 裡的那些）在 Windows 一律 `#[cfg(unix)]`；`engine_learn.rs` 自己宣告的 `getrusage` 那段也是。
-- Windows 不能刪除或改寫正在被 mmap 的檔（Unix 可以）。三個測試在還持有 `Lm`／engine 時刪或改寫 trigram 表：`tri_tiny.rs` 的 `load_reads_each_profiles_table_beside_the_model`、`engine_lm.rs` 的 `load_lm_refuses_a_bad_trigram_table`、`ffi.rs` 的 `child_lm_tables`。處置：刪除或改寫之前，用只在 Windows 編譯的 `drop`（`#[cfg(windows)]`）放掉持有映射的物件，之後還要用到它的斷言在 Windows 上改成重新載入（`child_lm_tables` 另備一份沒被動過的複本資料夾載入引擎）。Unix 的行不動。
+- Windows 不能刪除或改寫正在被 mmap 的檔（Unix 可以）。在還持有 `Lm`／`Colloquial`／engine 時刪或改寫對映檔的測試：`tri_tiny.rs` 的 `load_reads_each_profiles_table_beside_the_model`、`core/tests/kn_tiny.rs` 的 `load_reads_the_side_file_beside_the_model`（刪除 `kn.sjkn` 前補 `#[cfg(windows)] drop(on);`）、`engine_lm.rs` 的 `load_lm_refuses_a_bad_trigram_table`、`ffi.rs` 的 `child_lm_tables`，以及 `lm::tests::load_opts_maps_all_ngram_files`（在刪除／覆寫側檔前明確 `drop(lm)`）與 `colloquial::tests::colloquial_table_maps_sjlm`（在 `remove_dir_all` 前 `drop(colloq)`）。處置：刪除或改寫之前放掉持有映射的物件（既有測試用只在 Windows 編譯的 `#[cfg(windows)] drop(...)`），之後還要用到它的斷言在 Windows 上改成重新載入（`child_lm_tables` 另備一份沒被動過的複本資料夾載入引擎）。Unix 的既有行不動。
 - f64 逐位元比對的 golden：`engine_digits.rs`、`pack_oov.rs` 與 `engine_auto_english.rs` 拿 macOS libm 的位元當答案，glibc 與 Windows 的 `log10` 在最後一位不同，所以跳過條件是 `!cfg!(target_vendor = "apple")`（Linux 照樣跳過；iOS 模擬器照樣比對）：`engine_digits.rs` 的三支與一個斷言、`pack_oov.rs`、`engine_auto_english.rs` 各一支。其他測試在 Windows 上的浮點不同一律視為缺陷，不改容差。
 
 ### 2.7 換行
@@ -111,7 +111,7 @@ Linux `debug` job 在既有步驟之後加三步：
 
 - Windows 沒有學習檔（§2.5）。
 - Windows 上的每鍵 p95 斷言沒有在 CI 驗證（§2.9 第 4 步）。
-- 對映中的 trigram 表不能被就地改寫（§2.2）；Windows 另外擋住刪除與 rename 覆蓋，更新模型檔要在引擎釋放之後。
+- 對映中的 n-gram 模型與伴生表（`.sjlm`、`classes.sjc`、`kn.sjkn`、`trigram*.sjt3`）不能被就地改寫（§2.2）；Windows 另外擋住刪除與 rename 覆蓋，更新這些模型檔要在引擎釋放之後。
 
 ## 3. TSF 文字服務（`windows/tip`）
 

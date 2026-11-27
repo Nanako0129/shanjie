@@ -46,8 +46,9 @@
  *    for both profiles; a missing one only turns that profile's trigram level off). Each profile scores with its own table
  *    and with kn.sjkn: the chat profile with the side file's beta, the formal profile with beta 0.75 (FORMAL_KN_BETA in
  *    core/src/lm.rs) whatever beta the file records. The prediction row and the digit scores use the profile's beta too and never a trigram table.
- *    The file is memory-mapped (docs/spec/decoder.md §3.5): while an engine has it loaded it must not be truncated or
- *    rewritten in place (a truncated page is a SIGBUS); replace it by rename, as the install paths do.
+ *    The model file (.sjlm), classes.sjc, kn.sjkn (when present) and the trigram tables (trigram.sjt3, trigram-chat.sjt3) are all
+ *    loaded as read-only memory maps (docs/spec/decoder.md §3.5): while an engine has them loaded they must not be truncated or
+ *    rewritten in place (a truncated page is a SIGBUS); replace them by rename, as the install paths do.
  *  - data_dir must hold names-add.tsv (the always-on common proper nouns, docs/spec/lexicon-and-packs.md §1.1, §3) next to overlay-add.tsv and
  *    sandhi-add.tsv: shanjie_engine_new / _new_packs read it into the lexicon and shanjie_engine_load_lm reads it again to cap
  *    its words like overlay-add.tsv's; missing or unreadable, either call fails with 3.
@@ -540,7 +541,9 @@ typedef struct ShanjieRerankJob ShanjieRerankJob;
 //   the n-gram keeps working. 1 for a NULL engine or path, 2 for a path that is not UTF-8. Does not change the rerank setting
 //   (set_rerank) or the current display.
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
-// load_colloquial: the colloquial table (colloquial.sjlm, docs/spec/semantic-rerank.md §4). The engine reads the word sets of its k term
+// load_colloquial: the colloquial table (colloquial.sjlm, docs/spec/semantic-rerank.md §4), loaded as a read-only memory map
+//   (docs/spec/decoder.md §3.5): while an engine has it loaded it must not be truncated or rewritten in place (replace by rename).
+//   The engine reads the word sets of its k term
 //   from the lexicon folder it was created with (mcbpmf-data.txt, overlay-add.tsv) and from the pack rows it was created with. May be
 //   called before or after load_lm and load_tinylm (the table does not depend on them). The term applies per job, only with the chat
 //   profile, at any of the three rerank strengths (each with its own alpha, tau and delta: docs/spec/semantic-rerank.md §4.4) and a small
@@ -589,8 +592,9 @@ int32_t shanjie_engine_rerank_apply(ShanjieEngine *engine, ShanjieRerankJob *job
 void    shanjie_rerank_free(ShanjieRerankJob *job);
 
 // Parts shared between engines (docs/spec/c-abi.md §5.4): a pack switch builds a new engine without reading the model files again.
-//   A ShanjieShared owns only data: the loaded n-gram model (the two trigram tables inside it are memory maps), the small model, the
-//   colloquial table, the digit table, the English follower table and the reading table when it can be reused (no enabled pack of
+//   A ShanjieShared owns only data: the loaded n-gram model (the .sjlm file, classes.sjc, kn.sjkn and the two trigram tables inside
+//   it are read-only memory maps), the small model, the colloquial table (its .sjlm file is a read-only memory map), the digit table,
+//   the English follower table and the reading table when it can be reused (no enabled pack of
 //   either engine holds a one-syllable reading), plus the data folder's path. No user input is in it (no left context, composition,
 //   candidates or choice memory). It borrows nothing from the engine, so it stays valid after the engine is freed, and it never changes.
 //   The path is never written to a log.

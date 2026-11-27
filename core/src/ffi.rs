@@ -460,6 +460,7 @@ pub unsafe extern "C" fn shanjie_engine_reset(
 /// ships one since model-v6; likewise the two optional trigram tables beside it, `trigram.sjt3` (the formal profile's) and `trigram-chat.sjt3` (the chat
 /// profile's), each a failure with code 3 when broken, both shipped by the app), reading `data_dir/overlay-add.tsv`, `names-add.tsv`, `demote.tsv`, `variant-order.tsv` and `std-exempt.tsv` (the reading term, docs/spec/decoder.md §5) again; any of them missing is code 3 (`rerank-protect.tsv` is read at engine creation only, docs/spec/lexicon-and-packs.md §2.12). Does not
 /// recompute the composition display. Any failure leaves the previous LM state (none or the old model).
+/// The `.sjlm` model, `classes.sjc`, `kn.sjkn` and the trigram tables are all mapped read-only (no in-place truncation or rewrite while loaded; replace by rename).
 ///
 /// # Safety
 /// `engine` is NULL or a live handle; `path` is NULL or a NUL-terminated string.
@@ -1240,6 +1241,8 @@ pub unsafe extern "C" fn shanjie_engine_load_tinylm(engine: *mut ShanjieEngine, 
     rc
 }
 
+/// Loads the colloquial table (`colloquial.sjlm`) as a read-only memory map (no in-place truncation or rewrite while loaded; replace by rename).
+///
 /// # Safety
 /// `engine` is NULL or a live handle; `path` is NULL or a NUL-terminated string.
 #[no_mangle]

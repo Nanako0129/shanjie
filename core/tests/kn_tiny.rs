@@ -191,6 +191,9 @@ fn load_reads_the_side_file_beside_the_model() {
     assert!(on.kn_tag(Profile::Chat).unwrap().starts_with("+kn:") && Lm::load_without_classes(&m).unwrap().kn_tag(Profile::Chat).is_some());
     assert!(Lm::load_with(&m, true, false).unwrap().kn_tag(Profile::Chat).is_none(), "--no-kn");
     assert_eq!(on.prob("占", "他", 0.1), lm_with(Some(&bytes("kn.sjkn")), true).unwrap().prob("占", "他", 0.1));
+    // Windows refuses to delete or rewrite a file that is still mapped: release the models that map it first (Unix does not need to).
+    #[cfg(windows)]
+    drop(on);
     std::fs::remove_file(tmp.join("kn.sjkn")).unwrap();
     // The dangling-symlink steps are Unix only (docs/spec/windows-tip.md §2.6).
     #[cfg(unix)]

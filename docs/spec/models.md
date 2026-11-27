@@ -80,7 +80,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 ### 2.2 載入規則
 
 - `shanjie_engine_load_lm`：`classes.sjc` 必須在模型旁邊，缺了或不符回 3；`kn.sjkn` 在模型旁邊就載入，沒有就關閉，存在但讀不了或不符回 3（不靜默略過，連指向不存在檔案的符號連結也算「存在」）；兩張連文表各自在模型旁邊找（書面 `trigram.sjt3`、聊天 `trigram-chat.sjt3`），沒有就只是那個設定不用連文，任何一張存在但壞掉回 3（兩個設定都載入失敗）。
-- 連文表以唯讀記憶體映射載入。載入期間檔案不能被原地截斷或改寫（會讀到映射之外的頁而 SIGBUS）；安裝路徑一律整個 bundle 以 rename 換掉。
+- 通語（`bigram.sjlm`）、辨類（`classes.sjc`）、承接（`kn.sjkn`）、兩張連文表（`trigram.sjt3`、`trigram-chat.sjt3`）與常談（`colloquial.sjlm`）皆以唯讀記憶體映射載入（`Mapped::open`）。載入期間這些檔案不能被原地截斷或改寫（會讀到映射之外的頁而 SIGBUS 或破壞已驗過的不變量）；建置工具（`build_lm.py`、`build_classes.py`、`kn_cont.py`、`build_trigram.py`）一律先寫暫存檔再以 `os.replace` 取代，安裝路徑一律整個 bundle 以 rename 換掉。
 - `shanjie_engine_load_tinylm`：要先有成功載入的通語；檔案必須是一般檔案、不超過 64 MiB、格式正確；通語雜湊與 KN 狀態要符合檔頭（§8.1）；失敗回 3，引擎保留原本的小模型（或沒有），n-gram 照常運作。
 - `shanjie_engine_load_colloquial`：把檔案當成純二元表讀（不載入旁邊的詞類表、KN、連文表）；讀不了或格式錯回 3。
 - 錯誤只帶種類，不帶任何內容。
@@ -117,6 +117,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 - 載入檢查：V ≥ 2、N ≠ 0、D 有限、`vocab[0]` 是 `<s>`、`vocab[1]` 是 `</s>`、其餘嚴格依位元組遞增、UTF-8 合法、沒有多餘位元組。
 - 載入時算出 `back(v) = 1 − Σ(count − D) / t`（依檔案順序加總後除一次）與 `p_eos = eos_total / N`；機率公式本身見 `docs/spec/decoder.md`。
 - 常談表（`colloquial.sjlm`）是同一種格式：一般的二元詞頻表，不用詞類、不用 KN，D 0.75，剪枝門檻 2，不綁通語。
+- 載入與寫檔：核心以唯讀 mmap 載入（`Lm::load_opts`／`ColloquialTable::load`），詞彙（`vocab_word`）、unigram、前文與後繼陣列（`LeU32Slice`）皆從映射頁就地讀取而不複製進 heap 陣列；`tools/build_lm.py` 先寫暫存檔再 `os.replace`。
 
 ### 3.2 辨類（`SJCL0001`）
 
@@ -134,7 +135,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 | Pc | f64[(K+3)²] | 列主序的 P(d｜c) = (M[c,d] + ε) ÷ (M[c].sum + (K+3)ε)，M 是全部（剪枝前）加權二元組的類別計數，ε = 0.1 |
 
 - 總長 = 8 + 32 + 4 + 8 + 4 + 10V + 8(K+3)²，長度不符、類別 id 超出範圍（≥ K+3 且不是 `0xFFFF`）、任何機率不在 [0, 1] 都是格式錯誤。
-- 有類別但不在通語詞彙裡的詞，只記錄數目，不套類別項。
+- 有類別但不在通語詞彙裡的詞，只記錄數目，不套類別項。核心同樣以唯讀 mmap 載入並就地讀取 `cls`、`emit`、`Pc`（不複製進 heap 陣列）；`tools/build_classes.py` 先寫暫存檔再 `os.replace`。
 
 ### 3.3 承接（`SJKN0002`）
 
@@ -152,7 +153,7 @@ App 內附的模型只有一份清單：`data/models.tsv`。每列 `檔名<TAB>S
 
 - 總長 = 64 + 4V。載入時全部符合才收：魔術字串、V 等於通語詞彙數、通語雜湊、長度、β ∈ [0, 1]、`0 < ΣN′`，且 ΣN′ 不小於最大的 N′ 也不大於 id ≥ 2 的 N′ 總和（N′ = N + 1）。
 - ΣN′ 是上游（Python，`lm.kn_total` 依 `build_lm.variant_classes` 與 `lm.kn_class_reps`）預先算好並寫入與核對檔頭的值：每個異體類依類 tuple 順序取第一個落在模型詞彙 `vocab`（id ≥ 2）裡的成員作為詞彙內代表，每類只算一次（與 `tools/kn_cont.py::continuation` 的 `once(v)` 一致）。這樣後續詞庫層（例如 `names-add.tsv`）加入排名更高的詞彙外 `MERGE` 異體詞時，既定異體類對 ΣN′ 的單次貢獻仍維持不變，不致掉成 0；同時若兩個本就在 `vocab` 裡的詞被新併類或既有類被漏算，ΣN′ 檔頭比對仍會失敗。Rust 核心（`core/src/lm.rs`）不在執行時計算異體類，只讀檔頭的 ΣN′、對詞彙內詞（id ≥ 2）直接索引 `N[id]`，詞彙外詞略過 KN（`pb = 10^lp`），與 Python `lm.py` 一致。
-- 核心保留側檔整個位元組與它的 SHA-256（`Lm::kn_sha256`，從檢查過的同一份位元組算，不重讀檔），供會意檔的配對用（§8.1）。
+- 核心以唯讀 mmap 持有側檔整個位元組（`MappedBytes`，測試與 `Lm::add_kn` 可用記憶體位元組），延遲計算並快取它的 SHA-256（`Lm::kn_sha256`，從檢查過的同一份位元組算，不重讀檔），供會意檔的配對用（§8.1）；`N` 直接就地讀取。`tools/kn_cont.py` 先寫 PID 暫存檔再 `os.replace`，避免原地覆寫正在映射中的舊檔。
 - 摘要行標記：`+kn:<側檔 SHA-256 前 8 碼>:θ<θ>:β<該設定用的 β>`。
 
 ### 3.4 連文（`SJT30001`）
@@ -496,17 +497,17 @@ OpenCC 的對照表（`STCharacters`、`STPhrases`、`TWVariants`、`TWPhrases`�
 - 英文單字表（中英混打，`docs/spec/english-mixed.md`）不是 Release 附件，也不進 git，每次建置時由 `scripts/build-app.sh` 產生。
 
 ```sh
-gh release download sj-lm-7-9.7m -R Nanako0129/shanjie -p bigram.sjlm -D data/lm
-gh release download sj-wc-6-512c -R Nanako0129/shanjie -p classes.sjc -D data/lm
-gh release download sj-kn-2-397k -R Nanako0129/shanjie -p kn.sjkn -D data/lm
+t=$(mktemp -d) && gh release download sj-lm-7-9.7m -R Nanako0129/shanjie -p bigram.sjlm -D "$t" && mv "$t/bigram.sjlm" data/lm/ && rmdir "$t"
+t=$(mktemp -d) && gh release download sj-wc-6-512c -R Nanako0129/shanjie -p classes.sjc -D "$t" && mv "$t/classes.sjc" data/lm/ && rmdir "$t"
+t=$(mktemp -d) && gh release download sj-kn-2-397k -R Nanako0129/shanjie -p kn.sjkn -D "$t" && mv "$t/kn.sjkn" data/lm/ && rmdir "$t"
 gh release download sj-sr-10-31m -R Nanako0129/shanjie -p tinylm.sjtl -D data/lm
-gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D data/lm
+t=$(mktemp -d) && gh release download sj-cl-2-69k -R Nanako0129/shanjie -p colloquial.sjlm -p colloquial-attribution.tsv -D "$t" && mv "$t/colloquial.sjlm" "$t/colloquial-attribution.tsv" data/lm/ && rmdir "$t"
 t=$(mktemp -d) && gh release download sj-cx-2-7.7m -R Nanako0129/shanjie -p trigram.sjt3 -D "$t" && mv "$t/trigram.sjt3" data/lm/ && rmdir "$t"
 t=$(mktemp -d) && gh release download sj-cx-2-950k -R Nanako0129/shanjie -p trigram-chat.sjt3 -D "$t" && mv "$t/trigram-chat.sjt3" data/lm/ && rmdir "$t"
 shasum -a 256 -c data/bigram.sjlm.sha256 data/classes.sjc.sha256 data/kn.sjkn.sha256 data/tinylm.sjtl.sha256 data/trigram.sjt3.sha256 data/trigram-chat.sjt3.sha256 data/colloquial.sjlm.sha256 data/colloquial-attribution.tsv.sha256
 ```
 
-- 兩張連文表先下載到暫存目錄再 `mv` 進 `data/lm`，不要用 `--clobber` 原地覆蓋：核心以記憶體映射讀這兩個檔，正在執行的程序（測試、CLI）映射著它時原地改寫會讓它們收到 SIGBUS 或讀到壞資料，rename 則不會。
+- 所有以唯讀記憶體映射載入的 n-gram 模型與伴生檔（`bigram.sjlm`、`classes.sjc`、`kn.sjkn`、`trigram.sjt3`、`trigram-chat.sjt3`、`colloquial.sjlm`）更新時皆須先下載到暫存目錄再 `mv` 進 `data/lm`，不要用 `--clobber` 原地覆蓋：核心以記憶體映射讀這些檔，正在執行的程序（測試、CLI）映射著它時原地改寫會讓它們收到 SIGBUS 或讀到壞資料，rename 則不會。
 - 沒有登入 `gh` 時，改用 `https://github.com/Nanako0129/shanjie/releases/download/<Release>/<檔名>` 下載。
 - CI 的下載是 `scripts/fetch-models.sh`（`docs/spec/release-and-ci.md` §2.2）。
 
