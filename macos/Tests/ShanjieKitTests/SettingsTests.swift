@@ -580,4 +580,16 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(SettingsLayout.frameHeight(visibleHeight: h - 120), h - 120)
         XCTAssertEqual(SettingsLayout.frameHeight(visibleHeight: h), h)
     }
+
+    // docs/spec/macos-shell.md §9.1: ⌘W (Command alone) closes the window; ⌘Q and other combinations do not.
+    func testOnlyCommandWClosesTheSettingsWindow() {
+        XCTAssertTrue(isCloseWindowShortcut(flags: .command, charactersIgnoringModifiers: "w"))
+        XCTAssertTrue(isCloseWindowShortcut(flags: [.command, .capsLock], charactersIgnoringModifiers: "W"))
+        for flags: NSEvent.ModifierFlags in [[.command, .shift], [.command, .option], [.command, .control], []] {
+            XCTAssertFalse(isCloseWindowShortcut(flags: flags, charactersIgnoringModifiers: "w"), "\(flags)")
+        }
+        XCTAssertFalse(isCloseWindowShortcut(flags: .command, charactersIgnoringModifiers: "q"))
+        XCTAssertFalse(isCloseWindowShortcut(flags: .command, charactersIgnoringModifiers: "e"))
+        XCTAssertFalse(isCloseWindowShortcut(flags: .command, charactersIgnoringModifiers: nil))
+    }
 }
