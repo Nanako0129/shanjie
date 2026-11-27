@@ -395,6 +395,7 @@ mod tests {
         let (got_set, old_set): (HashSet<_>, HashSet<_>) = (got.iter().cloned().collect(), old.e.iter().map(|(w, n)| (w.clone(), *n)).collect());
         assert_eq!(got.len(), got_set.len());
         assert_eq!(got_set, old_set);
+        assert!(!dkeys.is_empty() && !ekeys.is_empty(), "the shipped english.tsv has D and E rows: an empty section would make the counts below vacuous");
         assert!(n_h >= dkeys.len() + ekeys.len() && n_i >= ekeys.len() && n_j == dkeys.len() * 8 && got.len() == old.e.len());
         println!("oracle-compared english p_e_given={n_h} lp_word/has={n_i} lp_e={n_j} words={} (D={} E={} G3={} G2={})", got.len(), dkeys.len(), ekeys.len(), new.g3.len(), new.g2.len());
     }
@@ -412,6 +413,7 @@ mod tests {
         let big = AutoTable::parse(&format!("{head}E\tok\t{}\n", u64::from(u32::MAX) + 5)).unwrap();
         assert_eq!(big.words().collect::<Vec<_>>(), [("ok", u64::from(u32::MAX) + 5)]);
         assert!(AutoTable::parse(&format!("{head}L\t5\t{}\n", u64::from(u32::MAX) + 5)).is_some());
+        assert!(AutoTable::parse(&format!("{head}L\t{}\t1\n", u64::from(u32::MAX) + 5)).is_none(), "an L length past u32::MAX is no table");
         assert!(AutoTable::parse(&format!("{head}L\t5\t{}\nL\t6\t1\n", u64::MAX)).is_none(), "sum_l overflow is a None, not a panic");
         let key = |n: usize| "a".repeat(n);
         assert!(AutoTable::parse(&format!("{head}D\t{}\t1\t1\n", key(u16::MAX as usize))).is_some());
