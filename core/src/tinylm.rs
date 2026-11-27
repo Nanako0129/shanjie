@@ -894,7 +894,8 @@ impl TinyLm {
     /// k = `key_for` of the text before the stretch: for versions 1 to 4 the engine's context key (`learn::context_key`; its
     /// `SENTINEL`, no Han character before the cursor, is the empty k as in tinylm.row_key), for a model declaring `left_len` the last
     /// L characters as they are ("^" included; docs/spec/semantic-rerank.md §5.2), the caller's (alpha, tau, delta) (`params` of the profile and level), then `pick`. Returns the chosen index and, when the model ran (two or more
-    /// candidates), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
+    /// candidates and not a confident span: ng[0] - ng[1] >= tau with no learning bias skips the forward pass and returns (0, None),
+    /// docs/spec/semantic-rerank.md §3.3), the LLs. A candidate longer than ctx - 1 characters is `TooLong`; the caller decides to keep the first.
     /// `masked` (same order as `cands`; empty, or a missing entry, is false) marks the candidates that cannot be chosen: the caller's
     /// `manual_mask`, made once with the decoder's first candidate as the base (docs/spec/decoder.md §7); the threshold and the scores still use the
     /// whole list.

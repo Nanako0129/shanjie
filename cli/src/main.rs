@@ -1063,7 +1063,8 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     if let (Some((_, load, _)), false) = (&tl, rerank.is_empty()) {
         // Latency record, stderr only: one rerank = the forward pass over up to 8 candidates of a row (rows with fewer
-        // than two candidates run nothing and are not counted); load = read + parse of the .sjtl, the file loaded once.
+        // than two candidates, and confident rows whose forward pass was skipped, run nothing and are not counted;
+        // docs/spec/semantic-rerank.md §3.3); load = read + parse of the .sjtl, the file loaded once.
         rerank.sort();
         let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         eprintln!(
