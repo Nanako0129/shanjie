@@ -1,8 +1,9 @@
 """Kneser-Ney 接續次數側檔（docs/spec/models.md），離線量測用，不動模型檔。
 
-N(w) = |{ v : once(v), v != "<s>", v 在模型詞彙裡, bi[(v, w)] >= theta }|，bi 是 build_lm.merged_counts 的整數二元組
+N(w) = |{ v : once(v), v != "<s>", v 在模型詞彙 id >= 2 裡, bi[(v, w)] >= theta }|，bi 是 build_lm.merged_counts 的整數二元組
 （與 build_lm.build 同一套加權、四捨五入、去 0、異體合併；build 丟掉 v 不在詞彙裡的二元組，這裡也不數）。
-</s> 與詞彙外的 w 不必擋：side_bytes 只取詞彙 id >= 2 的 N。類的非代表成員取代表成員的 N；模型詞彙裡有、計數裡沒有的詞 N = 0。
+once(v) 以 lm.kn_class_reps(vocab, cls) 取每個異體類（類 tuple 順序）裡第一個落在 vocab[2:] 的成員（避免高分疊加詞讓 cls[v][0] 落在詞彙外時整類漏數）。
+</s> 與詞彙外的 w 不必擋：side_bytes 只取詞彙 id >= 2 的 N。類的成員透過 cls[w][0] 取 merge_variants 放的 N；模型詞彙裡有、計數裡沒有的詞 N = 0。
 側檔 SJKN0002（docs/spec/decoder.md §3.3，little-endian）：magic b"SJKN0002"、V u32、模型檔 SHA-256 32 bytes、theta u32、beta f64、
 ΣN′ u64、N u32[V]（id 0、1 為 0）。ΣN′ 是預先彙總的值：用 lm.kn_total（和 lm.py 重算時同一個函式）加 build_lm.variant_classes 的類算好寫進檔頭，
 Rust 只讀檔頭；lm_eval.py 照舊傳 kn_classes 重算比對，那是它在上游的檢查。不再產生 SJKN0001（lm.py 仍讀得到舊檔）。
@@ -25,9 +26,11 @@ MAGIC = b"SJKN0002"
 
 
 def continuation(bi, cls, theta, vocab):
-    """詞 -> N（只含代表成員與不在類裡的詞；非代表成員由 side_bytes 取代表的）。"""
-    once = lambda w: w not in cls or cls[w][0] == w
-    known = set(vocab)
+    """w -> N(w)：只數在 vocab[2:] 裡的詞彙前文 v，每個異體類只數類 tuple 裡第一個落在 vocab[2:] 的成員（L.kn_class_reps）。
+    （merge_variants 把後詞次數放在 cls[w][0]，由 side_bytes 透過 cls[w][0] 取對應的 N。）"""
+    reps = L.kn_class_reps(vocab, cls)
+    known = set(vocab[2:])
+    once = lambda w: w not in cls or reps[cls[w]] == w
     n = {}
     for (v, w), c in bi.items():   # 每個 (v, w) 在 bi 裡只出現一次，所以直接計數
         if c >= theta and v != "<s>" and v in known and once(v):
@@ -39,7 +42,7 @@ def side_bytes(model_path, n, cls, theta, beta):
     """詞彙與雜湊都取自 model_path 這一個檔，N 陣列一定對齊它。"""
     raw = open(model_path, "rb").read()
     vocab = L.BigramLM(model_path, classes=False).vocab
-    rep = lambda w: cls[w][0] if w in cls else w
+    rep = lambda w: cls[w][0] if w in cls else w   # merge_variants 把後詞次數放在 cls[w][0]（即使 cls[w][0] 不在模型詞彙裡）
     vals = [0, 0] + [n.get(rep(w), 0) for w in vocab[2:]]
     total = L.kn_total(vocab, [x + 1 for x in vals], cls)
     return MAGIC + struct.pack("<I", len(vocab)) + hashlib.sha256(raw).digest() + struct.pack("<IdQ", theta, beta, total) \
