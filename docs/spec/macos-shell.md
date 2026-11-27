@@ -236,7 +236,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 | 標準鍵盤、倚天鍵盤 | `layout` | 互斥打勾；`selectLayout` 先走 `switchMode`（§2.1），再存偏好；選目前的排列不重建，仍寫一次偏好 |
 | 避免把敏感字詞排在前面 | `toggleDemote` | 預設開，鍵 `demoteSensitive` |
 | 即時預測 | `togglePrediction` | 預設開，鍵 `prediction` |
-| 可省略韻母 | `toggleAbbreviation` | 目前 App 傳 `showsAbbreviation: false`，整個隱藏且一律關；顯示時預測關閉會反灰 |
+| 可省略韻母 | `toggleAbbreviation` | App 傳 `Shell.shipsAbbreviation`（true），顯示、預設關；預測關閉時反灰（仍顯示勾選狀態） |
 | 中英混打（實驗） | `toggleEnglish` | 預設開，鍵 `english`；倚天排列時反灰 |
 | 語意校正 | `toggleRerank` | 預設開，鍵 `rerank`；敏感字詞降權關閉或小模型沒載入時反灰 |
 | 分隔線、小標題「已開啟的詞包」、每個詞包一行、分隔線 | 無 | 引擎實際載入的詞包，每個一行、不能點；小標題把它下面到分隔線為止的項目歸成一組，所以前後各一條分隔線（選單其他地方沒有分隔線）；都沒載入就整段（含分隔線）不出現；詞包的開關只在設定視窗 |
@@ -407,7 +407,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - 樣式 `[.titled, .closable, .fullSizeContentView]`，`titlebarAppearsTransparent`，`isOpaque = false`、背景透明；層級 `.floating`。
 - **背景**：`NSVisualEffectView`（材質 `.popover`、`.behindWindow`、`state .active`）放在內容**後面**，填滿整個視窗並延伸到標題列底下；SwiftUI 的內容從標題列下面開始（上緣約束取 `NSWindow.frameRect(forContentRect:styleMask:)` 算出的標題列高，一般 32 pt；`host.safeAreaRegions = []`），`Form` 與左欄的 `List` 都 `.scrollContentBackground(.hidden)` 讓玻璃透出，兩欄質感相同。玻璃不包住內容，否則內容會套 vibrancy、文字變淡。材質 `.popover` 是看系統清單挑的，沒有量測；不用 Liquid Glass 是因為在設定視窗太透。
 - **帶到前面**：開窗時記下前景 App（不是自己才記），`NSApp.activate()`、`makeKeyAndOrderFront`，再 `orderFrontRegardless()`（`activate()` 從 macOS 14 起只是請求，實測被拒絕時視窗會留在前景 App 後面）；視窗因此一定在最前面，但不一定是 key window，點一下才是。不改成 `.regular`（會在 Dock 多一個圖示）。關窗時，只在輸入法仍是 active app 的情況下把焦點還給記下的 App（否則使用者已經去別處，不搶焦點）。`close()` 先丟掉記下的 App，讓更新程式要往前時不會先喚醒別的 App。
-- 視窗裡**沒有文字欄位**：只有選擇器、開關、滑桿與按鈕，所以不需要裝 Edit 選單，輸入法也不會在自己的視窗裡處理打字。
+- 視窗裡只有一個文字欄位：「選字」頁可省略韻母開關下方的試打框（`docs/spec/prediction.md` §6），輸入法照常替它組字，用來在設定頁直接試打；其餘都是選擇器、開關、滑桿與按鈕。輸入法沒有裝 Edit 選單。
 - 安全輸入期間輸入選單反灰（系統行為），開不了設定視窗。
 
 ### 9.2 版面與尺寸
@@ -426,7 +426,7 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 | 頁 | 區塊與項目 |
 |---|---|
 | 一般 | 「鍵盤」：鍵盤排列（標準／倚天）、標點排列（macOS 注音／小麥注音，原生 `Picker`，偏好鍵 `punctLayout`，`docs/spec/keys-and-composition.md` §8.1；改了下一個鍵就生效）。「聊天／書面」：切換方式（依 App 自動／一律聊天／一律書面）、灰色說明、「個別設定的 App」清單 |
-| 選字 | 「選字」：即時預測、在瀏覽器裡第一個字不顯示預測（預測關時反灰）、可省略韻母（`showsAbbreviation` 為 false 時不顯示）、中英混打（實驗）與其說明、快打時鍵序顛倒不當英文、依按鍵順序判斷英文、重打同一個位置算英文（各附說明；三個選項在中英混打關閉或倚天排列時都反灰，「快打時鍵序顛倒不當英文」另在「依按鍵順序判斷英文」關閉時反灰，設定值仍顯示）、單按 Shift 切換中英、用哪一側的 Shift（左右都可／只有右邊／只有左邊，原生 `Picker`，偏好鍵 `shiftSide`，總開關關著時反灰，`docs/spec/keys-and-composition.md` §9.1）、中英文之間自動加空格、避免把敏感字詞排在前面、語意校正與「強度」（保守／標準／積極的分段控制，隨語意校正與載入的模型反灰）。「詞包」：動漫與遊戲詞（下一行灰字「資料更新至 YYYY-MM-DD（維基百科）」）、經典台詞、資訊與 AI 詞、美妝與保養詞、迷因與實況用語；所有詞包的開關只在這裡。「模糊輸入」：四個音對（ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ）與「鄰鍵打錯」（倚天排列時反灰，值保留）及一段說明 |
+| 選字 | 「選字」：即時預測、在瀏覽器裡第一個字不顯示預測（預測關時反灰）、可省略韻母（預測關閉時反灰；下方一行說明、三行固定示範與一個試打框，`docs/spec/prediction.md` §6）、中英混打（實驗）與其說明、快打時鍵序顛倒不當英文、依按鍵順序判斷英文、重打同一個位置算英文（各附說明；三個選項在中英混打關閉或倚天排列時都反灰，「快打時鍵序顛倒不當英文」另在「依按鍵順序判斷英文」關閉時反灰，設定值仍顯示）、單按 Shift 切換中英、用哪一側的 Shift（左右都可／只有右邊／只有左邊，原生 `Picker`，偏好鍵 `shiftSide`，總開關關著時反灰，`docs/spec/keys-and-composition.md` §9.1）、中英文之間自動加空格、避免把敏感字詞排在前面、語意校正與「強度」（保守／標準／積極的分段控制，隨語意校正與載入的模型反灰）。「詞包」：動漫與遊戲詞（下一行灰字「資料更新至 YYYY-MM-DD（維基百科）」）、經典台詞、資訊與 AI 詞、美妝與保養詞、迷因與實況用語；所有詞包的開關只在這裡。「模糊輸入」：四個音對（ㄣ／ㄥ、ㄓ／ㄗ、ㄔ／ㄘ、ㄕ／ㄙ）與「鄰鍵打錯」（倚天排列時反灰，值保留）及一段說明 |
 | 外觀 | 候選窗方向（橫排／直排的分段控制）、候選窗玻璃深淺（滑桿，兩端是裝飾用的圖示 `rectangle.on.rectangle`（中空）與 `rectangle.fill.on.rectangle.fill`（實心），放在滑桿兩旁的 `HStack`，VoiceOver 不讀，滑桿本身帶標籤；放在 `Slider` 自己的兩端標籤時兩個在分組的 `Form` 裡都變實心）、範例候選列預覽 |
 | 選字記憶 | 狀態列（學習已暫停（安全輸入）、選字記憶無法存檔）、不要備份選字記憶、清除選字記憶…（走和選單相同的確認視窗） |
 | 診斷 | 「記錄偶發問題的診斷資料」開關與說明、「複製診斷紀錄…」（見 §13.3） |

@@ -150,6 +150,15 @@ public struct MenuEntry: Equatable, Sendable {
         public static let spacing = "中英文之間自動加空格"
         public static let spacingNote = "在漢字和半形英文、數字之間自動加一個空格（俗稱「盤古之白」）。只改善解送出的文字。"
         public static let abbreviation = "可省略韻母"
+        /// The line under the settings toggle (docs/spec/prediction.md §6; English mixing does not act while it is on: no shadow, ASCII
+        /// is not sent to the core).
+        public static let abbreviationNote = "只打聲母、不打聲調也能從預測列選詞，例如下面幾行。開著時中英混打不作用。"
+        /// Fixed example lines under that note: the keys typed and the word the prediction row shows first. Each word ranks first at
+        /// the start of a sentence with the macOS settings (length cap off), as the eval tool's `--abbr-mix-dump` of the public dev
+        /// rows measured it (`--abbr A` for the first two, `--abbr C` for the third; ABBR-P CORE, public PR #126).
+        public static let abbreviationExamples = ["ㄇ ㄊ → 明天", "ㄇ ㄅ ㄈ → 沒辦法", "ㄗㄨㄟ ㄐㄧㄣ → 最近"]
+        /// The placeholder of the try field under the examples (docs/spec/prediction.md §6): a text field of the settings window itself.
+        public static let abbreviationTry = "在這裡試打"
         public static let rerank = "語意校正"
         public static let acgPack = "動漫與遊戲詞"
         public static let quotePack = "經典台詞"
@@ -305,8 +314,8 @@ extension Session {
         if shell.showsAbbreviation {
             items.append(MenuEntry(title: T.abbreviation, action: .toggleAbbreviation, checked: shell.abbreviationOn, enabled: shell.predictionOn))
         }
-        // docs/spec/english-mixed.md §1.1, §11: after 即時預測 and before 語意校正, where 可省略韻母 sits when it is shown (the app hides it, so there it
-        // follows 即時預測 directly); greyed (checkmark kept) when the layout is Eten.
+        // docs/spec/english-mixed.md §1.1, §11: after 即時預測 and before 語意校正, where 可省略韻母 sits (shown in the app; a shell built with
+        // showsAbbreviation false has it follow 即時預測 directly); greyed (checkmark kept) when the layout is Eten.
         items.append(MenuEntry(title: T.english, action: .toggleEnglish, checked: shell.englishOn, enabled: shell.englishEnabled))
         // docs/spec/semantic-rerank.md §8.2, §8.3 (F11): greyed while the demotion table is off or the small model did not load, where the core makes
         // no rerank job.

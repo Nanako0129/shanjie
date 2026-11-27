@@ -613,11 +613,12 @@ public final class Shell {
     private let abbreviationStore: AbbreviationStore
     /// docs/spec/prediction.md §6: the abbreviation composer (default off); sent to every engine `build()` makes, next to the prediction switch.
     private(set) var abbreviationOn = false
-    /// Whether the abbreviation switch is offered at all (menu item, settings toggle). The app passes false: the feature does not
-    /// ship in v0.4.0 (after a device check: a whole sentence cannot be abbreviated, and keys seemed stuck; the
-    /// stuck keys are read against docs/spec/prediction.md §6, not reproduced: Space and tone keys are eaten while two or more units are
-    /// pending). Hidden means always off; the stored value is neither read nor written.
+    /// Whether the abbreviation switch is offered at all (menu item, settings toggle). The app passes `shipsAbbreviation`. Hidden
+    /// means always off; the stored value is neither read nor written.
     public let showsAbbreviation: Bool
+    /// What the app passes as `showsAbbreviation`: the switch is offered (default off), with the key-order composer, the fixed R3
+    /// cuts and the mixed row of docs/spec/prediction.md §6. The macOS shell never turns the candidate length cap on (§7: iOS only).
+    public static let shipsAbbreviation = true
     private let spacingStore: SpacingStore
     /// cjk-spacing: space between Han and ASCII letters or digits in the text the shell commits (default off).
     private(set) var spacingOn = false
@@ -994,8 +995,8 @@ public final class Shell {
     /// `flagsCounter`: the system's count of `flagsChanged` events (docs/spec/macos-shell.md §13.1); the default (always 0) is for the tests.
     /// `englishNoticeStore`, `englishNotice`: the one-time explanation window of the English defaults change and whether it is still owed
     /// (docs/spec/english-mixed.md §10.3). The defaults (in memory, not owed, no window) are for the tests; the app passes its own.
-    /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes `false`
-    /// (v0.4.0). No test sees the app's value: the release device check does (no 可省略韻母 in the menu).
+    /// `showsAbbreviation`: whether the abbreviation switch is offered. The default `true` is for the tests; the app passes
+    /// `Shell.shipsAbbreviation`, which the tests read.
     public init(resources: URL, panel: CandidatePanel, isSecureInput: @escaping () -> Bool,
                 layoutStore: LayoutStore, learningDirectory: URL?, dialogs: LearningDialogs,
                 demoteStore: DemoteStore, predictionStore: PredictionStore, abbreviationStore: AbbreviationStore, englishStore: EnglishStore, acgPackStore: AcgPackStore, quotePackStore: QuotePackStore,
