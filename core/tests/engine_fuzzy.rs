@@ -120,30 +120,37 @@ fn all_off_and_adjacent_only_replay_the_python_golden() {
 }
 
 /// docs/spec/decoder.md §6.4, a measurement (run with `--ignored --nocapture` in release on the Linux box): per-key latency of the dev302 replay,
-/// all on (63, bit 5 included) against all off. The bound is a p95 ratio of at most 2.
+/// all on (63, bit 5 included) against all off. The bound is a p95 ratio of at most 2. With `SHANJIE_LATENCY_ROWS` (a rows file, `前文|句子|讀音`) the same
+/// is measured on those rows too (docs/contracts/typo-one-sym.md §4.1: the synthetic one-symbol typos, whose damaged syllable the flags 0 refuse).
 #[test]
 #[ignore]
 fn per_key_latency_all_on_against_all_off() {
-    let rows = dev302();
-    let mut p95s = Vec::new();
-    for flags in [0, FUZZY_ALL] {
-        let mut e = engine(Layout::Standard, flags, false);
-        let mut t = Vec::new();
-        for syls in &rows {
-            let mut keys: Vec<Key> = syls.iter().flat_map(|s| keys_of(Layout::Standard, s)).collect();
-            keys.push(Key::new(KeyKind::Enter));
-            for k in keys {
-                let t0 = std::time::Instant::now();
-                e.key(k).unwrap();
-                t.push(t0.elapsed());
-            }
-        }
-        t.sort();
-        let p = t[t.len() * 95 / 100];
-        println!("flags {flags}: keys {} p50 {:?} p95 {:?} max {:?}", t.len(), t[t.len() / 2], p, t[t.len() - 1]);
-        p95s.push(p);
+    let mut sets = vec![("dev302", dev302())];
+    if let Ok(f) = std::env::var("SHANJIE_LATENCY_ROWS") {
+        let rows = parse_rows(&std::fs::read_to_string(f).unwrap()).unwrap();
+        sets.push(("typo rows", rows.into_iter().map(|r| r.reading.expect("a rows file with readings")).collect()));
     }
-    println!("p95 ratio {:.2}", p95s[1].as_secs_f64() / p95s[0].as_secs_f64());
+    for (name, rows) in sets {
+        let mut p95s = Vec::new();
+        for flags in [0, FUZZY_ALL] {
+            let mut e = engine(Layout::Standard, flags, false);
+            let mut t = Vec::new();
+            for syls in &rows {
+                let mut keys: Vec<Key> = syls.iter().flat_map(|s| keys_of(Layout::Standard, s)).collect();
+                keys.push(Key::new(KeyKind::Enter));
+                for k in keys {
+                    let t0 = std::time::Instant::now();
+                    e.key(k).unwrap();
+                    t.push(t0.elapsed());
+                }
+            }
+            t.sort();
+            let p = t[t.len() * 95 / 100];
+            println!("{name}, flags {flags}: keys {} p50 {:?} p95 {:?} max {:?}", t.len(), t[t.len() / 2], p, t[t.len() - 1]);
+            p95s.push(p);
+        }
+        println!("{name}: p95 ratio {:.2}", p95s[1].as_secs_f64() / p95s[0].as_secs_f64());
+    }
 }
 
 // ---------- fuzzy sound ----------
@@ -999,4 +1006,110 @@ fn typo_one_sym_probe_hits_with_bit_5_and_not_without() {
         rows += 1;
     }
     assert!(rows >= 6, "{rows} rows");
+}
+
+// ---- misfires (docs/contracts/typo-one-sym.md §4.1 "正常打字與小寫英文誤觸量測") ----
+
+/// The 1,000 most frequent all-lowercase-letter English words of `data/lexicon/english.tsv` (the `E` rows: word, count).
+fn top_english(n: usize) -> Vec<String> {
+    let text = std::fs::read_to_string(root().join("data/lexicon/english.tsv")).unwrap();
+    let mut rows: Vec<(u64, String)> = text
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split('\t').collect();
+            (f.len() == 3 && f[0] == "E" && !f[1].is_empty() && f[1].chars().all(|c| c.is_ascii_lowercase())).then(|| (f[2].parse().unwrap(), f[1].to_string()))
+        })
+        .collect();
+    rows.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    rows.into_iter().take(n).map(|r| r.1).collect()
+}
+/// How many keys of `word` land on a column that an earlier key of the word filled (what the key record calls an overwrite) and the syllable the columns show then.
+fn columns_of(word: &str) -> (usize, String) {
+    let mut cols: [Option<char>; 3] = [None; 3];
+    let mut ow = 0;
+    for c in word.chars() {
+        let (col, sym) = Layout::Standard.symbol_of(c).expect("every letter is a symbol key");
+        ow += usize::from(cols[col].is_some());
+        cols[col] = Some(sym);
+    }
+    (ow, cols.iter().flatten().collect())
+}
+
+/// §4.1 (2): of the 1,000 most frequent lowercase English words (the macOS defaults of English mixing, `word` and Space), those with an overwritten column (the
+/// contract's `n_ow > 0`) are never taken as Chinese with bit 5 alone, whatever the table could read; a word typed in column order whose syllable the lexicon lacks may be
+/// (`go`): the count is printed (`--nocapture`). Words whose syllable the lexicon has are not this rule's: they decide as with the flags 0.
+#[test]
+fn bit_5_alone_takes_no_overwritten_english_word_of_the_thousand_most_frequent() {
+    let lex = &shared().lex;
+    let (mut unknown, mut ow_words, mut ow_caught, mut plain_words, mut plain_caught) = (0, 0, 0, 0, 0);
+    let mut caught = Vec::new();
+    for word in top_english(1000) {
+        let (ow, syl) = columns_of(&word);
+        let mut on = english_engine(ONE);
+        let mut off = english_engine(0);
+        let (a, b) = (raw(&mut on, &format!("{word} ")).preedit, raw(&mut off, &format!("{word} ")).preedit);
+        if lex.has_syllable(&syl) {
+            assert_eq!(a, b, "{word}: a lexicon syllable decides as it did before bit 5");
+            continue;
+        }
+        unknown += 1;
+        let han = is_han(&a);
+        assert!(!is_han(&b), "{word}: premise: with the flags 0 an unknown syllable never becomes Chinese on its own: {b}");
+        if ow > 0 {
+            ow_words += 1;
+            ow_caught += usize::from(han);
+            assert!(!han, "{word}: a column was overwritten, so Space must leave it to English, got {a}");
+        } else {
+            plain_words += 1;
+            plain_caught += usize::from(han);
+            if han {
+                caught.push(word.clone());
+            }
+        }
+    }
+    println!("unknown-syllable words {unknown}: overwritten columns {ow_words} (taken as Chinese {ow_caught}), column order {plain_words} (taken as Chinese {plain_caught}): {}", caught[..caught.len().min(12)].join(" "));
+    assert!(ow_words >= 100 && plain_words >= 30, "premise: both kinds are in the thousand ({ow_words}, {plain_words})");
+}
+
+/// Shift+letter English never goes through `finish_syllable`: with bit 5 alone and with both bits (and all flags) `Word` + Space of the 300 most frequent words stays English.
+#[test]
+fn shift_english_stays_english_with_bit_5() {
+    for flags in [ONE, ONE | FUZZY_ADJACENT, FUZZY_ALL] {
+        let mut e = english_engine(flags);
+        for word in top_english(300) {
+            let mut cap = word.clone();
+            cap[..1].make_ascii_uppercase();
+            let o = raw(&mut e, &format!("{cap} "));
+            assert!(!o.preedit.chars().any(|c| c as u32 >= 0x3400) && o.preedit.to_lowercase().starts_with(&word), "flags {flags}: {cap}: {}", o.preedit);
+            press(&mut e, KeyKind::Esc);
+            e.reset(ResetMode::Discard);
+        }
+    }
+}
+
+/// §4.1 (1): clean Chinese typing (every syllable a lexicon syllable: dev302 and the typing test, keys as typed, the macOS defaults of English mixing) comes out of the engine
+/// exactly as it does with the flags 0, with bit 5 alone and with bits 4 and 5 (the sound bits change clean input by design, so they are not in this): no row differs.
+#[test]
+fn clean_chinese_typing_is_identical_with_bit_5() {
+    let mut rows = dev302();
+    let typing = parse_rows(&std::fs::read_to_string(root().join("eval/dev/user-typing.txt")).unwrap()).unwrap();
+    let lex = &shared().lex;
+    rows.extend(usable(lex, typing).into_iter().map(|r| r.reading.clone().unwrap_or_else(|| lex.to_syllables(&r.sent).expect("usable row"))));
+    assert!(rows.len() >= 370, "{} rows", rows.len());
+    let replay = |flags: u32| -> Vec<String> {
+        let mut e = english_engine(flags);
+        rows.iter()
+            .map(|syls| {
+                let mut keys: Vec<Key> = syls.iter().flat_map(|s| keys_of(Layout::Standard, s)).collect();
+                keys.push(Key::new(KeyKind::Enter));
+                keys.into_iter().map(|k| e.key(k).unwrap().commit).collect()
+            })
+            .collect()
+    };
+    let base = replay(0);
+    for flags in [ONE, ONE | FUZZY_ADJACENT] {
+        let got = replay(flags);
+        let diff: Vec<usize> = (0..rows.len()).filter(|&i| got[i] != base[i]).collect();
+        assert!(diff.is_empty(), "flags {flags}: rows {diff:?} differ from the flags 0");
+    }
 }

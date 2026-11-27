@@ -217,3 +217,69 @@ fn a_one_symbol_first_path_is_reranked_and_not_skipped() {
         assert!(job.candidates()[0].len() >= 2, "flags {flags}: the small model has paths to choose among");
     }
 }
+
+/// docs/contracts/typo-one-sym.md §2.4 item 4 and docs/spec/decoder.md §7: a manual word the n-gram's first path reads through a one-symbol alternative is protected from the rerank
+/// like one typed right (`path_readings_with_fuzzy` hands the mask the lexicon reading, not the typed syllable). 米雅歌 (the manual word of engine_rerank.rs, ㄇㄧˇ ㄧㄚˇ ㄍㄜ) with the
+/// middle syllable typed as an unknown one-symbol slip of ㄧㄚˇ, bit 5 alone, formal, standard strength, the shipping n-gram and small model: it stays 米雅歌 through the rerank. The same
+/// engine on a copy of the lexicon whose manual rows are tagged `slang` (no manual word in the mask) takes it out for another reading: the premise, and the check that fails without the mask.
+#[test]
+fn a_manual_word_typed_with_a_one_symbol_slip_survives_the_rerank() {
+    use core::tinylm::RerankLevel;
+    let lex = &shared().lex;
+    let lmdir = root().join("data/lm");
+    let make = |dir: &Path| {
+        let mut e = Engine::new(dir, Layout::Standard).unwrap();
+        e.load_lm(&lmdir.join("bigram.sjlm")).unwrap();
+        e.load_tinylm(&lmdir.join("tinylm.sjtl")).unwrap();
+        e.set_profile(Profile::Formal).unwrap();
+        e.set_rerank(true).unwrap();
+        e.set_rerank_level(RerankLevel::Standard).unwrap();
+        e.set_fuzzy(core::fuzzy::FUZZY_ONE_SYM).unwrap();
+        e
+    };
+    let shown = |e: &mut Engine, mid: &str| {
+        let ngram = type_syls(e, &["ㄇㄧˇ", mid, "ㄍㄜ"]).preedit;
+        let after = match e.take_rerank_job() {
+            Some(job) => e.apply_rerank(job.run()).unwrap().map_or(ngram.clone(), |o| o.preedit),
+            None => ngram.clone(),
+        };
+        (ngram, after)
+    };
+    // Unknown syllables one symbol away from ㄧㄚˇ (the final column), read as ㄧㄚˇ by the one-symbol table and not by the adjacent one.
+    let slips: Vec<String> = "ㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ"
+        .chars()
+        .map(|c| format!("ㄧ{c}ˇ"))
+        .filter(|u| !lex.has_syllable(u) && lex.one_sym_alts(u).contains(&"ㄧㄚˇ") && !lex.adjacent_alts(u).contains(&"ㄧㄚˇ"))
+        .collect();
+    assert!(!slips.is_empty(), "premise: a one-symbol slip of ㄧㄚˇ");
+    let plain = std::env::temp_dir().join(format!("shanjie-fz-nomanual-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&plain);
+    std::fs::create_dir_all(&plain).unwrap();
+    for f in std::fs::read_dir(root().join("data/lexicon")).unwrap() {
+        let f = f.unwrap().path();
+        let name = f.file_name().unwrap().to_owned();
+        if name == "overlay-add.tsv" {
+            std::fs::write(plain.join(&name), std::fs::read_to_string(&f).unwrap().replace("\tmanual", "\tslang")).unwrap();
+        } else {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&f, plain.join(&name)).unwrap();
+            #[cfg(windows)]
+            std::fs::copy(&f, plain.join(&name)).unwrap();
+        }
+    }
+    let (mut kept, mut removed_without) = (0, 0);
+    for u in &slips {
+        let (ngram, after) = shown(&mut make(&root().join("data/lexicon")), u);
+        if ngram != "米雅歌" {
+            continue;
+        }
+        assert_eq!(after, "米雅歌", "{u}: protected like the typed reading");
+        kept += 1;
+        let (ngram, after) = shown(&mut make(&plain), u);
+        assert_eq!(ngram, "米雅歌", "{u}: premise");
+        removed_without += usize::from(after != "米雅歌");
+    }
+    std::fs::remove_dir_all(&plain).unwrap();
+    assert!(kept >= 1, "premise: the n-gram's first is 米雅歌 for some slip of {slips:?}");
+    assert!(removed_without >= 1, "premise: without the mask the rerank takes it out for some slip");
+}
