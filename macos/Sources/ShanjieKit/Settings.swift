@@ -1,5 +1,5 @@
+import AppKit
 import Combine
-import Foundation
 
 /// One row of the 個別設定的 App list (docs/spec/macos-shell.md §9.3).
 public struct AppProfileRow: Equatable, Hashable, Sendable {
@@ -316,6 +316,13 @@ public enum SettingsLayout {
     public static func frameHeight(visibleHeight: CGFloat) -> CGFloat {
         min(preferredHeight, visibleHeight)
     }
+}
+
+/// docs/spec/macos-shell.md §9.1: ⌘W closes the settings window. Command alone (⌘⇧W, ⌘⌥W, ⌃⌘W do not), matched on the
+/// character like a menu key equivalent, so other layouts use the key that types w. The input method has no main menu, so
+/// nothing else would catch it; ⌘Q stays unbound on purpose (quitting would stop the input method).
+public func isCloseWindowShortcut(flags: NSEvent.ModifierFlags, charactersIgnoringModifiers: String?) -> Bool {
+    flags.intersection([.command, .shift, .option, .control]) == .command && charactersIgnoringModifiers?.lowercased() == "w"
 }
 
 /// docs/spec/macos-shell.md §9.2: the settings window's frame moved vertically into its screen's usable area, up when it

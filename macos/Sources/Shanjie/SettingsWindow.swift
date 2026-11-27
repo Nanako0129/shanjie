@@ -117,7 +117,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 v.topAnchor.constraint(equalTo: container.topAnchor, constant: top), v.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             ])
         }
-        let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+        let w = SettingsNSWindow(contentRect: .zero, styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         w.titlebarAppearsTransparent = true
         w.contentView = container
         w.title = "善解設定"
@@ -615,4 +615,19 @@ private struct TintPreview: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SampleCandidateBar { SampleCandidateBar() }
     func updateNSView(_ bar: SampleCandidateBar, context: Context) { bar.setTint(value) }
+}
+
+/// The settings window (docs/spec/macos-shell.md §9.1): ⌘W closes it like the close button. Caught here because the input
+/// method has no main menu to hold a Close item; everything else, ⌘Q included, goes on to `super` and stays unbound.
+private final class SettingsNSWindow: NSWindow {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // Only as the key window: AppKit also offers key equivalents to the main window, and ⌘W meant for another of the input
+        // method's windows that can be key (the clear-learning confirmation alert, or this window's sheet) must not close this one.
+        // The English notice panel is never key (`PanelWindow.canBecomeKey` is false), so it never takes ⌘W.
+        if isKeyWindow, isCloseWindowShortcut(flags: event.modifierFlags, charactersIgnoringModifiers: event.charactersIgnoringModifiers) {
+            performClose(nil)
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
 }

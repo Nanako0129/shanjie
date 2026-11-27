@@ -407,7 +407,8 @@ IMK 對每個 client 各建一個 controller，但引擎只有一個。殼用 `w
 - 樣式 `[.titled, .closable, .fullSizeContentView]`，`titlebarAppearsTransparent`，`isOpaque = false`、背景透明；層級 `.floating`。
 - **背景**：`NSVisualEffectView`（材質 `.popover`、`.behindWindow`、`state .active`）放在內容**後面**，填滿整個視窗並延伸到標題列底下；SwiftUI 的內容從標題列下面開始（上緣約束取 `NSWindow.frameRect(forContentRect:styleMask:)` 算出的標題列高，一般 32 pt；`host.safeAreaRegions = []`），`Form` 與左欄的 `List` 都 `.scrollContentBackground(.hidden)` 讓玻璃透出，兩欄質感相同。玻璃不包住內容，否則內容會套 vibrancy、文字變淡。材質 `.popover` 是看系統清單挑的，沒有量測；不用 Liquid Glass 是因為在設定視窗太透。
 - **帶到前面**：開窗時記下前景 App（不是自己才記），`NSApp.activate()`、`makeKeyAndOrderFront`，再 `orderFrontRegardless()`（`activate()` 從 macOS 14 起只是請求，實測被拒絕時視窗會留在前景 App 後面）；視窗因此一定在最前面，但不一定是 key window，點一下才是。不改成 `.regular`（會在 Dock 多一個圖示）。關窗時，只在輸入法仍是 active app 的情況下把焦點還給記下的 App（否則使用者已經去別處，不搶焦點）。`close()` 先丟掉記下的 App，讓更新程式要往前時不會先喚醒別的 App。
-- 視窗裡只有一個文字欄位：「選字」頁可省略韻母開關下方的試打框（`docs/spec/prediction.md` §6），輸入法照常替它組字，用來在設定頁直接試打；其餘都是選擇器、開關、滑桿與按鈕。輸入法沒有裝 Edit 選單。
+- 視窗裡只有一個文字欄位：「選字」頁可省略韻母開關下方的試打框（`docs/spec/prediction.md` §6），輸入法照常替它組字，用來在設定頁直接試打；其餘都是選擇器、開關、滑桿與按鈕。輸入法沒有裝主選單（也就沒有 Edit 選單）。
+- **鍵盤**：視窗是 key window 時按 ⌘W 關窗，等同按關閉鈕（只認只有 Command 的 ⌘W，⌘⇧W、⌘⌥W、⌃⌘W 不算；照字元比對，和選單的 key equivalent 一樣）。沒有主選單可放「關閉」，所以由視窗的 `performKeyEquivalent(with:)` 接（`SettingsNSWindow`，判斷在 `isCloseWindowShortcut`）；不是 key window 時不接（AppKit 也會把 key equivalent 給 main window，別的視窗是 key window 時 ⌘W 不關設定視窗）。⌘Q 不綁任何動作：設定視窗在輸入法自己的程序裡，結束程序就等於關掉正在用的輸入法。驗證：`SettingsTests.testOnlyCommandWClosesTheSettingsWindow`（判斷函式）；實際按鍵路徑在 VM 實按。
 - 安全輸入期間輸入選單反灰（系統行為），開不了設定視窗。
 
 ### 9.2 版面與尺寸
