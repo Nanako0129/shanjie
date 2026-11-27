@@ -622,7 +622,8 @@ private struct TintPreview: NSViewRepresentable {
 private final class SettingsNSWindow: NSWindow {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         // Only as the key window: AppKit also offers key equivalents to the main window, and ⌘W meant for another of the input
-        // method's windows (the notice panel) must not close this one.
+        // method's windows that can be key (the clear-learning confirmation alert, or this window's sheet) must not close this one.
+        // The English notice panel is never key (`PanelWindow.canBecomeKey` is false), so it never takes ⌘W.
         if isKeyWindow, isCloseWindowShortcut(flags: event.modifierFlags, charactersIgnoringModifiers: event.charactersIgnoringModifiers) {
             performClose(nil)
             return true
