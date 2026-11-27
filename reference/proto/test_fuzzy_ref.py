@@ -152,10 +152,14 @@ class ShippedLexicon(unittest.TestCase):
     def test_one_sym_table_of_the_shipped_lexicon_matches_the_rust_digest(self):
         """`one_symbol_table_of_the_shipped_lexicon_has_the_pinned_digest` in core/src/fuzzy.rs asserts the same constant (docs/spec/decoder.md §6.2)."""
         allsyl, single = shipped_lexicon_syllables()
-        self.assertEqual(digest_one_sym(F.Tolerance(allsyl, single)), ONE_SYM_DIGEST)
+        self.assertEqual(digest_one_sym(F.Tolerance(allsyl, single)), rust_one_sym_digest())
 
 
-ONE_SYM_DIGEST = (3413, "082a805f3e2011d948d2109b4260ec99fca2fe42acd1d8915f40518a4ae119ef")
+def rust_one_sym_digest():
+    """The constant the Rust test pins, read from core/src/fuzzy.rs, so updating only one side's constant fails one of the two tests."""
+    m = re.search(r'const ONE_SYM_DIGEST: \(usize, &str\) = \((\d+), "([0-9a-f]{64})"\)', rust("fuzzy.rs"))
+    assert m, "no `const ONE_SYM_DIGEST: (usize, &str)` in core/src/fuzzy.rs: update this test"
+    return int(m.group(1)), m.group(2)
 
 
 if __name__ == "__main__":
