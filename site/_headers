@@ -3,3 +3,9 @@
 # index only the custom domain. Preview deployments (<hash>.shanjie.pages.dev) already get this header from Pages.
 https://shanjie.pages.dev/*
   X-Robots-Tag: noindex
+
+/wasm-assets/v1-p35-2ff55dcc/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/assets/*
+  Cache-Control: public, max-age=3600
