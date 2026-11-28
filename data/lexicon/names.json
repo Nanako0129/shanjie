@@ -165,14 +165,14 @@
  },
  "files": {
   "names-add.tsv": {
-   "bytes": 683787,
-   "lines": 8481,
-   "sha256": "a6aafa86ed166b55d0275700231971fd2b498a6668226fa10407bcc75340cadf"
+   "bytes": 688054,
+   "lines": 8549,
+   "sha256": "9bf8abadd2081e58b090c3b4875e9a79c24e5d27adb381585c63815ce3b1a12e"
   },
   "names-sources.tsv": {
-   "bytes": 482865,
-   "lines": 9013,
-   "sha256": "24278171bfb8777e3f0cc65e25411d253c08ff4cb413f10179f8d50cd88c2082"
+   "bytes": 486572,
+   "lines": 9081,
+   "sha256": "8972c025457535a720ae94dda7cdfa5ab42e0abecf415fbe4aa198e9f27ca3a1"
   }
  },
  "kept_c": 10,
@@ -602,13 +602,13 @@
    "sha256": "ee539b46ad7de069645d977628a92f8bd444a4f9e3ba1b4ba3a59a488f00a16d"
   }
  },
- "rows": 8481,
+ "rows": 8549,
  "skipped_subcategories": [
   "Category:台灣各公司人物"
  ],
  "sources": {
   "category": 1096,
-  "creator": 166,
+  "creator": 227,
   "hospital-abbr": 96,
   "manual": 1,
   "nsi": 181,
@@ -616,14 +616,14 @@
   "opendata": 6259,
   "school": 596,
   "school-abbr": 258,
-  "store": 231
+  "store": 238
  },
  "unresolved_collision_readings": 0,
- "version": "nsiac22bfd4-moe115.115-a6aafa86",
+ "version": "nsiac22bfd4-moe115.115-9bf8abad",
  "wiki_revisions": {
   "max": 95852924,
   "min": 700780,
   "pages": 2058
  },
- "words": 8443
+ "words": 8511
 }
