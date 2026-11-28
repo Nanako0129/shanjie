@@ -14,11 +14,28 @@ Overrides:
     Vanguard factory dict), apply only the --extra-ngrams overrides (unigram and contextual) and
     write it back. Untouched lines are preserved verbatim.
 
+Simplified column (--simplified, off by default): vChewing reads the Simplified candidates of a unigram line from its second
+column (EntryType 5) and the Traditional ones from the third (6), and a contextual line's typeID 5 only in Simplified mode, 6
+only in Traditional mode. With the flag, every word and every contextual entry also gets its Simplified form, converted word by
+word with OpenCC's TSPhrases.txt (longest match) and TSCharacters.txt (Apache-2.0; hash-checked, read from --opencc-dir; the
+tables are not in the repo). Without it the output is byte-for-byte what it was. --vendor TEXT writes one meta unigram
+(key _VENDOR, value TEXT, score 0, typeID 2). --build-meta writes _BUILD_TIMESTAMP (the data commit's committer time, seconds) and
+_COMMIT_HASH (its full SHA) the same way; both need --shanjie-root to be a clean git work tree.
+
+vChewing 5.1.0 takes a third-party dictionary with only the meta (2), Simplified (5) and Traditional (6) tables and falls back to
+its built-in dictionary table by table for the rest. A build without --base-txtmap therefore exits 2 when its output has a line of any other
+typeID or a DEFAULT_PROB_ header (docs/spec/vanguard-textmap.md section 2.3).
+
+--compare-factory PATH (the user's own vChewing factory dictionary; it is only read) counts line categories in that file and in the
+output and exits 2 when a category the factory file has is absent from the output and not in FACTORY_ABSENT_OK; see
+docs/spec/vanguard-textmap.md section 8.2.
+
 Purpose: tools/vanguard_textmap.py generates the Shanjie phonetic dictionary in the TextMap 2.0 layout
 that vChewing's Vanguard typing engine reads (VanguardFactoryDict4Typing.txtMap). The spec page is
 docs/spec/vanguard-textmap.md.
 
-Licence: the whole output is distributed under CC BY-SA 4.0. It also carries MIT parts (McBopomofo's
+Licence: the whole output is distributed under CC BY-SA 4.0. With --simplified the Simplified forms are produced with OpenCC's
+TSPhrases.txt and TSCharacters.txt (Apache-2.0). It also carries MIT parts (McBopomofo's
 mcbpmf-data.txt and sandhi-add.tsv; full text LICENSES/McBopomofo-MIT.txt) and BSD parts (libtabe's phrases);
 their notices must be kept. A build that includes the name layer and the IT pack also carries
 name-suggestion-index parts (BSD-3-Clause; full text LICENSES/name-suggestion-index-BSD-3-Clause.txt; keep the
@@ -27,7 +44,7 @@ License, version 1.0 (政府資料開放授權條款第 1 版; name layer, IT pa
 notices and credits to keep are the ones in each row of LICENSES/data.md. The companion files that --out-dict
 copies belong to vChewing, not to Shanjie, and are copied only from the directory the user passes.
 
-Reproduce the released file (output sha256 7f5d0a92...0d130, 620,219 entries, 478,784 keys): take this file from
+Reproduce the first version (vchewing-dict-1, withdrawn; output sha256 7f5d0a92...0d130, 620,219 entries, 478,784 keys): take this file from
 a checkout that has it, open a second worktree of data commit 1a9899ac (git worktree add --detach <path> 1a9899ac)
 whose data/lm/ matches that commit's data/*.sha256, and run, with <out> outside every repo work tree:
 
@@ -45,6 +62,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from dataclasses import dataclass
+import functools
 import glob
 import hashlib
 import json
@@ -70,11 +88,87 @@ _EDGE = (" ", "\t", "\r", "\x0b", "\x0c", "\u00a0")
 _DECIMAL_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$", re.ASCII)
 _NEWLINE_CHARS = frozenset(("\n", "\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x1f", "\x85", "\u2028", "\u2029"))
 _TONE_MARKS = frozenset(("ˊ", "ˇ", "ˋ", "˙"))
+# OpenCC commit 3ac34aa (Apache-2.0): the only Traditional-to-Simplified tables --simplified reads. Nothing on the command line
+# or in the environment can skip or replace this check.
+OPENCC_SHA256 = {
+    "TSPhrases.txt": "9a23666e95c97dbf8668b5d71ca19f09f33b4f3a3aa9e05677dab4b608cef102",
+    "TSCharacters.txt": "9ff46a7d30e5765375eb13d33f2b03a34d298913caf2b120380679f33ae1642d",
+}
+VENDOR_KEY = "_VENDOR"
+BUILD_TIMESTAMP_KEY = "_BUILD_TIMESTAMP"
+COMMIT_HASH_KEY = "_COMMIT_HASH"
+META_TYPE_ID = 2
+# vChewing 5.1.0 (3rdPartyBuildToolCompliance.md section 4): a third-party dictionary provides only these tables; every other table
+# must have zero grams so the built-in one answers.
+THIRD_PARTY_TYPE_IDS = frozenset({2, 5, 6})
+# --compare-factory: categories (labels as count_categories writes them) the output may lack although the factory file has them. One line
+# per entry with the reason in docs/spec/vanguard-textmap.md section 8.3; a test keeps the two lists equal.
+FACTORY_ABSENT_OK = frozenset({
+    "A typeID 7", "A typeID 9", "A typeID 10", "A typeID 11",
+    "C typeID 8",
+    "meta key _NORM",
+    "header key DEFAULT_PROB_7", "header key DEFAULT_PROB_9", "header key DEFAULT_PROB_10", "header key DEFAULT_PROB_11",
+})
+_SECTION_HEADER = "#PRAGMA:VANGUARD_HOMA_LEXICON_HEADER"
+_SECTION_VALUES = "#PRAGMA:VANGUARD_HOMA_LEXICON_VALUES"
+_SECTION_KEY_MAP = "#PRAGMA:VANGUARD_HOMA_LEXICON_KEY_LINE_MAP"
 
 
 def die(msg: str, code: int = 2) -> None:
     print(f"ERROR: {msg}", file=sys.stderr)
     raise SystemExit(code)
+
+
+def default_opencc_dir() -> str:
+    return os.path.join(os.path.expanduser(os.environ.get("SHANJIE_CACHE", "~/.cache/shanjie")), "sources", "opencc")
+
+
+def load_opencc(opencc_dir: str) -> tuple[dict[str, str], dict[str, str]]:
+    """(TSPhrases, TSCharacters) as {key: first value} after checking both files against OPENCC_SHA256; exit 2 when one is missing or differs."""
+    tables = []
+    for name, want in OPENCC_SHA256.items():
+        path = os.path.join(opencc_dir, name)
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except OSError:
+            die(f"OpenCC table not found: {path} (expected sha256 {want}); give the folder with --opencc-dir")
+        got = hashlib.sha256(raw).hexdigest()
+        if got != want:
+            die(f"OpenCC table {path} has sha256 {got}, expected {want}")
+        table = {}
+        for line in raw.decode("utf-8").split("\n"):
+            p = line.split("\t")
+            if len(p) == 2 and not line.startswith("#"):
+                table[p[0]] = p[1].split(" ")[0]
+        tables.append(table)
+    return tables[0], tables[1]
+
+
+def make_t2s(phrases: dict[str, str], chars: dict[str, str]):
+    """Word-level Traditional-to-Simplified: left to right, the longest TSPhrases key at each position, else the character's TSCharacters value, else the character as is."""
+    longest = max(map(len, phrases), default=0)
+
+    @functools.lru_cache(maxsize=None)
+    def t2s(word: str) -> str:
+        out, i = [], 0
+        while i < len(word):
+            for n in range(min(longest, len(word) - i), 0, -1):
+                hit = phrases.get(word[i : i + n])
+                if hit is not None:
+                    out.append(hit)
+                    i += n
+                    break
+            else:
+                out.append(chars.get(word[i], word[i]))
+                i += 1
+        return "".join(out)
+
+    return t2s
+
+
+def dedupe(items):
+    return list(dict.fromkeys(items))
 
 
 def is_bopomofo_symbol(word: str) -> bool:
@@ -654,7 +748,39 @@ def validate_value_line_strict(line: str, is_typing: bool, default_probs: dict[i
     raise ValueError(f"Malformed VALUES line: {line!r}")
 
 
-def validate_textmap_file(path: str, check_sorted: bool = True) -> tuple[int, int]:
+def contextual_items(line: str) -> list[tuple[int | None, str, tuple[str, ...]]]:
+    """(typeID, value, context) of each entry of a type-C or type-D line; [] for any other line (A, B, meta)."""
+    p = line.split("\t")
+    if line.startswith("!") and len(p) > 4:
+        return [(_parse_int32(p[1]), p[0][1:], tuple(_decode_grouped_values_strict(p[3 + 2 * i]))) for i in range((len(p) - 2) // 2)]
+    if line[:1] not in ("@", ">", "!") and len(p) == 4:
+        return [(_parse_int32(p[2]), p[0], tuple(_decode_grouped_values_strict(p[3])))]
+    return []
+
+
+def check_simplified_mirror(key: str, block: list[str], t2s) -> None:
+    """--simplified rule for one key: each B line's Simplified cell is its Traditional cell converted and deduplicated (so never empty),
+    and the (value, context) set of typeID 5 is the typeID 6 set converted."""
+    chs_set: set = set()
+    cht_set: set = set()
+    for ln in block:
+        p = ln.split("\t")
+        if ln.startswith("@") and len(p) == 3:
+            v5 = _decode_grouped_values_strict(p[1], allows_empty_cell=True)
+            v6 = _decode_grouped_values_strict(p[2], allows_empty_cell=True)
+            if not v5 or v5 != dedupe(t2s(w) for w in v6):
+                raise ValueError(f"key {key!r}: Simplified cell {p[1]!r} does not mirror Traditional cell {p[2]!r}")
+        for tid, val, ctx in contextual_items(ln):
+            if tid == 5:
+                chs_set.add((val, ctx))
+            elif tid == 6:
+                cht_set.add((t2s(val), tuple(t2s(c) for c in ctx)))
+    if chs_set != cht_set:
+        raise ValueError(f"key {key!r}: typeID 5 entries are not the converted typeID 6 entries")
+
+
+def validate_textmap_file(path: str, check_sorted: bool = True, t2s=None) -> tuple[int, int]:
+    """t2s (from make_t2s) additionally checks the --simplified mirror rules (check_simplified_mirror) on every key."""
     with open(path, "rb") as f:
         raw = f.read()
     try:
@@ -748,7 +874,98 @@ def validate_textmap_file(path: str, check_sorted: bool = True) -> tuple[int, in
     if expected_start != entry_count:
         raise ValueError(f"KEY_LINE_MAP covers {expected_start} lines != ENTRY_COUNT {entry_count}")
 
+    if t2s is not None:
+        for ln in km_lines:
+            key_s, s_str, c_str = ln.split("\t")
+            check_simplified_mirror(key_s, val_lines[int(s_str) : int(s_str) + int(c_str)], t2s)
+
     return entry_count, key_count
+
+
+def count_categories(path: str, what: str) -> dict[str, int]:
+    """{category label: count} for a TextMap 2.0 file, for --compare-factory. Categories: B lines with a non-empty Simplified / Traditional
+    cell, type-A / C / D lines per typeID, KEY_LINE_MAP keys starting with "_" (meta keys), header keys other than ENTRY_COUNT and KEY_COUNT.
+    A header, VALUES or KEY_LINE_MAP line that fits none of them (a blank line included) exits 2 with its line number and first 40 characters."""
+    try:
+        with open(path, "rb") as f:
+            lines = f.read().decode("utf-8").split("\n")
+    except (OSError, UnicodeDecodeError) as e:
+        die(f"{what}: cannot read {os.path.basename(path)}: {e}")
+    if lines and lines[-1] == "":
+        lines.pop()
+    counts: dict[str, int] = defaultdict(int)
+    section = None
+    for i, ln in enumerate(lines):
+        def unknown() -> None:
+            die(f"{what}: line {i + 1} fits no category: {ln[:40]}")
+        if ln.startswith("#PRAGMA:"):
+            if ln not in (_SECTION_HEADER, _SECTION_VALUES, _SECTION_KEY_MAP):
+                unknown()
+            section = ln
+            continue
+        if section is None:
+            unknown()
+        p = ln.split("\t")
+        if section == _SECTION_HEADER:
+            if len(ln.split("\t", 1)) != 2:
+                unknown()
+            if p[0] not in ("ENTRY_COUNT", "KEY_COUNT"):
+                counts[f"header key {p[0]}"] += 1
+        elif section == _SECTION_KEY_MAP:
+            if len(p) != 3:
+                unknown()
+            if p[0].startswith("_"):
+                counts[f"meta key {p[0]}"] += 1
+        elif ln.startswith(">") and len(p) == 2 and _parse_int32(p[0][1:]) is not None:
+            counts[f"A typeID {_parse_int32(p[0][1:])}"] += 1
+        elif ln.startswith("@") and len(p) == 3:
+            counts["B Simplified cell non-empty"] += p[1] not in ("", "\x07")
+            counts["B Traditional cell non-empty"] += p[2] not in ("", "\x07")
+        elif ln.startswith("!") and len(p) > 4 and len(p) % 2 == 0 and _parse_int32(p[1]) is not None:
+            counts[f"D typeID {_parse_int32(p[1])}"] += 1
+        elif len(p) in (3, 4) and _parse_int32(p[2]) is not None:
+            counts[f"C typeID {_parse_int32(p[2])}"] += 1
+        else:
+            unknown()
+    return dict(counts)
+
+
+def _category_order(label: str) -> tuple:
+    group = label.split(" ", 1)[0]
+    tid = int(label.rsplit(" ", 1)[1]) if group in ("A", "C", "D") else 0
+    return ({"B": 0, "A": 1, "C": 2, "D": 3, "meta": 4, "header": 5}[group], tid, label)
+
+
+def compare_factory(factory_path: str, ours_path: str) -> tuple[str, list[str]]:
+    """(table, missing): both files' category counts side by side, and the labels the factory file has (> 0), the output lacks (= 0)
+    and FACTORY_ABSENT_OK does not list."""
+    fac = count_categories(factory_path, "factory file")
+    if not any(k.startswith("B ") for k in fac):
+        die("factory file: no unigram (B) line found")
+    ours = count_categories(ours_path, "output")
+    labels = sorted(set(fac) | set(ours), key=_category_order)
+    rows, missing = [f"{'category':<34}{'factory':>10}{'ours':>10}  status"], []
+    for lab in labels:
+        f, o = fac.get(lab, 0), ours.get(lab, 0)
+        if f > 0 and o == 0:
+            status = "absent, allowed" if lab in FACTORY_ABSENT_OK else "MISSING"
+            if lab not in FACTORY_ABSENT_OK:
+                missing.append(lab)
+        else:
+            status = "ok"
+        rows.append(f"{lab:<34}{f:>10}{o:>10}  {status}")
+    return "\n".join(rows), missing
+
+
+def check_third_party_tables(path: str) -> None:
+    """Exit 2 when the file has a line of a typeID outside THIRD_PARTY_TYPE_IDS or a DEFAULT_PROB_ header key."""
+    bad = []
+    for lab in count_categories(path, "output"):
+        last = lab.rpartition(" ")[2]
+        if lab.startswith("header key DEFAULT_PROB_") or (lab[0] in "ACD" and int(last) not in THIRD_PARTY_TYPE_IDS):
+            bad.append(lab)
+    if bad:
+        die("output has tables vChewing 5.1.0 takes from its built-in dictionary: " + ", ".join(sorted(bad)))
 
 
 def assemble_companion_files(companion_dir: str, out_dict: str) -> list[str]:
@@ -799,14 +1016,15 @@ def parse_packs(packs_arg: str) -> list[str]:
     return out
 
 
-def emit_contextual_lines(val: str, items: list[tuple[tuple[str, ...], float]], decimals: int) -> list[str]:
-    """VALUES lines for one (reading, value) contextual group: Format C for 1 entry, Format D chunks (2..16) otherwise."""
+def emit_contextual_lines(val: str, items: list[tuple[tuple[str, ...], float]], decimals: int, type_id: int = 6) -> list[str]:
+    """VALUES lines for one (reading, value) contextual group: Format C for 1 entry, Format D chunks (2..16) otherwise.
+    type_id is 6 (Traditional) or, for the --simplified mirror, 5."""
     validate_bare_value(val)
     items = sorted(items, key=lambda it: (-it[1], it[0]))
     if len(items) == 1:
         ctx_t, sc = items[0]
         validate_context_tokens(ctx_t)
-        return [f"{val}\t{format_prob(sc, decimals)}\t6\t{encode_grouped_values(ctx_t)}"]
+        return [f"{val}\t{format_prob(sc, decimals)}\t{type_id}\t{encode_grouped_values(ctx_t)}"]
     out: list[str] = []
     pos = 0
     total_items = len(items)
@@ -814,7 +1032,7 @@ def emit_contextual_lines(val: str, items: list[tuple[tuple[str, ...], float]], 
         rem = total_items - pos
         chunk_cnt = 15 if rem == 17 else min(rem, 16)
         chunk = items[pos : pos + chunk_cnt]
-        cells = [f"!{val}", "6"]
+        cells = [f"!{val}", str(type_id)]
         for ctx_t, sc in chunk:
             validate_context_tokens(ctx_t)
             cells.append(format_prob(sc, decimals))
@@ -959,6 +1177,8 @@ def _input_files(args: argparse.Namespace, packs: list[str]) -> list[str]:
     if args.colloq_uni_w > 0.0 or args.colloq_bi_w > 0.0:
         files.append(args.colloq_path or os.path.join(lm_dir, "colloquial.sjlm"))
     files += [f for f in (args.trigram_path, args.extra_ngrams) if f]
+    if args.simplified:
+        files += [os.path.join(args.opencc_dir, n) for n in OPENCC_SHA256]
     return [f for f in files if os.path.isfile(f)]  # demote.tsv is the only optional one
 
 
@@ -966,7 +1186,7 @@ def finish_stats(stats: dict, args: argparse.Namespace, packs: list[str], txtmap
     """Make the stats path-free, add "inputs", and write build_stats.json (inside --out-dict, else next to the txtMap)."""
     root = args.shanjie_root
     flags = dict(vars(args))
-    for k in ("shanjie_root", "out_dict", "out_txtmap", "companion_dir", "kn_path", "colloq_path", "trigram_path", "extra_ngrams", "base_txtmap"):
+    for k in ("shanjie_root", "out_dict", "out_txtmap", "companion_dir", "kn_path", "colloq_path", "trigram_path", "extra_ngrams", "base_txtmap", "opencc_dir", "compare_factory"):
         if flags.get(k):
             flags[k] = _rel(flags[k], root)
     stats["flags"] = flags
@@ -1117,6 +1337,29 @@ def build_from_base(args: argparse.Namespace, out_dict: str | None, txtmap_path:
 def build_textmap(args: argparse.Namespace) -> dict:
     t_start = time.perf_counter()
     packs = parse_packs(args.packs)
+    # Base mode copies an existing file's lines and has no Simplified or meta step: refuse the flags rather than ignore them.
+    if args.base_txtmap and (args.simplified or args.vendor is not None or args.build_meta):
+        die("--simplified, --vendor and --build-meta are not supported together with --base-txtmap")
+    if args.vendor is not None:
+        try:
+            validate_bare_value(args.vendor)
+        except ValueError as e:
+            die(f"--vendor: {e}")
+    meta_lines: dict[str, str] = {}
+    if args.vendor is not None:
+        meta_lines[VENDOR_KEY] = f"{args.vendor}\t0\t{META_TYPE_ID}"
+    if args.build_meta:
+        # The data commit's own time, not the build time, so the same data rebuilds to the same bytes.
+        head = _git(args.shanjie_root, "rev-parse", "HEAD")
+        if head is None:
+            die("--build-meta needs --shanjie-root to be the top of a git work tree")
+        if _git(args.shanjie_root, "status", "--porcelain", "--untracked-files=no"):
+            die("--build-meta: --shanjie-root has uncommitted changes to tracked files")
+        meta_lines[BUILD_TIMESTAMP_KEY] = f"{BUILD_TIMESTAMP_KEY}\t{int(_git(args.shanjie_root, 'log', '-1', '--format=%ct'))}\t{META_TYPE_ID}"
+        meta_lines[COMMIT_HASH_KEY] = f"{head}\t0\t{META_TYPE_ID}"
+    t2s = make_t2s(*load_opencc(args.opencc_dir)) if args.simplified else None
+    if args.compare_factory and not os.path.isfile(args.compare_factory):
+        die(f"--compare-factory file not found: {os.path.basename(args.compare_factory)}")
 
     # A 33 MB output inside the repo work tree would be committed by mistake: refuse it.
     root_real = os.path.realpath(args.shanjie_root)
@@ -1585,16 +1828,32 @@ def build_textmap(args: argparse.Namespace) -> dict:
     for (reading, value, ctx_tuple), prob in contextual_entries.items():
         ctx_by_reading[reading][value].append((ctx_tuple, prob))
 
-    all_keys = sorted(set(uni_final.keys()) | set(ctx_by_reading.keys()), key=lambda k: k.encode("utf-8"))
+    # --simplified: every typeID 6 entry again as typeID 5 with value and context converted; entries that collapse keep the highest score.
+    chs_entries: dict[tuple[str, str, tuple[str, ...]], float] = {}
+    if t2s is not None:
+        for (reading, value, ctx_tuple), prob in contextual_entries.items():
+            ckey = (reading, t2s(value), tuple(t2s(c) for c in ctx_tuple))
+            if prob > chs_entries.get(ckey, -math.inf):
+                chs_entries[ckey] = prob
+    chs_by_reading: dict[str, dict[str, list[tuple[tuple[str, ...], float]]]] = defaultdict(lambda: defaultdict(list))
+    for (reading, value, ctx_tuple), prob in chs_entries.items():
+        chs_by_reading[reading][value].append((ctx_tuple, prob))
+
+    key_set = set(uni_final.keys()) | set(ctx_by_reading.keys())
+    key_set |= meta_lines.keys()
+    all_keys = sorted(key_set, key=lambda k: k.encode("utf-8"))
 
     value_lines: list[str] = []
     key_map_lines: list[str] = []
     unigram_entry_count = 0
     unigram_line_count = 0
     contextual_line_count = 0
+    chs_contextual_line_count = 0
 
     for reading in all_keys:
         start_line = len(value_lines)
+        if reading in meta_lines:
+            value_lines.append(meta_lines[reading])
 
         # Unigrams: Format B grouped by descending rounded score
         u_entries = uni_final.get(reading)
@@ -1606,10 +1865,18 @@ def build_textmap(args: argparse.Namespace) -> dict:
                 unigram_entry_count += 1
             for sc in sorted(prob_groups.keys(), reverse=True):
                 words_cell = encode_grouped_values(prob_groups[sc])
-                value_lines.append(f"@{format_prob(sc, decimals)}\t\x07\t{words_cell}")
+                # Simplified cell (EntryType 5): the same words converted, deduplicated in order; \a (no words) without --simplified.
+                chs_cell = encode_grouped_values(dedupe(t2s(w) for w in prob_groups[sc])) if t2s is not None else "\x07"
+                value_lines.append(f"@{format_prob(sc, decimals)}\t{chs_cell}\t{words_cell}")
                 unigram_line_count += 1
 
-        # Contextuals: grouped by (value, typeID=6), Format C for 1 entry, Format D (chunk 2..16) for >= 2
+        # Contextuals: grouped by (value, typeID), Format C for 1 entry, Format D (chunk 2..16) for >= 2; typeID 5 lines (--simplified) first
+        chs_by_val = chs_by_reading.get(reading)
+        if chs_by_val:
+            for val in sorted(chs_by_val.keys(), key=lambda x: x.encode("utf-8")):
+                new_lines = emit_contextual_lines(val, chs_by_val[val], decimals, 5)
+                value_lines.extend(new_lines)
+                chs_contextual_line_count += len(new_lines)
         c_by_val = ctx_by_reading.get(reading)
         if c_by_val:
             for val in sorted(c_by_val.keys(), key=lambda x: x.encode("utf-8")):
@@ -1650,11 +1917,13 @@ def build_textmap(args: argparse.Namespace) -> dict:
             f.write("\n")
     t_ser = time.perf_counter() - t0
 
+    check_third_party_tables(txtmap_path)
+
     # 8. Strict self-validation
     t0 = time.perf_counter()
     if args.validate:
         try:
-            v_entries, v_keys = validate_textmap_file(txtmap_path)
+            v_entries, v_keys = validate_textmap_file(txtmap_path, t2s=t2s)
         except Exception as e:
             die(f"self-validation failed for {txtmap_path}: {e}", code=2)
     else:
@@ -1681,6 +1950,9 @@ def build_textmap(args: argparse.Namespace) -> dict:
         "extra_unigram_added": uni_added,
         "contextual_total_entries": len(contextual_entries),
         "contextual_lines": contextual_line_count,
+        "meta_lines": meta_lines,
+        "chs_contextual_entries": len(chs_entries),
+        "chs_contextual_lines": chs_contextual_line_count,
         "copied_companions": copied_companions,
         "validated": args.validate,
         "timing_sec": {
@@ -1722,6 +1994,11 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--colloq-bi-w", type=float, default=0.0, help="Colloquial bigram blend weight (default 0.0)")
     ap.add_argument("--trigram-path", default=None, help="Optional SJT30001 trigram table path")
     ap.add_argument("--extra-ngrams", default=None, help="Optional TSV (reading\\tvalue\\tcontext\\tprob[\\tsource]) overrides; empty context = unigram override/add")
+    ap.add_argument("--simplified", action="store_true", help="Also write the Simplified column (EntryType 5) and typeID 5 contextual lines, converted with OpenCC TSPhrases/TSCharacters from --opencc-dir")
+    ap.add_argument("--opencc-dir", default=default_opencc_dir(), help="Folder with OpenCC TSPhrases.txt and TSCharacters.txt, sha256-checked (default $SHANJIE_CACHE/sources/opencc)")
+    ap.add_argument("--vendor", default=None, help="Write one meta unigram: key _VENDOR, value TEXT, score 0, typeID 2")
+    ap.add_argument("--build-meta", action="store_true", help="Write meta unigrams _BUILD_TIMESTAMP (data commit's committer time) and _COMMIT_HASH (its SHA); --shanjie-root must be a clean git work tree")
+    ap.add_argument("--compare-factory", default=None, help="The user's own vChewing VanguardFactoryDict4Typing.txtMap: after writing, compare line categories with the output and exit 2 when the output lacks one the factory file has (except FACTORY_ABSENT_OK)")
     ap.add_argument("--base-txtmap", default=None, help="Existing TextMap 2.0 file: skip the Shanjie build, apply only --extra-ngrams overrides (other build flags ignored)")
 
     # Unigram tuning
@@ -1777,6 +2054,12 @@ def main() -> int:
 
     stats = build_textmap(args)
     print(json.dumps({k: v for k, v in stats.items() if k != "flags"}, ensure_ascii=False, indent=2))
+    if args.compare_factory:
+        out = os.path.join(os.path.realpath(args.out_dict), "VanguardFactoryDict4Typing.txtMap") if args.out_dict else os.path.realpath(args.out_txtmap)
+        table, missing = compare_factory(args.compare_factory, out)
+        print(table)
+        if missing:
+            die("the factory file has categories the output lacks and FACTORY_ABSENT_OK does not allow: " + ", ".join(missing))
     return 0
 
 
