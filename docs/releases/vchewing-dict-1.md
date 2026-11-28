@@ -1,4 +1,4 @@
-〔草稿：issue 號碼與 tools PR 號碼待填，建 Release 前拿掉這一行〕
+〔草稿：issue 號碼待填，建 Release 前拿掉這一行〕
 
 給[唯音輸入法](https://github.com/vChewing/vChewing-macOS)（vChewing）用的辭典檔，條目、讀音與分數全部從善解的詞庫與模型轉出來，不含唯音原廠辭典的任何一筆。兩個專案合作的經過與唯音那邊怎麼載入，見 issue #ISSUE。
 
@@ -14,7 +14,7 @@
 
 從善解 repo 的 commit `1a9899ac` 建出來：小麥注音基底與它推出的變調讀音、疊加層、名單層（含「善解」「唯音」等軟體名稱與車站、醫院、公司等專有名詞）、動漫、資訊、迷因、美妝四個詞包，以及通語 SJ-LM-7-9.7M 與承接 SJ-KN-2-397K 的詞頻。單字與詞的分數來自這些詞庫與通語的詞頻，另外收 40 萬條「前一個詞 → 下一個詞」的二元組，讓唯音在常見的前後文裡選對。
 
-重現方式：`tools/vanguard_textmap.py`（PR #TOOLS）照它說明裡的旗標，在同一個 commit 上會建出逐位元組相同的檔。
+重現方式：用 `tools/vanguard_textmap.py`（PR #140 加入），把 `--shanjie-root` 指向 commit `1a9899ac` 的 worktree、帶上定版旗標，會建出逐位元組相同的檔。步驟與旗標見 [`docs/spec/vanguard-textmap.md`](https://github.com/Nanako0129/shanjie/blob/main/docs/spec/vanguard-textmap.md) 第 10 節。
 
 ## 量到的效果
 
