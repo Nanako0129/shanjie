@@ -41,7 +41,7 @@ TextMap 2.0 檔：標頭（`VERSION 2.0`、`TYPE TYPING`、`READING_SEPARATOR -`
 對每個（讀音 r、詞 w），依序：
 
 1. 起點是詞庫分數（疊加層、名單層、詞包的列一併進來）。
-2. **壓上限（cap_overlay，`--no-cap-overlay` 關）**：`overlay-add.tsv`、`names-add.tsv` 與非 `acg-oov` 詞包的詞，若在通語裡有詞頻 c，分數取 `min(分數, log10(c/N))`；通語裡沒有的詞，`overlay-add.tsv` 與 `names-add.tsv` 的扣 1.0（非 `acg-oov` 詞包的詞不扣）。`sandhi-add.tsv` 的詞不壓、不扣。`acg-oov` 詞包的詞不壓、不扣、不參與下面的混合。
+2. **壓上限（cap_overlay，`--no-cap-overlay` 關）**：判斷以詞（字串）為單位，不以列為單位。一個詞只要出現在 `overlay-add.tsv`、`names-add.tsv` 或非 `acg-oov` 詞包的任一列，它在每個讀音、每個來源（含 `mcbpmf-data.txt` 與 `sandhi-add.tsv`）的列都受這一步影響：通語裡有詞頻 c 時分數取 `min(分數, log10(c/N))`；通語裡沒有時扣 1.0，但這個詞也出現在非 `acg-oov` 詞包的列裡時不扣。只出現在 `mcbpmf-data.txt` 或 `sandhi-add.tsv` 的詞不壓、不扣。一個詞只要出現在 `acg-oov` 詞包的任一列，它所有的列都不壓、不扣，也不參與下面的混合。
 3. 套異體順序。
 4. **混合通語詞頻（`--uni-lam` λ）**：若詞在通語裡有詞頻，`p1 = c/N`；有 `kn.sjkn` 時 `p1 = β·(n₁₊(w)+1)/T + (1−β)·p1`（β 是 `--kn-beta`，n₁₊ 是接續類型數，T 是側檔總數，字詞表前兩個保留詞不混）；有 `--colloq-uni-w` 時再與常談詞頻混合。分數成為 `λ·log10(p1) + (1−λ)·原分數`。通語沒有而常談有的詞，把原分數換成機率後與常談混合（細節在程式 `build_textmap` 的第 3 步）。
 5. `--len-bonus`：每多一個字加這個值（預設 0）。
