@@ -20,7 +20,7 @@ use crate::english_auto::{AutoTable, Params as AutoParams};
 mod digit_layer;
 use digit_layer::{DRun, DigitAlt, DigitCache, DigitEvent, Late, LateEvent};
 use crate::tinylm::{manual_mask, Learning, RerankLevel, TinyLm, TOPK};
-use crate::{decode_beam, Lexicon, ManualSet, NoLearning, VariantOrder, BEAM_S1};
+use crate::{decode_beam, Builder, Lexicon, ManualSet, NoLearning, OverlayLayer, VariantOrder, BEAM_S1};
 use std::collections::{HashMap, HashSet};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
@@ -1300,26 +1300,28 @@ pub const VARIANT_ORDER_FILE: &str = "variant-order.tsv";
 
 /// `load_lexicon_extra_detailed` and the length of the `PACK_OOV` prefix of the returned text (`read_packs_split`).
 fn load_lexicon_split(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: Option<&Path>, names: bool) -> Result<(Arc<Lexicon>, String, usize), LoadError> {
+    // Layer by layer: each file's text is fed to the builder and dropped before the next is read, so the 21 MB overlay text is never joined.
+    let mut b = Builder::default();
     let base = read_file(data_dir.join("mcbpmf-data.txt"))?;
-    let overlay = read_file(data_dir.join("overlay-add.tsv"))?;
-    let sandhi = read_file(data_dir.join("sandhi-add.tsv"))?;
-    let mut text = join_overlays(overlay, &sandhi);
-    if names {
-        text = join_overlays(text, &read_file(data_dir.join(NAMES_FILE))?);
+    b.feed_base(&base);
+    drop(base);
+    let layers = [("overlay-add.tsv", OverlayLayer::Overlay), ("sandhi-add.tsv", OverlayLayer::Sandhi), (NAMES_FILE, OverlayLayer::Names)];
+    for (file, layer) in layers.into_iter().filter(|&(_, l)| names || l != OverlayLayer::Names) {
+        b.feed_overlay(&read_file(data_dir.join(file))?, layer);
     }
     let (mut extra, oov_len) = match packs {
         Some((dir, mask)) => read_packs_split(dir, mask)?,
         None => (String::new(), 0),
     };
+    b.feed_overlay(&extra, OverlayLayer::Pack);
     if let Some(f) = extra_file {
-        extra = join_overlays(extra, &read_file(f.to_path_buf())?);
-    }
-    if !extra.is_empty() {
-        text = join_overlays(text, &extra);
+        let text = read_file(f.to_path_buf())?;
+        b.feed_overlay(&text, OverlayLayer::Extra);
+        extra = join_overlays(extra, &text);
     }
     // Required like the other data files (docs/spec/decoder.md §2.3): missing, malformed, or naming a spelling the lexicon lacks is a load failure.
     let variants = VariantOrder::parse(&read_file(data_dir.join(VARIANT_ORDER_FILE))?).map_err(|e| LoadError::Parse { path: data_dir.join(VARIANT_ORDER_FILE), detail: e.to_string() })?;
-    let lex = Lexicon::parse_with_variants(&base, Some(&text), Some(&variants)).map_err(|e| LoadError::Parse { path: data_dir.to_path_buf(), detail: e.to_string() })?;
+    let lex = b.finish(Some(&variants), crate::apply_variant_order).map_err(|e| LoadError::Parse { path: data_dir.to_path_buf(), detail: e.to_string() })?;
     // Required too (docs/spec/lexicon-and-packs.md §2.12): the rerank-protect words join the manual mask; missing or malformed is a load failure.
     let protect = read_file(data_dir.join(RERANK_PROTECT_FILE))?;
     let lex = lex.with_protected(&protect).map_err(|detail| LoadError::Parse { path: data_dir.join(RERANK_PROTECT_FILE), detail })?;
@@ -1455,8 +1457,8 @@ impl Engine {
         e.install_lm(shared.lm.clone(), Some(shared))?;
         e.set_tinylm(shared.tinylm.clone());
         if let Some(t) = &shared.colloquial {
-            let dir = e.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
-            e.colloquial = Some(Arc::new(e.colloquial_on(t.clone(), dir).map_err(|_| EngineError::LoadFailed)?));
+            e.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
+            e.colloquial = Some(Arc::new(e.colloquial_on(t.clone())));
         }
         Ok(e)
     }
@@ -1648,26 +1650,25 @@ impl Engine {
         self.left_cut = false;
     }
 
-    /// The colloquial table at `path` (docs/spec/semantic-rerank.md §4), with the word sets of its k term read from the
-    /// engine's lexicon folder (`mcbpmf-data.txt`, `overlay-add.tsv`) and the pack rows this engine was built with. Callable before or
+    /// The colloquial table at `path` (docs/spec/semantic-rerank.md §4), with the word sets of its k term read off the engine's lexicon
+    /// (built from `mcbpmf-data.txt`, `overlay-add.tsv` and the pack rows this engine was built with; no file is read again). Callable before or
     /// after `load_lm` / `load_tinylm`: the pairing is checked per job. Turns the SR-TW-M first-word estimate on (`Colloquial::unseen_start_unigram`).
-    /// Fails (the previous table, or none, stays) when the engine has no data folder or a file cannot be read or parsed. Drops the pending job.
+    /// Fails (the previous table, or none, stays) when the engine has no data folder or the table file cannot be read or parsed. Drops the pending job.
     pub fn load_colloquial(&mut self, path: &Path) -> Result<(), EngineError> {
         self.invalidate();
-        let dir = self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
+        self.data_dir.as_ref().ok_or(EngineError::LoadFailed)?;
         let table = Arc::new(ColloquialTable::load(path).map_err(|_| EngineError::LoadFailed)?);
-        self.colloquial = Some(Arc::new(self.colloquial_on(table, dir).map_err(|_| EngineError::LoadFailed)?));
+        self.colloquial = Some(Arc::new(self.colloquial_on(table)));
         Ok(())
     }
 
-    /// The colloquial term on a loaded table: the word sets of k from `dir` and this engine's pack rows (`load_colloquial`, `new_shared`).
-    fn colloquial_on(&self, table: Arc<ColloquialTable>, dir: &Path) -> Result<Colloquial, colloquial::ColloquialError> {
-        let base = std::fs::read_to_string(dir.join("mcbpmf-data.txt")).map_err(|_| colloquial::ColloquialError::Read)?;
-        let overlay = std::fs::File::open(dir.join("overlay-add.tsv")).map_err(|_| colloquial::ColloquialError::Read)?;
-        let mut co = Colloquial::with_table(table, &base, std::io::BufReader::new(overlay), self.pack_text.as_deref())?;
+    /// The colloquial term on a loaded table: the word sets of k read off this engine's lexicon, which holds the pack rows it was built with
+    /// (`load_colloquial`, `new_shared`).
+    fn colloquial_on(&self, table: Arc<ColloquialTable>) -> Colloquial {
+        let mut co = Colloquial::with_table_lexicon(table, self.lex.clone());
         // The shipping setting (docs/spec/semantic-rerank.md §4.4): a first word the table has no `<s>` bigram for is scored by the unigram estimate.
         co.set_unseen_start_unigram(true);
-        Ok(co)
+        co
     }
 
     /// The loaded colloquial table, if any (tests).

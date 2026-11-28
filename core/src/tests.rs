@@ -585,3 +585,90 @@ fn judge_v2_layers() {
     let other = v(&["ㄔㄨㄢˋ", "ㄌㄧㄢˊ", "ㄕㄣˇ"]);
     assert!(!Judge2::new(&f, &l, "串聯沉", &other, &[]).ok("串連沈"), "the character pair needs its reading");
 }
+
+/// A lexicon built layer by layer (`Builder::feed_*`), as `engine::load_lexicon_split` does.
+fn layered(base: &str, layers: &[(&str, OverlayLayer)]) -> Result<Lexicon, Error> {
+    let mut b = Builder::default();
+    b.feed_base(base);
+    for (t, l) in layers {
+        b.feed_overlay(t, *l);
+    }
+    b.finish(None, apply_variant_order)
+}
+
+/// The k words: overlay-add.tsv and pack rows count, sandhi, names and `--extra-overlay` rows do not; any base row of the word (under any
+/// reading) takes it out; a colloquial-tagged word counts like the rows of its layer, also when the lexicon dropped the row.
+#[test]
+fn overlay_only_follows_the_layers() {
+    let base = "a 基 -1.0\nb 共 -1.0\n";
+    let ovl = "a\t疊\t-1.0\t0\nd\t共\t-1.0\t0\nc\t異讀\t-1.0\t0\n";
+    let sandhi = "a\t三\t-1.0\t0\n";
+    let names = "a\t名\t-1.0\t0\nd\t疊名\t-1.0\t0\n";
+    let pack = "a\t包\t-1.0\tacg\n";
+    let extra = "a\t外\t-1.0\t0\n";
+    let l = layered(base, &[(ovl, OverlayLayer::Overlay), (sandhi, OverlayLayer::Sandhi), (names, OverlayLayer::Names), (pack, OverlayLayer::Pack), (extra, OverlayLayer::Extra)]).unwrap();
+    for (w, want) in [("基", false), ("共", false), ("疊", true), ("異讀", true), ("三", false), ("名", false), ("疊名", false), ("包", true), ("外", false), ("無", false)] {
+        assert_eq!(l.is_overlay_only(w), want, "{w}");
+    }
+    // a word under another reading in the base is not overlay-only, and a later layer's row does not change that
+    let l = layered("a 詞 -1.0\n", &[("b\t詞\t-1.0\t0\n", OverlayLayer::Overlay), ("c\t詞\t-1.0\t0\n", OverlayLayer::Pack)]).unwrap();
+    assert!(!l.is_overlay_only("詞"));
+    // the same word in the overlay and in the names: still counted (the overlay row is one of its rows)
+    let l = layered("", &[("a\t詞\t-1.0\t0\n", OverlayLayer::Overlay), ("b\t詞\t-1.0\t0\n", OverlayLayer::Names)]).unwrap();
+    assert!(l.is_overlay_only("詞"));
+}
+
+#[test]
+fn overlay_only_of_colloquial_rows() {
+    let colloq = tone3::COLLOQ_TAG;
+    let base = "a 甲 -1.0\nb 乙 -1.0\n";
+    // 甲 is in the base (not counted); 新 is also an overlay row (counted once through it); 兩字 has one character for one syllable
+    // fewer than its reading says, so the lexicon drops the colloquial row (counted from the extra list); 名單 comes from names (not counted)
+    let ovl = format!("a\t甲\t-1.0\t{colloq}\na\t新\t-1.0\t0\na\t新\t-2.0\t{colloq}\na-b\t兩字\t-1.0\t0\nc\t兩字\t-1.0\t{colloq}\na-b\t孤立\t-1.0\t{colloq}\n");
+    let names = format!("a\t名單\t-1.0\t{colloq}\n");
+    let l = layered(base, &[(&ovl, OverlayLayer::Overlay), (&names, OverlayLayer::Names)]).unwrap();
+    let ok = |w: &str| l.is_overlay_only(w);
+    assert!(!ok("甲") && ok("新") && ok("兩字") && ok("孤立") && !ok("名單"));
+    // 孤立 is no entry of the lexicon (the row has two syllables for one character), so it sits in the extra list only
+    assert!(l.word_info("孤立").is_none());
+    assert_eq!(l.overlay_extra.len(), 1);
+    // a pack row does the same
+    let l = layered(base, &[(&format!("a\t只包\t-1.0\t{colloq}\n"), OverlayLayer::Pack)]).unwrap();
+    assert!(l.is_overlay_only("只包"));
+}
+
+#[test]
+fn layered_build_equals_the_joined_text() {
+    let base = "a 基 -1.0\nb 共 -1.0\na-b 共同 -2.0\n";
+    let layers = [
+        ("a\t疊\t-1.0\tmanual\nd\t共\t-1.5\t0\nc\t異\t-1.0\tcolloq\n", OverlayLayer::Overlay),
+        ("a\t三\t-1.0\t0", OverlayLayer::Sandhi),
+        ("a\t名\t-1.0\t0\n", OverlayLayer::Names),
+        ("c\t包\t-3.0\tacg\n", OverlayLayer::Pack),
+        ("a\t外\t-1.0\t0\n", OverlayLayer::Extra),
+    ];
+    let joined: String = layers.iter().map(|(t, _)| if t.ends_with('\n') { t.to_string() } else { format!("{t}\n") }).collect();
+    let one = Lexicon::parse_with(base, Some(&joined)).unwrap();
+    let many = layered(base, &layers).unwrap();
+    assert_eq!(one.words, many.words);
+    assert_eq!(one.by_word, many.by_word);
+    assert_eq!(one.key_pool, many.key_pool);
+    assert_eq!(one.main_ents, many.main_ents);
+    assert_eq!(one.ents.iter().map(|e| (e.off, e.len, e.score.to_bits())).collect::<Vec<_>>(), many.ents.iter().map(|e| (e.off, e.len, e.score.to_bits())).collect::<Vec<_>>());
+    assert_eq!(*one.manual(), *many.manual());
+}
+
+/// A bad overlay row stops the reading of every later layer; a duplicate before it is reported first; a bad base score comes before both.
+#[test]
+fn layered_error_order() {
+    let bad = "no tabs here\n";
+    let dup = "a\t基\t-1.0\t0\n";
+    let r = layered("a 基 -1.0\n", &[(dup, OverlayLayer::Overlay), (bad, OverlayLayer::Names)]);
+    assert_eq!(r.err(), Some(Error::OverlayDuplicate { word_len: 1 }));
+    let r = layered("a 基 -1.0\n", &[(bad, OverlayLayer::Overlay), (dup, OverlayLayer::Pack)]);
+    assert_eq!(r.err(), Some(Error::BadOverlayRow { line_len: 12 }));
+    let r = layered("a 基 x\n", &[(bad, OverlayLayer::Overlay)]);
+    assert_eq!(r.err(), Some(Error::BadScore { token_len: 1 }));
+    // `parse_with` (one overlay text) gives the same answers
+    assert_eq!(Lexicon::parse_with("a 基 -1.0\n", Some(&format!("{dup}{bad}"))).err(), Some(Error::OverlayDuplicate { word_len: 1 }));
+}

@@ -649,11 +649,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     let rss_after = tinylm.is_some().then(rss_kb).flatten();
     let dir = root().join("data/lexicon");
-    // The colloquial table and the word sets of its k term, from the engine's own loader (the engine's pack rows are the `--packs` rows).
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
+    // The colloquial table and the word sets of its k term, read off the lexicon just built (the engine's own way: its pack rows are the `--packs` rows,
+    // `--extra-overlay` rows do not count).
     let colloq = match &colloquial_core {
         Some(f) => {
-            let pack_text = read_packs_detailed(&pdir, packs).map_err(|e| e.to_string())?;
-            let mut co = Colloquial::load_from_dir(f, &dir, Some(&pack_text)).map_err(|e| format!("--colloquial-core: {e}"))?;
+            let mut co = Colloquial::load_with_lexicon(f, lex.clone()).map_err(|e| format!("--colloquial-core: {e}"))?;
             co.set_first_unigram(first_unigram);
             co.set_unseen_start_unigram(!no_unseen_start);
             Some(co)
@@ -672,7 +673,6 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         let why = if tl.is_none() { "no --tinylm is loaded" } else { "the --tinylm model is not the one the term is paired with" };
         eprintln!("warning: --colloquial-core is loaded but the colloquial term is off ({why}); the tag says -colloq:. To measure the term as it ships on this model, add --tinylm-paired.");
     }
-    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
