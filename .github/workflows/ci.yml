@@ -970,9 +970,9 @@ jobs:
           echo "default CFBundleIdentifier: $ID"
           [ "$ID" = com.nyanako.inputmethod.shanjie.dev ]
           [ "$(pb CFBundleDisplayName "$APP/Contents/Info.plist")" = 善解（開發版） ]
-          [ "$(pb CFBundleName "$APP/Contents/Info.plist")" = "Shanjie (Dev)" ]
+          [ "$(pb CFBundleName "$APP/Contents/Info.plist")" = "BopoMola (Dev)" ]
           [ "$(pb CFBundleDisplayName "$APP/Contents/Resources/zh-Hant.lproj/InfoPlist.strings")" = 善解（開發版） ]
-          [ "$(pb CFBundleDisplayName "$APP/Contents/Resources/en.lproj/InfoPlist.strings")" = "Shanjie (Dev)" ]
+          [ "$(pb CFBundleDisplayName "$APP/Contents/Resources/en.lproj/InfoPlist.strings")" = "BopoMola (Dev)" ]
           [ ! -e "$APP/Contents/Resources/container-migration.plist" ]
           [ ! -e build/default/善解輸入法.app ]
 

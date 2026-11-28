@@ -12,7 +12,7 @@ public enum InstallCommand {
         }
     }
 
-    static let settingsSteps = "install: open System Settings > Keyboard > Input Sources, press +, choose Shanjie under Chinese (Traditional) and press Add"
+    static let settingsSteps = "install: open System Settings > Keyboard > Input Sources, press +, choose BopoMola under Chinese (Traditional) and press Add"
 
     /// `acceptedAfterWait` is the result of `Registration.waitUntilAccepted` (only read for a
     /// skipped `notAccepted`).

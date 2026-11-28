@@ -13,8 +13,8 @@
 #   BUNDLE_ID        default com.nyanako.inputmethod.shanjie.dev, the development ID (docs/spec/install-and-update.md §2.1, §2.6, §6.1). The
 #                    shipping ID com.nyanako.inputmethod.shanjie is passed explicitly (release.yml;
 #                    `make bundle BUNDLE_ID=com.nyanako.inputmethod.shanjie`). The ID alone decides:
-#                      shipping ID  善解輸入法.app, 善解輸入法 / Shanjie, with container-migration.plist
-#                      any other    善解（開發版）.app, 善解（開發版） / Shanjie (Dev), no migration list
+#                      shipping ID  善解輸入法.app, 善解輸入法 / BopoMola, with container-migration.plist
+#                      any other    善解（開發版）.app, 善解（開發版） / BopoMola (Dev), no migration list
 #                    The input mode ID, the connection name, the helper's bundle ID (<ID>.updater), the preferences domain and
 #                    the sandbox container all follow the ID.
 #   OUT_DIR          default build, relative to the repository; the app is $OUT_DIR/<folder above>
@@ -96,9 +96,9 @@ BUNDLE_ID="${BUNDLE_ID:-$SHIPPING_ID.dev}"
 # docs/spec/install-and-update.md §2.1, §2.6, §6.1: the names by ID (scripts/check-app.sh and install-ime.sh use the same table). The base display
 # name must equal the folder name.
 if [ "$BUNDLE_ID" = "$SHIPPING_ID" ]; then
-  NAME_ZH=善解輸入法 NAME_EN=Shanjie
+  NAME_ZH=善解輸入法 NAME_EN=BopoMola
 else
-  NAME_ZH=善解（開發版） NAME_EN="Shanjie (Dev)"
+  NAME_ZH=善解（開發版） NAME_EN="BopoMola (Dev)"
 fi
 OUT_DIR="${OUT_DIR:-build}"
 # rm -rf below acts on $OUT_DIR/<name>.app: keep it inside the repository.

@@ -26,9 +26,9 @@ fail() { echo "error: $*" >&2; exit 1; }
 SHIPPING_ID=com.nyanako.inputmethod.shanjie
 ID="${EXPECTED_BUNDLE_ID:-$SHIPPING_ID}"
 if [ "$ID" = "$SHIPPING_ID" ]; then
-  NAME_ZH=善解輸入法 NAME_EN=Shanjie
+  NAME_ZH=善解輸入法 NAME_EN=BopoMola
 else
-  NAME_ZH=善解（開發版） NAME_EN="Shanjie (Dev)"
+  NAME_ZH=善解（開發版） NAME_EN="BopoMola (Dev)"
 fi
 APP="${1:-$ROOT/build/$NAME_ZH.app}"
 BIN="$APP/Contents/MacOS/shanjie"
