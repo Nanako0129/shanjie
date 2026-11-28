@@ -1,6 +1,4 @@
-〔草稿：issue 號碼待填，建 Release 前拿掉這一行〕
-
-給[唯音輸入法](https://github.com/vChewing/vChewing-macOS)（vChewing）用的辭典檔，條目、讀音與分數全部從善解的詞庫與模型轉出來，不含唯音原廠辭典的任何一筆。兩個專案合作的經過與唯音那邊怎麼載入，見 issue #ISSUE。
+給[唯音輸入法](https://github.com/vChewing/vChewing-macOS)（vChewing）用的辭典檔，條目、讀音與分數全部從善解的詞庫與模型轉出來，不含唯音原廠辭典的任何一筆。兩個專案合作的經過與唯音那邊怎麼載入，見 issue #143。
 
 ## 內容
 
