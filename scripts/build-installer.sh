@@ -58,7 +58,7 @@ cp LICENSES/McBopomofo-MIT.txt LICENSES/data.md "$RES/LICENSES/"
 scripts/compile-app-icon.sh "$RES"   # the app icon (docs/spec/macos-shell.md §1.4): Assets.car and AppIcon.icns
 
 printf '"CFBundleName" = "%s";\n"CFBundleDisplayName" = "%s";\n' 安裝善解輸入法 安裝善解輸入法 > "$RES/zh-Hant.lproj/InfoPlist.strings"
-printf '"CFBundleName" = "%s";\n"CFBundleDisplayName" = "%s";\n' "Shanjie Installer" "Shanjie Installer" > "$RES/en.lproj/InfoPlist.strings"
+printf '"CFBundleName" = "%s";\n"CFBundleDisplayName" = "%s";\n' "BopoMola Installer" "BopoMola Installer" > "$RES/en.lproj/InfoPlist.strings"
 
 # Bundle ID deliberately outside the input method's prefix (docs/spec/install-and-update.md §5.1).
 cat > "$APP/Contents/Info.plist" <<EOF
@@ -70,7 +70,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundleExecutable</key><string>shanjie-installer</string>
   <key>CFBundleIdentifier</key><string>com.nyanako.shanjie.installer</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-  <key>CFBundleName</key><string>Shanjie Installer</string>
+  <key>CFBundleName</key><string>BopoMola Installer</string>
   <key>CFBundleDisplayName</key><string>安裝善解輸入法</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundleIconName</key><string>AppIcon</string>

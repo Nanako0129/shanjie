@@ -3,7 +3,7 @@ import XCTest
 
 // docs/spec/install-and-update.md §10.1: the exit code and message of `shanjie install`.
 final class InstallCommandTests: XCTestCase {
-    private let steps = "install: open System Settings > Keyboard > Input Sources, press +, choose Shanjie under Chinese (Traditional) and press Add"
+    private let steps = "install: open System Settings > Keyboard > Input Sources, press +, choose BopoMola under Chinese (Traditional) and press Add"
 
     func testSkippedDoneExitsZero() {
         let r = InstallCommand.report(.init(outcome: .done, skipped: true), acceptedAfterWait: true)

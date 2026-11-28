@@ -322,8 +322,8 @@ enum Screens {
     static let thisMacCost = L("安裝和每次更新都要輸入一次管理員密碼。", "Installing and every update ask for an administrator password once.")
     static let accountTitle = L("只裝在我的帳號", "My Account Only")
     static let accountText = L("不需要密碼，一鍵更新。有程式開著安全輸入時，系統會暫時停用善解。",
-                               "No password, one-click updates. The system disables Shanjie while another app holds Secure Keyboard Entry.")
-    static let accountCost = L("其他帳號看不到善解。", "Other accounts do not see Shanjie.")
+                               "No password, one-click updates. The system disables BopoMola while another app holds Secure Keyboard Entry.")
+    static let accountCost = L("其他帳號看不到善解。", "Other accounts do not see BopoMola.")
 
     /// `system`: the /Library copy's version (nil: none); `account`: the account copy's, when there is one.
     static func welcome(system: String?, account: String?, bundled: String) -> Screen {
@@ -339,9 +339,9 @@ enum Screens {
         }
         // docs/spec/install-and-update.md §5.3, §5.4 first, then docs/spec/install-and-update.md §9.2's rollback note.
         let details = L("「這台 Mac」把善解放進系統的輸入法資料夾，由系統保護檔案；之後更新時，善解更新會跳出系統的密碼框，請你輸入密碼來允許更新（框裡有一行說明固定是英文：「善解更新 wants permission to update 善解輸入法.」），只在你按下關於頁的「更新」之後出現。選「這台 Mac」時，有程式開著安全輸入的期間，你打的字會經過善解（和平常一樣：學習暫停、不讀前文、不記錄）；終端機開著「加密的鍵盤輸入」時，sudo 的密碼提示也一樣會經過善解。「只有我的帳號」就是之前的安裝方式。兩種之間可以重新打開安裝程式切換，學習資料與設定不受影響（container 依 bundle ID）。不是管理員的帳號，請選「只有我的帳號」，或請管理員安裝。\n執行中的舊版會被結束，上一版保留在同一個資料夾的 .shanjie-previous。\n退回 0.4.x 以前（沒有沙盒）的版本時，舊版看不到學習資料與設定，它們已搬進 ~/Library/Containers/com.nyanako.inputmethod.shanjie；退回期間學到的，再升級時不會搬過去。搬回的方法：https://github.com/Nanako0129/shanjie/blob/main/docs/sandbox-restore.md \n",
-                        "This Mac puts Shanjie in the system's input methods folder, where the system protects its files. Later updates show the system's password dialog asking for your password to allow the update (one line in it is always English: \"善解更新 wants permission to update 善解輸入法.\"), and only after you choose Update on the About page. With This Mac, while another app holds Secure Keyboard Entry, what you type goes through Shanjie (as always: learning paused, no reading of earlier text, nothing recorded); with Secure Keyboard Entry on in Terminal, the sudo password prompt goes through Shanjie too. My Account Only is the way it was installed before. Open the installer again to switch between the two; learned words and settings stay (the container follows the bundle ID). On an account that is not an administrator, choose My Account Only, or ask an administrator to install it.\nA running older copy is stopped; the previous version is kept in the same folder as .shanjie-previous.\nGoing back to a version without the sandbox (0.4.x or earlier), it sees no learned words or settings: they moved into ~/Library/Containers/com.nyanako.inputmethod.shanjie. What it learns is not moved on the next upgrade. To move the data back: https://github.com/Nanako0129/shanjie/blob/main/docs/sandbox-restore.md \n") + license
+                        "This Mac puts BopoMola in the system's input methods folder, where the system protects its files. Later updates show the system's password dialog asking for your password to allow the update (one line in it is always English: \"善解更新 wants permission to update 善解輸入法.\"), and only after you choose Update on the About page. With This Mac, while another app holds Secure Keyboard Entry, what you type goes through BopoMola (as always: learning paused, no reading of earlier text, nothing recorded); with Secure Keyboard Entry on in Terminal, the sudo password prompt goes through BopoMola too. My Account Only is the way it was installed before. Open the installer again to switch between the two; learned words and settings stay (the container follows the bundle ID). On an account that is not an administrator, choose My Account Only, or ask an administrator to install it.\nA running older copy is stopped; the previous version is kept in the same folder as .shanjie-previous.\nGoing back to a version without the sandbox (0.4.x or earlier), it sees no learned words or settings: they moved into ~/Library/Containers/com.nyanako.inputmethod.shanjie. What it learns is not moved on the next upgrade. To move the data back: https://github.com/Nanako0129/shanjie/blob/main/docs/sandbox-restore.md \n") + license
         // No primary button: Return chooses neither option.
-        return Screen(step: 0, title: L("善解輸入法 ", "Shanjie ") + bundled, body: lines.joined(separator: "\n"),
+        return Screen(step: 0, title: L("善解輸入法 ", "BopoMola ") + bundled, body: lines.joined(separator: "\n"),
                       seal: true, details: details, close: L("取消", "Cancel"), choices: true)
     }
 
@@ -371,39 +371,39 @@ enum Screens {
 
     /// docs/spec/install-and-update.md §5.3, §5.8: "My Account Only" while this Mac has a copy. Nothing changed.
     static func blocked() -> Screen {
-        Screen(step: 0, title: L("這台 Mac 已經裝了善解", "Shanjie is already installed for this Mac"),
+        Screen(step: 0, title: L("這台 Mac 已經裝了善解", "BopoMola is already installed for this Mac"),
                body: L("善解已經裝在 /Library/Input Methods，給這台 Mac 的每個帳號用，所以不能再只裝在你的帳號。什麼都沒有改。\n要改成只裝在你的帳號，請管理員在「終端機」執行下面的指令移除，再重新打開這個安裝程式。",
-                       "Shanjie is installed in /Library/Input Methods for every account on this Mac, so it cannot also be installed for your account only. Nothing was changed.\nTo install it for your account only instead, have an administrator run the command below in Terminal, then open this installer again."),
+                       "BopoMola is installed in /Library/Input Methods for every account on this Mac, so it cannot also be installed for your account only. Nothing was changed.\nTo install it for your account only instead, have an administrator run the command below in Terminal, then open this installer again."),
                seal: true, detail: RootStage.removalCommand, secondary: L("返回", "Back"), close: L("完成", "Done"),
                copyLabel: L("拷貝指令", "Copy Command"))
     }
 
     /// docs/spec/install-and-update.md §5.7, §5.9: after a location change. One button; never logs the user out.
     static let logOutSentence = L("請登出再登入一次，善解才會在所有 App 裡正常。登入後輸入法選單裡如果沒有善解，請重新打開這個安裝程式。",
-                                  "Log out and back in once, so that Shanjie works in every app. If Shanjie is not in the input menu after you log back in, open this installer again.")
+                                  "Log out and back in once, so that BopoMola works in every app. If BopoMola is not in the input menu after you log back in, open this installer again.")
 
-    /// System Settings may ask whether to allow Shanjie after the installer already shows its last page and bounces its Dock icon (the
+    /// System Settings may ask whether to allow BopoMola after the installer already shows its last page and bounces its Dock icon (the
     /// system accepts before it asks: VM, 2026-10-21), so the last pages say to answer it first.
-    static let allowFirst = L("系統設定如果問要不要允許善解，先按「允許」再登出。", "If System Settings asks whether to allow Shanjie, choose Allow before you log out.")
+    static let allowFirst = L("系統設定如果問要不要允許善解，先按「允許」再登出。", "If System Settings asks whether to allow BopoMola, choose Allow before you log out.")
 
     static func logOut() -> Screen {
         Screen(step: 3, title: L("✓ 已經裝好了，請登出再登入", "✓ Installed: log out and back in"), body: allowFirst + "\n\n" + logOutSentence,
                primary: L("好", "OK"))
     }
 
-    /// The two steps in the Keyboard pane, shared by every screen that asks the user to add Shanjie. The labels are the
+    /// The two steps in the Keyboard pane, shared by every screen that asks the user to add BopoMola. The labels are the
     /// zh_TW and en strings of KeyboardSettings.appex's Localizable.loctable (文字輸入, 輸入方式, 編輯⋯), read 2026-10-21.
     static let pressPlus = L("在「文字輸入」的「輸入方式」按「編輯⋯」，再按「+」。", "Under Text Input, next to Input Sources, choose Edit…, then press +.")
-    static let chooseShanjie = L("選「繁體中文」裡的「善解輸入法」，按「加入」。", "Choose Shanjie under Chinese (Traditional) and press Add.")
+    static let chooseShanjie = L("選「繁體中文」裡的「善解輸入法」，按「加入」。", "Choose BopoMola under Chinese (Traditional) and press Add.")
 
     /// docs/spec/install-and-update.md §5.7, §5.9: after a first "This Mac" install, the system may open System Settings by itself;
     /// the input method is added only after the log out. Step 2, like `activate`: activation is still to do.
     static func logOutThenAdd() -> Screen {
-        Screen(step: 2, title: L("✓ 已經裝好了，請登出再登入，再加入善解", "✓ Installed: log out and back in, then add Shanjie"),
+        Screen(step: 2, title: L("✓ 已經裝好了，請登出再登入，再加入善解", "✓ Installed: log out and back in, then add BopoMola"),
                body: L("1. 請登出再登入一次。\n2. 登入後到「系統設定 → 鍵盤」，", "1. Log out and back in once.\n2. Then open System Settings > Keyboard. ")
                    + pressPlus + "\n3. " + chooseShanjie + "\n\n"
                    + L("系統設定如果現在自己打開了：問要不要允許善解，就先按「允許」；然後可以關掉，登入後再加。登入後如果找不到善解，請重新打開這個安裝程式。",
-                       "If System Settings opened by itself just now: if it asks whether to allow Shanjie, choose Allow first; then you can close it and add Shanjie after you log back in. If you cannot find Shanjie then, open this installer again."),
+                       "If System Settings opened by itself just now: if it asks whether to allow BopoMola, choose Allow first; then you can close it and add BopoMola after you log back in. If you cannot find BopoMola then, open this installer again."),
                primary: L("好", "OK"))
     }
 
@@ -412,13 +412,13 @@ enum Screens {
     }
 
     static let copying = L("正在複製…", "Copying…")
-    /// docs/spec/install-and-update.md §5.7, §5.9: the system may ask whether the installer may enable Shanjie.
+    /// docs/spec/install-and-update.md §5.7, §5.9: the system may ask whether the installer may enable BopoMola.
     static let enabling = L("正在請系統啟用…如果系統問要不要允許，請按『允許』。", "Asking the system to turn it on… If it asks, choose Allow.")
     static let movingAccountCopy = L("正在把你帳號裡的那份移到 .shanjie-previous…", "Moving the copy in your account to .shanjie-previous…")
     static let loading = L("正在請系統改用新的那份…", "Asking the system to use the new copy…")
     static let password = L("請在系統的視窗輸入管理員密碼。", "Enter an administrator password in the system's dialog.")
     static let waiting = L("正在等系統啟用。如果系統跳出視窗，請允許「善解輸入法」。",
-                           "Waiting for the system to turn it on. If it asks, allow Shanjie.")
+                           "Waiting for the system to turn it on. If it asks, allow BopoMola.")
 
     static func failed(_ failure: Failure) -> Screen {
         Screen(step: 1, title: L("沒有裝好", "Not installed"), body: failure.message, detail: failure.detail, close: L("完成", "Done"))
@@ -436,7 +436,7 @@ enum Screens {
     static func activate(note: String? = nil) -> Screen {
         Screen(step: 2, title: L("還差一步：到系統設定加入", "One more step: add it in System Settings"),
                body: L("系統要在「輸入方式」裡加入，才會開始使用善解輸入法。\n\n1. 按「打開輸入方式設定」。\n2. ",
-                       "The system uses Shanjie only after you add it under Input Sources.\n\n1. Choose Open Input Sources Settings.\n2. ")
+                       "The system uses BopoMola only after you add it under Input Sources.\n\n1. Choose Open Input Sources Settings.\n2. ")
                    + pressPlus + "\n3. " + chooseShanjie + (note.map { "\n\n" + $0 } ?? ""),
                primary: L("打開輸入方式設定", "Open Input Sources Settings"), secondary: L("重新檢查", "Check Again"),
                close: L("完成", "Done"))
@@ -507,7 +507,7 @@ final class StepView: NSView {
     let detailsLabel = NSTextField(wrappingLabelWithString: "")
     let licenses = NSButton(title: L("顯示授權", "Licenses"), target: nil, action: nil)
     let tryField = NSTextField(string: "")
-    let switchButton = NSButton(title: L("切換到善解", "Switch to Shanjie"), target: nil, action: nil)
+    let switchButton = NSButton(title: L("切換到善解", "Switch to BopoMola"), target: nil, action: nil)
     let switchNote = NSTextField(wrappingLabelWithString: "")
     let primary = NSButton(title: "", target: nil, action: nil)
     let secondary = NSButton(title: "", target: nil, action: nil)
@@ -785,7 +785,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect: NSRect(origin: .zero, size: Look.windowSize),
                           styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = L("安裝善解輸入法", "Shanjie Installer")
+        window.title = L("安裝善解輸入法", "BopoMola Installer")
         window.delegate = self
         window.contentView = view
         window.autorecalculatesKeyViewLoop = true
@@ -1190,7 +1190,7 @@ final class Controller: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// as Shanjie's mode (the call can return noErr and not switch).
     @objc private func switchPressed() {
         window.makeFirstResponder(view.tryField)
-        let failed = L("切換失敗。請從選單列的輸入法選單選「善解輸入法」。", "Could not switch. Choose Shanjie from the input menu in the menu bar.")
+        let failed = L("切換失敗。請從選單列的輸入法選單選「善解輸入法」。", "Could not switch. Choose BopoMola from the input menu in the menu bar.")
         guard let bundleID = Paths.info(target)?["CFBundleIdentifier"] as? String, Registration.selectMode(bundleID: bundleID) else {
             view.switchNote.stringValue = failed
             return

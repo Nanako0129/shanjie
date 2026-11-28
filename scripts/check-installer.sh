@@ -16,8 +16,19 @@ RES="$APP/Contents/Resources"
 
 [ -x "$APP/Contents/MacOS/shanjie-installer" ] || fail "no installer executable"
 [ "$($PB -c 'Print :CFBundleIdentifier' "$PLIST")" = com.nyanako.shanjie.installer ] || fail "bundle ID"
+[ "$($PB -c 'Print :CFBundleName' "$PLIST")" = "BopoMola Installer" ] || fail "CFBundleName"
+[ "$($PB -c 'Print :CFBundleDisplayName' "$PLIST")" = 安裝善解輸入法 ] || fail "CFBundleDisplayName"
+[ "$($PB -c 'Print :LSHasLocalizedDisplayName' "$PLIST")" = true ] || fail "LSHasLocalizedDisplayName"
 [ "$($PB -c 'Print :LSMinimumSystemVersion' "$PLIST")" = 26.0 ] || fail "minimum system version"
 if $PB -c 'Print :LSUIElement' "$PLIST" >/dev/null 2>&1; then fail "the installer must be a regular app (no LSUIElement)"; fi
+for lp in "zh-Hant|安裝善解輸入法" "en|BopoMola Installer"; do
+  IFS='|' read -r l name <<<"$lp"
+  S="$RES/$l.lproj/InfoPlist.strings"
+  plutil -lint "$S" >/dev/null || fail "$l InfoPlist.strings does not lint"
+  for k in CFBundleName CFBundleDisplayName; do
+    [ "$($PB -c "Print :$k" "$S" 2>/dev/null)" = "$name" ] || fail "$l InfoPlist.strings: $k"
+  done
+done
 
 VERSION="$($PB -c 'Print :CFBundleShortVersionString' "$PLIST")"
 ZIP="${2:-$ROOT/build/shanjie-$VERSION.zip}"

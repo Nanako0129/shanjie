@@ -148,7 +148,7 @@
 
 依序做下列步驟（順序是規格：第 3 步之前不得啟動任何沙盒組建）：
 
-0. 預設組建（開發版 ID `com.nyanako.inputmethod.shanjie.dev`、名稱「善解（開發版）」/ `Shanjie (Dev)`、沒有移轉清單），只建置並核對 Info.plist 與 `InfoPlist.strings`。
+0. 預設組建（開發版 ID `com.nyanako.inputmethod.shanjie.dev`、名稱「善解（開發版）」/ `BopoMola (Dev)`、沒有移轉清單），只建置並核對 Info.plist 與 `InfoPlist.strings`。
 1. 正式 ID 組建（`BUNDLE_ID=com.nyanako.inputmethod.shanjie`），只建置；`container-migration.plist` 的 `Move` 恰為 `${ApplicationSupport}/shanjie`。
 2. 沒有移轉清單的拋棄式組建（`…ci-nomanifest`），只建置。
 3. `check-app.sh` 在 `CI` 未設定時拒絕執行正式 ID 的組建，且不得建立正式 container；`SKIP_RUN=1` 時通過第 2、3 項檢查。

@@ -10,7 +10,7 @@
 |---|---|---|
 | 輸入法 | `善解輸入法.app`（開發版 `善解（開發版）.app`），App 沙盒，只做更新探測 | `~/Library/Input Methods`，或 `/Library/Input Methods` |
 | 善解更新 | 輸入法 bundle 裡不在沙盒的小 App，內嵌 Sparkle，只更新包著自己的那份輸入法 | `<輸入法>.app/Contents/Helpers/善解更新.app` |
-| 安裝程式 | `安裝善解輸入法.app`（英文名 Shanjie Installer），內附輸入法的 zip | Release 資產 `shanjie-installer-<版本>.zip` |
+| 安裝程式 | `安裝善解輸入法.app`（英文名 BopoMola Installer），內附輸入法的 zip | Release 資產 `shanjie-installer-<版本>.zip` |
 | `scripts/install-ime.sh` | 命令列安裝，只裝帳號層 | 安裝程式內也附一份 |
 | `shanjie install` | 輸入法執行檔的子命令，註冊並啟用輸入法 | `Contents/MacOS/shanjie` |
 | Homebrew cask | 帳號層安裝 | 共用的 tap |
@@ -23,7 +23,7 @@
 | | 正式 ID | 開發版 ID |
 |---|---|---|
 | bundle ID | `com.nyanako.inputmethod.shanjie` | `com.nyanako.inputmethod.shanjie.dev`（本機組建的預設） |
-| 資料夾與顯示名稱 | `善解輸入法.app`、善解輸入法 / Shanjie | `善解（開發版）.app`、善解（開發版） / Shanjie (Dev) |
+| 資料夾與顯示名稱 | `善解輸入法.app`、善解輸入法 / BopoMola | `善解（開發版）.app`、善解（開發版） / BopoMola (Dev) |
 | 輸入模式 ID | `<ID>.zhuyin` | 同 |
 | 連線名稱 | `<ID>_Connection` | 同 |
 | 善解更新的 ID | `<ID>.updater` | 同 |
@@ -324,7 +324,7 @@ host 是善解更新往上三層的 bundle（`<host>/Contents/Helpers/善解更�
 
 ### 5.4 畫面
 
-視窗 560×430，依畫面內容伸縮高度（最小 430）；標題「安裝善解輸入法」／「Shanjie Installer」；只有標題列與關閉按鈕。複製、登記進行中（`isBusy`）關不掉視窗、也不能結束（否則腳本會變孤兒、什麼都沒啟用又沒有訊息）。頂端步驟指示四個點：歡迎、安裝、啟用、試打；目前步驟實心，已完成或跳過的灰色實心，未到的空心。外觀跟系統的淺色、深色；印章（朱紅圓角方塊裡的「解」）與標題字型比照網站；視覺參數都是 `Look` 裡的具名常數。
+視窗 560×430，依畫面內容伸縮高度（最小 430）；標題「安裝善解輸入法」／「BopoMola Installer」；只有標題列與關閉按鈕。複製、登記進行中（`isBusy`）關不掉視窗、也不能結束（否則腳本會變孤兒、什麼都沒啟用又沒有訊息）。頂端步驟指示四個點：歡迎、安裝、啟用、試打；目前步驟實心，已完成或跳過的灰色實心，未到的空心。外觀跟系統的淺色、深色；印章（朱紅圓角方塊裡的「解」）與標題字型比照網站；視覺參數都是 `Look` 裡的具名常數。
 
 | 畫面 | 內容與按鈕 |
 |---|---|
@@ -531,7 +531,7 @@ sign 工作不 checkout、不跑任何 repo 的程式：只用 Apple 的工具�
 `packaging/Casks/shanjie.rb` 是範本（`version`、`sha256` 兩行是佔位值 `0.0.0`／64 個 0）；`scripts/render-cask.sh <MAJOR.MINOR.PATCH> <sha256>` 只替換這兩行後印到 stdout，格式不對或範本裡不是各恰好一行就結束碼 1 且沒有輸出（`SHANJIE_CASK_TEMPLATE` 只給測試用）。CI 與 release 都用這支腳本，cask 的內容只有範本一處。
 
 - 安裝指令：`brew install --cask nanako0129/tap/shanjie`。範本必須放在路徑含 `Casks/` 的位置，`brew style` 才套 cask 規則。
-- 內容：`url` 指向 Release 的 `shanjie-#{version}.zip`；`name`「善解輸入法」、「Shanjie」；`depends_on arch: :arm64`、`macos: :tahoe`；`input_method "善解輸入法.app"`（Homebrew 搬到 `~/Library/Input Methods`，只做帳號層；`/Library` 用安裝程式。brew 裝的時候 `/Library` 已有一份會變成兩份，cask 不擋）。
+- 內容：`url` 指向 Release 的 `shanjie-#{version}.zip`；`name`「善解輸入法」、「BopoMola」；`depends_on arch: :arm64`、`macos: :tahoe`；`input_method "善解輸入法.app"`（Homebrew 搬到 `~/Library/Input Methods`，只做帳號層；`/Library` 用安裝程式。brew 裝的時候 `/Library` 已有一份會變成兩份，cask 不擋）。
 - `auto_updates true`：brew 不再主動升級，交給 Sparkle。因此一般的 `brew upgrade` 可能略過這個 cask；指名升級用 `brew upgrade --cask nanako0129/tap/shanjie`。實際行為未量（範本的註解標明）。
 - **不在 cask 裡執行 `shanjie install`**：`postflight do` 會被 `brew style` 判為違規，`postflight_steps` 在 Homebrew 的沙盒裡執行（`HOME` 是暫存資料夾、擋住讀取真正的家目錄），`~` 開頭的指令路徑也不展開；就算放行，TIS 在那個沙盒裡能不能註冊也沒有量過。所以由 `caveats` 請使用者執行 `"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install`，結束碼 3 時到系統設定 → 鍵盤 → 輸入方式加入。
 - 升級後由新版接手：`postflight_steps` 裡一步 `terminate_process`（`match: :full`，帶一句 notice），pattern 是 `^[^ ]*/Library/Input Methods/(善解輸入法|shanjie)\.app/Contents/MacOS/shanjie$`。結尾錨定執行檔，所以帶參數的 `shanjie install` 與別的程式只是在參數裡提到這個路徑都不符合；開頭 `[^ ]*` 可為空，所以系統層的 `/Library/Input Methods` 也符合；`.shanjie-previous` 裡的上一版不符合；家目錄路徑含空白的帳號不會被結束（要手動結束舊程序或登出）。pattern 不錨定家目錄，因為 postflight 在 Homebrew 沙盒裡、HOME 是暫存資料夾，而 `pkill` 本來就只能結束自己帳號的程序。為什麼在 postflight 而不用 `uninstall on_upgrade`：升級時 Homebrew 從已安裝那一版的 receipt 讀解除安裝步驟，`on_upgrade` 在 JSON 裡是字串，`uninstall_phase` 只認 Symbol 或 Array，所以被略過（Homebrew 7.0.7 實測）；就算修好，`Uninstall` 也排在把新 bundle 搬進來之前，只會讓舊版有機會被重新啟動。postflight 是安裝階段最後一步，系統之後啟動的一定是新版。
@@ -677,7 +677,7 @@ EOF
 - **沙盒拒絕的允許清單**：從按下更新到新版啟動的 `log`，由腳本逐筆比對，**只允許**程序名稱是輸入法、操作是 `mach-lookup`、服務名稱整串等於 `<ID>-spks` 的那一種（輸入法裡只做探測的 Sparkle 會查它，沙盒擋下、Sparkle 當成沒有，探測與更新都不受影響）；其他任何一筆（含 `-spki`）都算失敗。`log` 會合併重複的報告、也有不記錄的規則，所以「沒有其他拒絕」只是煙霧測試，不是證明；證明靠下面的正面量測。
 - **偏好設定左右不了更新**：在輸入法 container 的偏好設定與 `~/Library/Preferences/<ID>.plist` 各寫 `SUFeedURL=http://127.0.0.1:<另一個埠>/x`，啟動善解更新與按「立即檢查」：那個埠收不到任何請求、照常讀測試 feed；兩個網域都寫 `SUSkippedVersion=999`：「立即檢查」照樣顯示新版、按「更新到 X」照樣出現 Sparkle 對話框；在善解更新的對話框按「跳過這個版本」再按「更新到 X」：對話框照常出現。
 - **沙盒擋不擋 `SMJobSubmit`**：對輸入法的程式套一個不進 repo 的小 patch，讓關於頁的一個按鈕直接呼叫一次 `SMJobSubmit(kSMDomainUserLaunchd, …)` 送良性工作（在 container 外建一個標記檔）。先在拿掉沙盒的組建上跑對照組，必須回傳 true 且標記檔出現；沙盒組建回傳 false、沒有標記檔、`launchctl print` 查不到才算關住。結果只作為資訊，本規格不把沙盒當成擋住已在程序內執行程式的保證（§1.3）。
-- **安裝程式**：全新安裝「這台 Mac」（出廠的 `/Library/Input Methods` 擁有者與權限、有沒有「Allow … to enable "Shanjie"?」詢問、完成頁走哪個畫面、`log show` 的 `registration outcome:` 與畫面對照、登出再登入後新開的 App 能打字、背景持有安全輸入時不反灰且選單顯示學習暫停）；取消密碼框（回歡迎頁、`/Library/Input Methods` 沒有新檔含 staging）；帳號層 → 「這台 Mac」的移轉（帳號層只剩 `.shanjie-previous`、log 有強制登記、container 裡的學習檔雜湊不變、0 沙盒拒絕）；「只有我的帳號」被擋下（印移除指令、什麼都沒改）；全新「只有我的帳號」（`registration: as before`、不停在「請登出」）；「這台 Mac」同版重新安裝（成功、上一版在 `.shanjie-previous`、不要求登出）；退回（`sudo rm -rf` 兩個路徑後選「只有我的帳號」，log 有強制登記、停在「請登出」、登出後新開的 App 能打字）。「搬了沒登記」的壞狀態由三條抓到：log 讀不到 `registration: forced (location changed)`、登入後新開的 App 打不了字、系統設定看不到善解（程序路徑抓不到它，只記錄、不當判準）。
+- **安裝程式**：全新安裝「這台 Mac」（出廠的 `/Library/Input Methods` 擁有者與權限、有沒有「Allow … to enable "BopoMola"?」詢問、完成頁走哪個畫面、`log show` 的 `registration outcome:` 與畫面對照、登出再登入後新開的 App 能打字、背景持有安全輸入時不反灰且選單顯示學習暫停）；取消密碼框（回歡迎頁、`/Library/Input Methods` 沒有新檔含 staging）；帳號層 → 「這台 Mac」的移轉（帳號層只剩 `.shanjie-previous`、log 有強制登記、container 裡的學習檔雜湊不變、0 沙盒拒絕）；「只有我的帳號」被擋下（印移除指令、什麼都沒改）；全新「只有我的帳號」（`registration: as before`、不停在「請登出」）；「這台 Mac」同版重新安裝（成功、上一版在 `.shanjie-previous`、不要求登出）；退回（`sudo rm -rf` 兩個路徑後選「只有我的帳號」，log 有強制登記、停在「請登出」、登出後新開的 App 能打字）。「搬了沒登記」的壞狀態由三條抓到：log 讀不到 `registration: forced (location changed)`、登入後新開的 App 打不了字、系統設定看不到善解（程序路徑抓不到它，只記錄、不當判準）。
 - **實機換位置兩次**（Caps Lock 在虛擬機測不了）：退回帳號層、再裝回這台 Mac，每次登出後 Caps Lock 切換仍正常；壞掉先用慢速按鍵修（系統設定 → 輔助使用 → 鍵盤打開慢速按鍵、按一次 Caps Lock、再關掉），修得回來就記下，修不回來是停止條件。
 - **正式路徑**（推 tag 之後）：main 的 `appcast.xml` 有新項目，enclosure 網址等於 Release 的 zip、`length` 等於上傳的 zip 大小；該網址回 200，下載的 SHA-256 等於 `.sha256`；已安裝的新版在關於頁「立即檢查」顯示「已是最新」而不是「檢查失敗」（證明出貨的版本讀得到正式 feed、驗得過 feed 簽章）。第一次真正的更新（上一版 → 這一版）在下一次發版時實機看：`/Library` 與 `~/Library` 兩條都過，container 裡的學習資料還在，`log` 沒有允許清單以外的沙盒拒絕；兩條都過之前不發別的版本。
 - **更新測試版的其他量測**：背景檢查查到新版時沒有彈出任何視窗；把測試 feed 改一個字（簽章失效）檢查要被拒、不顯示新版；錄下檢查與下載的實際請求（目的主機、標頭）；Caps Lock 切換仍有效（Sparkle 不呼叫 TIS 註冊）；更新前就開著的 App 能不能繼續打字、要不要重開。

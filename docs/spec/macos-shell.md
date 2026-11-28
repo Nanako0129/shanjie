@@ -62,8 +62,8 @@ Swift 程式放在 `macos/`（`Package.swift`，swift-tools 6.0，平台 macOS 2
 
 | bundle ID | 資料夾 | 中文名／英文名 |
 |---|---|---|
-| `com.nyanako.inputmethod.shanjie`（出貨） | `善解輸入法.app` | 善解輸入法／Shanjie |
-| 其他（`build-app.sh` 與 `make bundle` 的預設是 `….shanjie.dev`） | `善解（開發版）.app` | 善解（開發版）／Shanjie (Dev) |
+| `com.nyanako.inputmethod.shanjie`（出貨） | `善解輸入法.app` | 善解輸入法／BopoMola |
+| 其他（`build-app.sh` 與 `make bundle` 的預設是 `….shanjie.dev`） | `善解（開發版）.app` | 善解（開發版）／BopoMola (Dev) |
 
 - Info.plist 的基礎 `CFBundleDisplayName` 等於資料夾名稱（Finder 只在兩者一致時套用在地化名稱）；`zh-Hant.lproj` 給中文名，`en.lproj` 與 `CFBundleName` 給英文名；`InfoPlist.strings` 另有輸入模式 ID 的名稱。非中文系統顯示英文名。
 - 不變的 ASCII 名稱：執行檔 `Contents/MacOS/shanjie`、bundle ID、Release 附件 `shanjie-<版本>.zip`（解壓後是中文名的 App；用 Finder 或 `ditto` 解壓，`unzip` 指令可能把中文檔名弄亂）。

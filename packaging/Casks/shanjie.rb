@@ -4,7 +4,7 @@ cask "shanjie" do
 
   url "https://github.com/Nanako0129/shanjie/releases/download/v#{version}/shanjie-#{version}.zip"
   name "善解輸入法"
-  name "Shanjie"
+  name "BopoMola"
   desc "Zhuyin input method that converts whole sentences on the device"
   homepage "https://shanjie.nyanako.com/"
 
