@@ -88,14 +88,14 @@ fn kn_beta(kn: &Kn, profile: Option<Profile>) -> f64 {
 }
 
 /// Maps `path` read-only, turning a 0-byte regular file into an empty `Mem` buffer so `parse_bytes*` reports `Format`
-/// (matching `std::fs::read`), while missing, non-regular, or unreadable paths remain `LmError::Io`.
+/// (matching `std::fs::read`), while missing, non-regular, unreadable, or past-`isize::MAX` paths remain `LmError::Io`.
 fn map_or_empty(path: &Path) -> Result<MappedBytes, LmError> {
     // SAFETY: callers follow the read-only mmap contract (no in-place rewrite or truncation while mapped;
     // build_lm.py, build_classes.py, kn_cont.py, build_trigram.py and install paths replace files by rename).
     match unsafe { Mapped::open(path) } {
         Ok(m) => Ok(MappedBytes::Map(m)),
         Err(MapError::Empty) => Ok(MappedBytes::Mem(Vec::new())),
-        Err(MapError::Io) => Err(LmError::Io),
+        Err(MapError::Io | MapError::TooLarge) => Err(LmError::Io),
     }
 }
 

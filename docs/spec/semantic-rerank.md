@@ -46,10 +46,10 @@
 
 ### 2.2 讀檔檢查
 
-- `TinyLm::load` 與 `load_paired` 只讀一般檔案（先開檔、再檢查同一個 handle；開檔時用 `O_NONBLOCK`，所以 FIFO 不會卡住）且不超過 `MAX_FILE`（64 MiB）；不是一般檔案回 `Io`，超過上限回 `Format`；最多讀上限加 1 個 byte。
-- 檔頭上限（讓前向計算的配置有上界）：V ≤ 65,536、ctx ≤ 1,024、d ≤ 2,048、n_layer ≤ 64；另要求權重型別 ≤ 1、n_layer 與 n_head 不為 0、d 能被 n_head 整除、ctx ≥ 2、V ≥ 3。
-- 字表碼位必須是合法 Unicode 純量值且不重複；int8 還原後與 f32 權重都必須是有限值（縮放有限但乘上 127 仍可能溢位為 inf，一樣拒絕）。
-- 每一個矩陣乘法前，三個矩陣的長度前提用 `assert!` 檢查（release 也檢查；用 `checked_mul`，乘積溢位也擋）：Accelerate 的呼叫用原始指標，可攜路徑的向量版用未對齊的載入與儲存，都靠這個前提。
+- `TinyLm::load` 與 `load_paired` 只接受一般檔案，用唯讀 mmap 映射整個檔（`core/src/mmap.rs` 的 `Mapped::open_bounded`，n-gram 模型與伴生表經不設上限的 `Mapped::open` 也用它）：開檔一次（Unix 用 `O_NONBLOCK`，所以 FIFO 不會卡住；不加 `O_NOFOLLOW`，開發 checkout 的模型檔是連結），再檢查同一個 handle（一般檔案；Windows 另要 `FILE_TYPE_DISK`），長度先以 64 位元判斷：0 byte、超過 `MAX_FILE`（64 MiB）或超過 `isize::MAX` 都拒絕（32 位元平台不會把長度截斷），Windows 照檢查過的長度映射。不是一般檔案或映射失敗回 `Io`，空檔與超過上限回 `Format`。模型活著的期間映射一直在，int8 矩陣直接從映射讀，所以檔案在載入期間不可原地改寫或截斷（`docs/spec/models.md` §2.2；安裝與更新都是整包換名或先停常駐程序）。`TinyLm::parse(&[u8])` 複製一份位元組給模型。
+- 檔頭上限（讓前向計算的配置有上界）：V ≤ 65,536、ctx ≤ 1,024、d ≤ 2,048、n_layer ≤ 64；另要求權重型別 ≤ 1、n_layer 與 n_head 不為 0、d 能被 n_head 整除、ctx ≥ 2、V ≥ 3。檔案應有的長度以 64 位元、每一步檢查溢位地算，再和檔長比（32 位元平台上不會繞回一個小數字而讓短檔通過）。
+- 字表碼位必須是合法 Unicode 純量值且不重複；f32 權重必須是有限值；int8 矩陣每列的縮放必須有限且乘上 128 仍有限（int8 最小值是 -128；只看 127 時，接近 `f32::MAX / 127` 的縮放會把 -128 還原成 -inf），所以任何 int8 值還原後都有限。一維向量、位置嵌入與所有縮放都以 `from_le_bytes` 複製到堆積（約 0.5 MiB），不把檔案位元組轉型成 `&[f32]`（不必對齊）。
+- 每一個矩陣乘法前，三個矩陣的長度前提用 `assert!` 檢查（release 也檢查；用 `checked_mul`，乘積溢位也擋）：Accelerate 的呼叫用原始指標，可攜路徑的向量版用未對齊的載入與儲存，都靠這個前提。int8 的 `b` 另外檢查縮放的個數（每個存放的列一個：轉置時 n、否則 k）。
 
 ### 2.3 配對
 
@@ -57,7 +57,7 @@
 
 - 檔頭記的 n-gram SHA-256 必須等於載入的 `bigram.sjlm`（`OtherNgram`）。
 - Kneser–Ney 側檔：檔頭記的雜湊必須等於 `lm` 載入的側檔的完整 32 bytes；檔頭全 0（或版本 1 到 3）時 `lm` 不可有側檔。三種不合各有自己的錯誤（`KnPairing::TunedWithout`、`OtherSideFile`、`TunedWith`），因為各需要不同的處理。「載入」指模型旁的側檔，與書面設定實際用不用它無關。
-- 這只是配對檢查，不是對 `.sjtl` 本身的完整性檢查。`file_sha256()` 是 `load_paired` 剛解析的那一份位元組的 SHA-256，當場算好、字串留在 `TinyLm`、位元組隨即釋放（常談表之後載入時不會遇到它們還活著）；用 `parse` 或 `load` 得到的模型此欄為空。量過：release 版、真的 14.6 MB 檔、7 次，核心的軟體 SHA-256 為 35 至 52 ms（中位數約 37 ms），`parse` 為 5 至 9 ms。
+- 這只是配對檢查，不是對 `.sjtl` 本身的完整性檢查。`file_sha256()` 是 `load_paired` 剛解析的那一份位元組的 SHA-256：對解析用的同一個映射原地算（開檔一次，雜湊的就是解析的那個檔；不另複製整個檔），字串留在 `TinyLm`；用 `parse` 或 `load` 得到的模型此欄為空。量過：release 版、真的 14.6 MB 檔、7 次，核心的軟體 SHA-256 為 35 至 52 ms（中位數約 37 ms），`parse` 為 5 至 9 ms。
 - 載入雜湊的取捨：載入時算一次雜湊，是因為常談的配對（4.3）要認出「量這些格時用的那一份檔」；代價是每次建引擎多這一段時間。
 
 換 n-gram 模型（`load_lm`、`set_lm` 成功）時引擎丟掉小模型（它記的是前一個 n-gram 的雜湊）；常談表不丟。
@@ -74,6 +74,10 @@
   - 不用 FMA：它把乘與加合成一次捨入，結果和分開做不同，沒有 FMA 的 CPU 算不出同一個值。換來的是每台電腦的分數與選字相同，CI 的 Linux 對 Windows 逐位元組比對也不隨 runner 的 CPU 變。
   - 向量版是安全的 `#[target_feature]` 函式（用到沒有啟用的指令集編不過）；`unsafe` 只有分派處的呼叫，以及對長度剛好的切片區塊做的未對齊載入與儲存；尾段用純量。
   - 驗證：`tinylm::tests::kernels_agree_bit_for_bit`（這台 CPU 有的每一份核心函式對純量參考實作逐位元相同；不轉置的乘法另對向量化之前的寫法逐位元相同；矩陣放在較大緩衝區的中段，兩側放 NaN 與固定的位元型樣，抓越界的讀寫；印出跑了哪幾份）、`an_empty_dot_adds_positive_zero`、四個長度不符的 `should_panic`。i686 與 aarch64 的 Windows 在 CI 只有建置、沒有跑測試，走的是純量參考實作。
+- **int8 權重不展開**（出貨模型的 34 個矩陣存成 int8 加每列一個縮放；以前載入時整份展開成 116.4 MiB 的 f32）。還原的值永遠是 `(q as i8 as f32) * scale`，每個元素算一次、不併進別的乘法，所以和展開後的 f32 矩陣逐位元相同。
+  - 可攜路徑（`gemm_q8`）：每次只還原 `b` 的幾列到一塊堆積上的暫存（至多 128 KiB；不放堆疊，512 KiB 的工作執行緒也夠），再讓每一列 `a` 經 `gemm_kernel` 對這一塊做：不轉置每 4 列（和向量版的分塊相同）、轉置每 `32_768 / k` 列（1 到 32）。每個元素的運算與順序和展開後的乘法相同，結果逐位元相同。嵌入查表只還原用到的那一列。
+  - Apple（Accelerate，方案 B1）：每個 int8 矩陣有自己的一塊 Mach 可清除記憶體（`tinylm.rs` 的 `purgeable`，只用 `<mach/vm_map.h>` 的 `vm_allocate`、`vm_deallocate`、`vm_purgable_control`，iOS 也有；只編進 64 位元的 Apple 目標）。第一次用到時配置並整塊還原，釘住（non-volatile）做一次 `cblas_sgemm`（參數和展開時相同，結果逐位元組相同），做完就轉回 volatile：不用的時候不算進程序的 phys_footprint，系統記憶體吃緊時可以清掉，下次釘住發現被清掉（狀態以 `VM_PURGABLE_STATE_MASK` 遮罩後是 `EMPTY`）就重新還原。一次只釘一塊（最大是嵌入表 20.3 MiB），沒有巢狀鎖。狀態全在一個 `Mutex` 裡，還原時持鎖、沒有任何釘住者才寫；還原中 panic 時那一塊標成未還原並轉回 volatile，鎖中毒照樣取回，下次再還原。任何 Mach 呼叫失敗都不讀那一塊、改走可攜路徑（LL 差在 1e-5 內）並計數；`TinyLm::purgeable_stats()`（只有整數計數，不經 C ABI）與 `PurgeableStats::check` 讓探針確認沒有靜默退回可攜路徑。匿名記憶體、不寫檔：隱私規格的「沒有其他快取」不變。
+  - 沒有要計分的位置（每個候選都是空字串）時直接回全 0，不跑模型、不釘任何一塊。
 - 每批最多 `BATCH`（8）個候選，右側補 PAD；因果遮罩讓 PAD 不影響前面的位置。
 
 ### 2.5 匯出工具與小模型 golden
@@ -380,6 +384,7 @@ Windows 版的殼分成兩半：引擎在常駐程序 `shanjie-host.exe`，每�
   - `core/tests/engine_recur.rs`（前文重現項，`docs/spec/decoder.md` §4.6）：前文空或只有一個字元時與關掉它逐列相同；同音詞跟著前文走（語意校正關與開各一次）；G 只含兩個都是漢字的字元對、至多 63 個、只看最後 64 個字元；每次設前文都覆寫；每一個清除點（送出、Esc、兩種 `reset`、回傳碼 4、自動送出、達 `MAX_SYLLABLES` 的候選列選字送出、四個直通點）同時清空 `left_full` 與 G，換會意模型只清 `left_full`、G 不變；沒有先設前文就開始組字的路（Backspace 刪到空、只有未完成符號時按 Esc、Ctrl+\ 之後）舊前文不再生效；組字中（進行中的英文、未完成符號、數字緩衝）不清；引擎與評測 CLI 解碼相同；兩個共用模型的引擎各有自己的 G；終端機類的結尾兩個漢字是一個字元對。`core/tests/engine_newword.rs` 的 `r2_marker_characters_on_disk_with_a_recurring_left_text`：用會翻轉選字的 64 字前文做逐字改選，前文裡沒送出的漢字不在學習檔裡。
   - `core/src/lm.rs` 與 `core/src/ffi.rs` 的單元測試：字元對集合與加分的算法（詞內與跨詞邊界、第一個詞沒有邊界、`None` 等於舊解碼）、C ABI 的 NULL、空字串、不是 UTF-8 都清空 G。
   - 前文重現的加重（3.1.1）：`core/src/lm.rs` 的 `pool_bonus_needs_32_scalar_values_and_counts_positions`（31 回 0、32 回 γ × 次數、G 空回 0、純量值不是字形）、`pool_order_sorts_stably_and_refuses_what_it_cannot_order`（穩定排序、全 0、NaN、正負無限大、個數不同、重排後第一名被遮罩都回 `None`）；`core/src/engine.rs` 的 `pool_recur_tests`（手做的分數與 golden 小模型：重排後第一名不是 `paths[0]` 時 sure 選它、另一個候選贏過 δ 選那一個並對回索引、遮罩與學習項照重排後的順序、換進池的學到路徑排到第一時的選字與 `overturned`、`sinit_diag`、`TooLong` 選 `paths[0]`、手動詞擋住重排、遮罩的基準是解碼器的第一名、兩段的工作裡前一段重排後的選字是後一段的前文鍵且套用時照 `paths` 的索引換字，以及 `a_job_holds_no_recurrence_set`：`RerankJob` 與 `Stretch` 的欄位逐一列在解構裡，多加欄位就編譯不過）；`core/tests/engine_pool_recur.rs`（真模型：四種不生效的情形等於合併基準記下的選字常數、門檻數的是純量值、覆寫、每個清除點與沒有新前文的組字、組字中換模型照舊生效、工作的欄位照解碼器順序）；`core/src/ffi.rs` 的 `null_empty_and_non_utf8_left_texts_turn_the_pool_weight_off` 與 `pool_weight_after_code_4`。
+  - 權重不展開（2.2、2.4）：`core/src/tinylm.rs` 的 `q8_matches_dequantized_f32_bit_for_bit`（int8 模型對「f32 存放還原值」的同一模型，可攜路徑與預設路徑都逐位元相同）、`kernels_agree_bit_for_bit` 另比 `gemm_q8` 對展開後的乘法（每份核心、兩個方向，`b` 與縮放偏移 0 到 15 個元素、兩側放 -128 與 NaN）、`parse_rejects_32bit_want_overflow`、`parse_rejects_i8_min_scale_overflow`、`parse_accepts_unaligned_slice_and_odd_dims`、`gemm_q8_rejects_short_scale_and_overflow`、`plain_q8_fits_512kib_worker_stack`、`ll_many_empty_candidates_short_circuits`、`load_paired_preserves_colloquial_pairing`；Apple 的 `b1_purge_empty_recovers_bit_for_bit`、`b1_concurrent_threads_and_purge_stress`、`b1_populate_panic_unwind_recovers`、`b1_kernel_error_falls_back_to_plain`（錯誤注入只編進測試）；`core/src/mmap.rs` 的 `mapped_open_bounded_validates_u64_and_isize_max_bounds`。範例 `core/examples/tinylm_plain_bench.rs`（可攜路徑的速度，200 對固定樣本）與 `core/examples/tinylm_b1_probe.rs`（在帶正式三鍵 entitlements 與 Hardened Runtime 的拋棄式 bundle 裡確認 B1 沒有退回、量 phys_footprint）CI 只建置不執行。
   - FFI 子程序測試（`core/src/ffi.rs`）：載入各錯誤碼且輸出不含路徑、沒有工作時 NULL、run → apply → free、apply 兩次、所有 NULL 組合、run 內 panic 回 4 且輸出不含內容、`load_tinylm` 不改重排開關；C 標頭冒煙測試 `core/tests/c/abi_smoke.c` 每個函式至少呼叫一次。
 - **CLI**（`cli/tests/tinylm.rs`、`cli/tests/colloquial.rs`、`cli/tests/recur.rs`、`cli/tests/replay.rs`、`cli/tests/measure_flags.rs`）：`recur.rs` 驗 `--context` 的前文空或一個字元時印的與 `--no-recur` 相同、前文有同音詞時選字翻轉；`replay.rs` 的 `recurrence_replay_agrees_with_the_cli` 驗重播的引擎與 CLI 選字相同、`--no-recur`、`--key-times` 只有數字且列數對；`pool_weight_replay_agrees_with_the_cli` 驗前文重現的加重在手寫列上：CLI 預設與 `--no-pool-recur` 選字不同（前提）、重播兩者各等於 CLI，31 個純量值的列四者相同；`recur.rs` 的 `the_pool_weight_marks_and_records` 驗標記、沒有 `--tinylm` 時逐位元組相同、重排過的列的 `--tinylm-scores` 與 `--pool-mask-diff`（以及它在沒有 `--tinylm`、沒有 `--context`、`--no-recur`、`--no-pool-recur` 時被拒），`the_pool_mask_diff_is_refused_with_the_holdout` 驗它和 `--set holdout` 並用時在讀任何檔之前被拒；`--tinylm-paired` 與 `--picks` 的 `paired_flag_turns_the_term_on_for_another_model`、`paired_flag_changes_nothing_on_the_paired_model`、`picks_match_the_scores_the_dump_and_the_rowstats`、`picks_of_a_row_without_candidates`、`picks_threads_agree_on_the_whole_dev302`、`the_flags_are_refused_where_they_do_not_apply`；n-gram 不符被拒、壞檔與孤兒 `--tinylm-scores`、KN 側檔必須是記著的那一個、`sentinel_context_is_an_empty_k`、`rerank_level_uses_that_levels_set` 與 `rerank_level_refusals`、`summary_line_records_a_non_standard_level`、`a_declared_left_length_keys_cli_rows_like_the_engine`、`no_option_is_byte_identical_to_before`、`the_term_applies_at_every_strength`、`the_shipping_setting_applies_and_threads_agree`、`the_first_word_estimate_is_on_by_default_and_the_flag_turns_it_off`、`scores_carry_col_and_recompute_the_pick`、`colloquial_replay_agrees_with_the_cli`。
 - **Python**（`make test-python`）：`tools/test_export_sjtl.py`（不給 δ 時輸出與 golden 逐位元組相同、各版本寫出與讀回、壞值報錯而且不留檔）、`tools/gen_tinylm_tiny.py` 的 golden 可重產、`tools/test_build_attribution.py`（各來源加總與停止條件，合成輸入）。

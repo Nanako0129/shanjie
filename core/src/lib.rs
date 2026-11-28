@@ -13,6 +13,7 @@ pub mod learn;
 pub mod learn_store;
 pub mod lm;
 pub mod mixed;
+mod mmap;
 pub mod predict;
 pub mod reading;
 pub mod tinylm;
