@@ -552,14 +552,15 @@ typedef struct ShanjieRerankJob ShanjieRerankJob;
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 // load_colloquial: the colloquial table (colloquial.sjlm, docs/spec/semantic-rerank.md §4), loaded as a read-only memory map
 //   (docs/spec/decoder.md §3.5): while an engine has it loaded it must not be truncated or rewritten in place (replace by rename).
-//   The engine reads the word sets of its k term
-//   from the lexicon folder it was created with (mcbpmf-data.txt, overlay-add.tsv) and from the pack rows it was created with. May be
+//   The engine takes the word sets of its k term
+//   from the lexicon it was created with (built from mcbpmf-data.txt, overlay-add.tsv and the pack rows it was created with; those files are not read
+//   again). May be
 //   called before or after load_lm and load_tinylm (the table does not depend on them). The term applies per job, only with the chat
 //   profile, at any of the three rerank strengths (each with its own alpha, tau and delta: docs/spec/semantic-rerank.md §4.4) and a small
 //   model whose SHA-256 is the one the term was measured with; in every other case the jobs are those of an engine without the table. Loading also turns the
 //   first-word estimate on (docs/spec/semantic-rerank.md §4): a first word the table has no sentence-start bigram for is scored by the table's unigram
-//   estimate, not by the sentence-start back-off. 3 when a file cannot be read or is malformed (the engine keeps its previous table,
-//   or none); 1 for a NULL engine or path; 2 for a path that is not UTF-8. Drops the pending rerank job. Never log the path.
+//   estimate, not by the sentence-start back-off. 3 when colloquial.sjlm cannot be read or is malformed, or the engine has no lexicon folder
+//   (the engine keeps its previous table, or none); 1 for a NULL engine or path; 2 for a path that is not UTF-8. Drops the pending rerank job. Never log the path.
 int32_t shanjie_engine_load_colloquial(ShanjieEngine *engine, const char *path);
 // set_rerank 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation (S7c-2c), like set_demote in its codes and its
 //   snapshot (handled 1, commit ""): it recomputes the composition, so turning it off shows the n-gram result at once; 1 when engine or
