@@ -6,7 +6,7 @@ optional trigrams, and optional debugger-mined overrides are scored to match Sha
 model definitions and Homa's PathFinder / weightedScore semantics, then serialized and
 strictly self-validated against VanguardTrie.TrieIO rules.
 
-v2 changes (output is byte-identical to build_shanjie_textmap.py when the new features are unused):
+Overrides:
   * --extra-ngrams rows with an EMPTY context are unigram overrides: the word's unigram
     probability at that reading is replaced if the word exists there, otherwise the word is added
     (Debugger actions fillMissingCount/adjustCount vs addUnigram). Counts go to build_stats.json.
@@ -22,8 +22,8 @@ Licence: the whole output is distributed under CC BY-SA 4.0. It also carries MIT
 mcbpmf-data.txt and sandhi-add.tsv; full text LICENSES/McBopomofo-MIT.txt) and BSD parts (libtabe's phrases);
 their notices must be kept. A build that includes the name layer and the IT pack also carries
 name-suggestion-index parts (BSD-3-Clause; full text LICENSES/name-suggestion-index-BSD-3-Clause.txt; keep the
-copyright notice, do not use its authors' names to endorse the output) and parts under the Government Website
-Open Data Licence version 1 (name layer, IT pack; name the providing agency). This list is not complete: the
+copyright notice, do not use its authors' names to endorse the output) and parts under the Open Government Data
+License, version 1.0 (政府資料開放授權條款第 1 版; name layer, IT pack; name the providing agency). This list is not complete: the
 notices and credits to keep are the ones in each row of LICENSES/data.md. The companion files that --out-dict
 copies belong to vChewing, not to Shanjie, and are copied only from the directory the user passes.
 
@@ -1122,8 +1122,16 @@ def build_textmap(args: argparse.Namespace) -> dict:
     root_real = os.path.realpath(args.shanjie_root)
 
     def check_outside_root(p: str, flag: str) -> None:
-        if os.path.commonpath([p, root_real]) == root_real:
-            die(f"{flag} must lie outside the --shanjie-root work tree: got {p}")
+        # Every existing ancestor is compared by identity (samefile), not by spelling: on a case-insensitive file system
+        # realpath keeps the typed case, so <root>/../REPO/x would otherwise pass for <root>/../repo.
+        q = p
+        while True:
+            if os.path.exists(q) and os.path.samefile(q, root_real):
+                die(f"{flag} must lie outside the --shanjie-root work tree: got {p}")
+            parent = os.path.dirname(q)
+            if parent == q:
+                return
+            q = parent
 
     if args.out_dict:
         out_dict = os.path.realpath(args.out_dict)

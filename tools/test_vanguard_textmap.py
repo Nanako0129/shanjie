@@ -286,6 +286,16 @@ class EndToEnd(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.root, "x.txtMap")))
         os.unlink(link)
 
+    def test_case_variant_of_the_work_tree_is_refused(self):
+        head, tail = os.path.split(self.root)
+        variant = os.path.join(head, tail.swapcase())
+        if variant == self.root or not os.path.exists(variant):
+            self.skipTest("case-sensitive file system: a case variant is another path")
+        r = run_tool("--shanjie-root", self.root, "--out-txtmap", os.path.join(variant, "c.txtMap"), *BUILD_FLAGS, ok=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("outside the --shanjie-root work tree", r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.root, "c.txtMap")))
+
     def test_out_dict_needs_companion_dir(self):
         r = run_tool("--shanjie-root", self.root, "--out-dict", os.path.join(self.out, "nodict"), *BUILD_FLAGS, ok=False)
         self.assertEqual(r.returncode, 2)

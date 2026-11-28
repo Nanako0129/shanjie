@@ -21,6 +21,8 @@
 | `--trigram-path` | 選用，`SJT30001` 三元表，必須是為該 `bigram.sjlm` 建的 |
 | `--extra-ngrams` | 選用，覆寫表，見 §6 |
 
+路徑旗標（`--kn-path`、`--colloq-path`、`--trigram-path`、`--extra-ngrams`、`--base-txtmap`、輸出與 `--companion-dir`）的相對路徑以目前的工作目錄解析，不是以 `--shanjie-root`；在 repo 外執行時給絕對路徑或相對工作目錄的路徑。
+
 依賴 numpy（`tools/build_classes.py`、`tools/build_trigram.py` 已依賴）。
 
 ## 2. 輸出
@@ -39,15 +41,17 @@ TextMap 2.0 檔：標頭（`VERSION 2.0`、`TYPE TYPING`、`READING_SEPARATOR -`
 對每個（讀音 r、詞 w），依序：
 
 1. 起點是詞庫分數（疊加層、名單層、詞包的列一併進來）。
-2. **壓上限（cap_overlay，`--no-cap-overlay` 關）**：疊加層、名單層與非 `acg-oov` 詞包的詞，若在通語裡有詞頻 c，分數取 `min(分數, log10(c/N))`；通語裡沒有的詞，名單層與疊加層扣 1.0（非 `acg-oov` 詞包的詞不扣）。`acg-oov` 詞包的詞不壓、不扣、不參與下面的混合。
+2. **壓上限（cap_overlay，`--no-cap-overlay` 關）**：`overlay-add.tsv`、`names-add.tsv` 與非 `acg-oov` 詞包的詞，若在通語裡有詞頻 c，分數取 `min(分數, log10(c/N))`；通語裡沒有的詞，`overlay-add.tsv` 與 `names-add.tsv` 的扣 1.0（非 `acg-oov` 詞包的詞不扣）。`sandhi-add.tsv` 的詞不壓、不扣。`acg-oov` 詞包的詞不壓、不扣、不參與下面的混合。
 3. 套異體順序。
 4. **混合通語詞頻（`--uni-lam` λ）**：若詞在通語裡有詞頻，`p1 = c/N`；有 `kn.sjkn` 時 `p1 = β·(n₁₊(w)+1)/T + (1−β)·p1`（β 是 `--kn-beta`，n₁₊ 是接續類型數，T 是側檔總數，字詞表前兩個保留詞不混）；有 `--colloq-uni-w` 時再與常談詞頻混合。分數成為 `λ·log10(p1) + (1−λ)·原分數`。通語沒有而常談有的詞，把原分數換成機率後與常談混合（細節在程式 `build_textmap` 的第 3 步）。
 5. `--len-bonus`：每多一個字加這個值（預設 0）。
 6. 再套一次異體順序，扣 `demote.tsv`，夾到上限並四捨五入。
 
-每個讀音的 B(r) 是該讀音最高的 unigram 分數。詞 w 只掛在分數不低於 w 最佳讀音 `--max-reading-gap`（預設 1.5）以內的讀音上。
+每個讀音的 B(r) 是該讀音最高的 unigram 分數。unigram 行在詞的每個讀音上都輸出，不受 §4 的讀音差距限制。
 
 ## 4. contextual 的計分
+
+contextual 只掛在 w 的部分讀音上：w 在該讀音的分數不低於 w 最佳讀音的分數減 `--max-reading-gap`（預設 1.5）；`acg-oov` 詞包的詞不產生 contextual。
 
 候選是通語二元表裡的（前文 v、詞 w）：計數 ≥ `--bi-min-count`（預設 3）、v 的總數 ≥ `--bi-min-ctx`（預設 5）、v 在詞庫裡且長度 ≤ `--max-ctx-len`（預設 4）、w 在詞庫裡且長度 ≤ `--max-val-len`（預設 4）。對 w 掛的每個讀音 r：
 
