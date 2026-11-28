@@ -45,6 +45,8 @@
 
   資料類的 Release 一律不標 Latest，Releases 頁的 Latest 永遠是輸入法的最新版。
 
+- **給其他輸入法用的辭典（`vchewing-dict-N`）**：從善解資料轉出的唯音輸入法辭典（`VanguardFactoryDict4Typing.txtMap`），只放這個檔、它的 `.sha256` 與 `NOTICE.txt`（`docs/releases/<tag>.NOTICE.txt`），不放唯音自己的配套檔。說明檔同樣先進 main、不標 Latest；上傳前後都用說明檔裡寫的 SHA-256 核對，做法同上面「換檔時建 Release」那段的暫存資料夾。
+
 - **網站連結**：輸入法版本（`v*`）的說明最後一行是「安裝與使用說明：https://shanjie.nyanako.com/ 」（網址後面留一個空格，免得全形標點黏進連結）。已發的舊版說明不回頭改。
 
 ## Sparkle 自動更新（v0.4.7 起）

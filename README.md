@@ -29,6 +29,10 @@ brew install --cask nanako0129/tap/shanjie
 
 裝好後在選單列的輸入法選單選「善解輸入法」；選單裡的「善解設定…」打開設定視窗。v0.4.7 起可以在設定的「關於」頁直接更新。
 
+## 給唯音輸入法使用者
+
+唯音輸入法（vChewing）可以用一份從善解的詞庫與模型轉出來的辭典：在 [Releases 的 `vchewing-dict-1`](https://github.com/Nanako0129/shanjie/releases/tag/vchewing-dict-1) 下載 `VanguardFactoryDict4Typing.txtMap`（CC BY-SA 4.0，署名在同一頁的 `NOTICE.txt`）。兩個專案合作的經過與唯音那邊的載入方式見 [issue #143](https://github.com/Nanako0129/shanjie/issues/143)。
+
 ## 贊助
 
 善解是一個人利用空閒時間開發、免費開源的專案。贊助會用在模型訓練的雲端運算、測試與發版的基礎設施，以及持續改進選字的時間。如果善解對你有幫助，可以在 Patreon 支持它的開發。
