@@ -24,9 +24,9 @@
 - `rerank-protect.tsv`（重排保護詞，§2.12）不是詞庫的一層，不加詞、不改分數：上表各層合併之後才讀，缺檔或有一列不成立都是載入失敗。
 - `names-english.txt`（名單層的英文寫法，§3.1）屬於名單層，但不是解碼的一層：一行一個英文寫法、沒有讀音與標籤欄，編進核心而不是載入的檔，所以沒有缺檔的情況，評測 CLI 的 `--no-names` 也不影響它；只在英文段結束時換大小寫（`docs/spec/english-mixed.md` §4.4）。
 - `mixed-words.tsv`（中英混合詞，`docs/spec/english-mixed.md` §5.7）也不是詞庫的一層：候選清單多一項，解碼器在英文 token 後面把它的列當成一個可以選的詞（`docs/spec/decoder.md` §4.7），Shift＋字母的英文段照它切分、列預測；選用，缺檔或有一列不合規就整張不載入、不回錯誤。
-- 載入順序（`engine::load_lexicon_split`）：基底；接著疊加層文字 = `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、詞包列（動漫詞包先讀，其餘詞包依 `PACK_FILES` 的順序：動漫、經典台詞、資訊、迷因、美妝）、評測專用的 `--extra-overlay` 檔；每一段之間補一個換行。同一個讀音下的所有列最後一起穩定排序（見 §1.3）。
+- 載入順序（`engine::load_lexicon_split`）：基底（`mcbpmf-data.txt`）；接著依序 `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`（評測 CLI 的 `--no-names` 略過名單層）、詞包列（動漫詞包先讀，其餘詞包依 `PACK_FILES` 的順序：動漫、經典台詞、資訊、迷因、美妝）、評測專用的 `--extra-overlay` 檔。每一層依序串流餵給 `Builder`（`feed_base_line`／`feed_overlay_line`，層別 `OverlayLayer`），不再把各層接成一個 21 MB 的大字串；效果等同依這個順序把各層文字串接成一份，每一段之間補一個換行。基底與前三層（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`）單趟用 64 KiB 的 `BufReader`（`engine::stream_lines`）逐行讀進 `Builder`，沒有任何一個檔案的整份文字留在記憶體裡；詞包列與 `--extra-overlay` 檔在它們之後讀（`feed_overlay`）。讀檔失敗回報的是依這個順序最先壞的檔；壞列與壞基底分數的停止規則照舊：壞基底分數最先回報，壞疊加層列使後面所有層的列都不再餵入（檔案照樣讀完），`OverlayDuplicate` 先於 `BadOverlayRow`。同一個讀音下的所有列最後一起穩定排序（見 §1.3）。
 - 一個要求的詞包，檔案不存在時什麼都不貢獻（引擎和沒有它逐位元組相同）；檔案存在卻讀不了或解析失敗是載入失敗。C ABI 與評測 CLI 的差別在 §4.1。
-- 封頂用的文字（`engine::capping_overlay`）= `overlay-add.tsv`、`names-add.tsv`、詞包列（沒有 `sandhi-add.tsv`）。封頂規則見 §1.4。
+- 封頂用的文字（`engine::capping_overlay`）= `overlay-add.tsv`、`names-add.tsv`、詞包列（沒有 `sandhi-add.tsv`）。封頂規則見 §1.4。封頂用的文字另外讀、另外接（`capping_overlay` 與 `pack_text` 仍留著，串流化歸 ITEM-F4），不是詞庫載入的那一份。
 - 疊加層、名單層、詞包彼此的詞串不可重複：同一個（讀音, 詞）在兩個檔都有，核心載入時回 `OverlayDuplicate`（引擎建立失敗）；封頂又是依字串封頂所有讀音，所以各建置工具另外要求「新層的詞串不在任何既有層的任何讀音下」。`data/packs/meme-add.tsv`（迷因詞包，位元 8）存在時，各工具把它的詞也當作已佔用；它的內容與建置見 §9。
 
 ### 1.2 檔案格式與解析規則
@@ -42,6 +42,7 @@
 
 - 每個讀音下的詞依分數由高到低排；同分時基底在前、疊加層依檔案順序。實作是「先照檔案順序收齊所有列，再對每個讀音各做一次穩定排序」，沒有另外建舊式的對照表。
 - 每個詞字串另有一個「勝出的列」（`by_word`）：同一個詞出現在好幾列時取分數最高的；同分取檔案裡最前面的（嚴格較大才取代）。
+- 建置（`Builder::finish`）照實際數量一次配好完成後的表：`by_word` 的暫存 `winners` 與兩張位元表照不同詞數、`readings` 與 `fkeys` 照讀音數與讀音鍵總長（含常談列的讀音）、`ents` 照主表列數加上常談補位列數、`words` 照常談詞的位元組數，所以建好的 `ents`、`key_pool`、`readings`、`by_word` 容量等於長度（`builder_finish_equals_the_c837ac4f_oracle` 斷言）。原因：macOS 的配置器對超過約 1 MiB 的區塊，釋放之後仍把它算在行程的足跡裡到結束，所以降低尖峰靠的是不留整份文字、不讓表倍增再留下舊區塊，不是提早釋放；以前 `ents` 剛好配滿之後又被 13 筆常談列倍增（8.6 → 17.3 MB）。
 - 結構（`core/src/lib.rs`，`Lexicon`）：
 
 | 欄位 | 內容 |
@@ -52,12 +53,15 @@
 | `ents` | 每個詞一筆（`off`、`len`、`score`），16 位元組，依讀音分組、組內分數由高到低 |
 | `words` | 一整塊 UTF-8，`(off, len)` 切出詞 |
 | `by_word` | 每個不同詞的勝出列的位置，依詞的位元組排序，每個 4 位元組 |
+| `overlay_bits` | 每個 `by_word` 項一個位元（`Vec<u64>`）：該詞有疊加層（`overlay-add.tsv`）或詞包的列、`mcbpmf-data.txt` 在任何讀音下都沒有它；`sandhi-add.tsv`、`names-add.tsv` 與 `--extra-overlay` 的列不設這個位元。標籤 `colloq` 的列照它所在層的規則算（建置時補位）。`Lexicon::is_overlay_only(w)` 讀它（對 `by_word` 二分搜尋，命中就查位元），是常談項 k 的詞集（`docs/spec/semantic-rerank.md` §4.1） |
+| `overlay_extra` | 同一種詞、但詞庫丟掉了它的列（`colloq` 列的字數不等於音節數），所以不在 `by_word` 裡：排序的字串陣列，正式資料是空的、不佔堆；`is_overlay_only` 在 `by_word` 找不到時二分搜尋它 |
 
 - 查詢全用二分搜尋：讀音（`&[String]` 每次解碼先轉成編號，不認得的音節是 `u32::MAX`）、詞（依位元組）；由詞反查讀音用 `readings[].start` 的 `partition_point`。
 - 分數維持 `f64`；只用標準函式庫，沒有 `unsafe`、沒有 mmap；資料在執行時從文字檔解析。
 - 公開的只有 `max_len`、`reading_count()`、`entries(&[String])`、`word_info(&str)` 等讀取函式，欄位都是私有的。
 - 記憶體：這個結構落地時量過，載入 50 萬列疊加後的 `shanjie-eval --set dev --limit 302` 峰值常駐記憶體約 87 MB（只載基底約 37 MB）；詞庫之後變大（疊加層約 36 萬列、名單層約 2 千列、詞包再加），這些數字只當量級。
-- 驗證：`core/src/tests.rs` 的 `learner_word_score_takes_last_duplicate`、`overlay_duplicate_within_overlay_is_error`、`overlay_bad_rows_report_length_only`（結構改寫不能改變這三個行為）；`cli/tests/golden.rs` 的 `matches_s1_references_byte_for_byte` 逐位元組比 `eval/golden/s1-dev302.txt`、`s1-dev302-nooverlay.txt`、`s1-overlay-sets.txt`，`unigram.txt` 在 `--no-overlay` 下比對。
+- ITEM-F2 的量測（Mac、交錯 3 輪、量測時 1 分鐘負載 4.3–5.9，對 F2 之前的 `ae8779ea`）：建詞庫的尖峰（`/usr/bin/time -l shanjie-eval --rows <單列檔>`，不帶 `--lm`，peak memory footprint）84.38／84.13／84.07 MB → 62.83／57.44／57.57 MB（中位數少約 25.3 MiB）；一個引擎常駐（`pack_switch_bench memory data/lexicon data/packs data/lm 31 0 2 shared` 的 `one_engine_mib`）180／180／180 → 151／151／151；載入常談表（`pack_switch_bench phases … 31 5` 的 `load_colloquial` ms_median）152／183／126 → 15.6／13.0／13.1；`new_with_packs` ms_median 216／227／183 → 249／190／224（中位數比 1.04）。同一批對照：只做 c837ac4f 的版本尖峰 78.09／74.94／74.96 MB；另一種做法（建置前多讀一趟只數數量、原地重排、不穩定排序）尖峰 41.2 MB，但 `new_with_packs` 約 310–333 ms（慢約 50%），所以沒有採用。macOS 的配置器不歸還大區塊，這些數字是這個平台的；其他平台沒有量。
+- 驗證：`core/src/tests.rs` 的 `learner_word_score_takes_last_duplicate`、`overlay_duplicate_within_overlay_is_error`、`overlay_bad_rows_report_length_only`（結構改寫不能改變這三個行為）；`core/src/tests.rs` 的 `builder_finish_equals_the_c837ac4f_oracle`（把改前的 `Builder::finish`——`Raw` 版、穩定排序——原樣留成測試用的對照，對正式資料（無詞包與全詞包）與同讀音同分超過 32 列、同詞同分散在不同讀音的合成輸入，逐項比對 `readings`、`key_pool`、`ents`、`words`、`by_word`、`colloq`、`overlay_bits`、`overlay_extra`，錯誤路徑比整個 `Result`，並斷言建好的表沒有多餘容量）、`layered_build_equals_the_joined_text`、`layered_error_order`、`overlay_only_follows_the_layers`；`core/tests/colloquial_overlay_bits.rs` 逐詞比對 `is_overlay_only` 與檔案詞集；`cli/tests/golden.rs` 的 `matches_s1_references_byte_for_byte` 逐位元組比 `eval/golden/s1-dev302.txt`、`s1-dev302-nooverlay.txt`、`s1-overlay-sets.txt`，`unigram.txt` 在 `--no-overlay` 下比對。
 
 ### 1.4 封頂（只寫與詞包有關的部分）
 
