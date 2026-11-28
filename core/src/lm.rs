@@ -1017,10 +1017,8 @@ impl Demote {
 /// overlay cap applied to scores and every reading re-sorted (cap_overlay in lm.py). Decoding only;
 /// syllable generation and candidate lists keep using the original lexicon.
 pub struct CappedLexicon {
-    /// V3 prediction index, built on first use, with the identity of the model that built it. Its `&str`s point into
-    /// `base`'s heap strings, so this field MUST stay declared before `base`: fields drop in declaration order, and the
-    /// index has to go before the strings it borrows.
-    index: OnceLock<(crate::predict::Index<'static>, (u64, usize, usize))>,
+    /// V3 prediction index, built on first use, with the identity of the model that built it. It holds its own `Arc` of `base`.
+    index: OnceLock<(crate::predict::Index, (u64, usize, usize))>,
     base: Arc<Lexicon>,
     ents: Vec<crate::Ent>,
     /// Demotion resolved once per entry: `(position in ents, delta)` sorted by position; empty without a table.
@@ -1122,15 +1120,8 @@ impl CappedLexicon {
 
     /// The prediction index (V3), built from this lexicon and `lm` the first time (hundreds of ms, tens of MB). Later
     /// calls must pass the same model (checked in debug builds by `Lm::identity`); the index holds its word ids.
-    pub fn predict_index(&self, lm: &Lm) -> &crate::predict::Index<'_> {
-        let (idx, built_for) = self.index.get_or_init(|| {
-            let idx = crate::predict::Index::new(self, lm);
-            // SAFETY: the index only borrows strings owned by `self.base` (an Arc whose heap strings never move while
-            // `self` lives). `index` is declared before `base`, so it drops first and nothing dangles during drop. It is
-            // handed out only for the lifetime of `&self`.
-            let idx = unsafe { std::mem::transmute::<crate::predict::Index<'_>, crate::predict::Index<'static>>(idx) };
-            (idx, lm.identity())
-        });
+    pub fn predict_index(&self, lm: &Lm) -> &crate::predict::Index {
+        let (idx, built_for) = self.index.get_or_init(|| (crate::predict::Index::new(self, lm), lm.identity()));
         debug_assert!(*built_for == lm.identity(), "the prediction index was built for another model");
         idx
     }
@@ -1260,9 +1251,14 @@ impl CappedLexicon {
     /// pack word is rebuilt here the way `new` without the exemption orders it (base order, pack words capped with `lm`, the model the
     /// lexicon was built with, then a stable sort), so the engine keeps no second copy of those lists.
     pub fn readings<'s, 'm>(&'s self, lm: &'m Lm) -> impl Iterator<Item = (Vec<&'s str>, Vec<(&'s str, f64)>)> + use<'s, 'm> {
+        self.readings_by_index(lm).map(move |(r, list)| (self.base.reading_syllables(r), list))
+    }
+
+    /// `readings` without the key: the reading's index in the lexicon and its capped (word, score) list, best first. The prediction index reads
+    /// the key from the lexicon itself.
+    pub(crate) fn readings_by_index<'s, 'm>(&'s self, lm: &'m Lm) -> impl Iterator<Item = (usize, Vec<(&'s str, f64)>)> + use<'s, 'm> {
         debug_assert!(self.built_for == lm.identity(), "readings() needs the model the lexicon was capped with");
         (0..self.base.readings.len()).map(move |r| {
-            let key = self.base.key_of(&self.base.readings[r]).iter().map(|&i| self.base.syl_names[i as usize].as_str());
             let range = self.base.range(r);
             // `pack_bits` is set per position; `ents` permutes positions only within a reading, so `range` covers the same bits.
             let list = if !self.pack_bits.is_empty() && range.clone().any(|p| bit(&self.pack_bits, p)) {
@@ -1283,7 +1279,7 @@ impl CappedLexicon {
                 list.iter_mut().filter(|(w, _)| *w == v.less).for_each(|(_, s)| *s = s.min(limit));
                 list.sort_by(|a, b| desc(a.1, b.1));
             }
-            (key.collect(), list)
+            (r, list)
         })
     }
 

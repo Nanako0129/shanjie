@@ -725,6 +725,20 @@ impl Lexicon {
         let i = self.by_word.binary_search_by(|&p| self.word(p as usize).cmp(w)).ok()?;
         Some(self.by_word[i] as usize)
     }
+    /// Read-only accessors of the prediction index (`predict::Index`), which shares this lexicon's words and readings.
+    /// The `by_word` index of `w`, which is also its rank among the distinct words by bytes.
+    pub(crate) fn find_wix(&self, w: &str) -> Option<u32> {
+        self.by_word.binary_search_by(|&p| self.word(p as usize).cmp(w)).ok().map(|i| i as u32)
+    }
+    pub(crate) fn word_by_wix(&self, wix: u32) -> &str {
+        self.word(self.by_word[wix as usize] as usize)
+    }
+    pub(crate) fn reading_syl_ids(&self, r: usize) -> &[u32] {
+        self.key_of(&self.readings[r])
+    }
+    pub(crate) fn main_ents(&self) -> usize {
+        self.main_ents
+    }
     fn reading_of(&self, p: usize) -> usize {
         self.readings.partition_point(|r| r.start as usize <= p) - 1
     }
