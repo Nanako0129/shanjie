@@ -9,8 +9,11 @@ The --simplified tests build in-process against a synthetic OpenCC folder (two s
 duration of the call); only the "hash differs" and "file missing" cases run the command line against the real constants. None of them
 needs the real OpenCC tables."""
 import hashlib
+import contextlib
+import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -316,6 +319,110 @@ class SimplifiedTests(unittest.TestCase):
                 self.assertEqual(r.returncode, 2)
                 self.assertIn("--base-txtmap", r.stderr)
             self.assertFalse(os.path.exists(out))
+
+
+HEADER = ["#PRAGMA:VANGUARD_HOMA_LEXICON_HEADER", "VERSION\t2.0", "TYPE\tTYPING", "READING_SEPARATOR\t-", "ENTRY_COUNT\t7", "KEY_COUNT\t3",
+          "DEFAULT_PROB_7\t-11", "#PRAGMA:VANGUARD_HOMA_LEXICON_VALUES"]
+# a small stand-in for a vChewing factory file: every category it has is one the --simplified --vendor output has or FACTORY_ABSENT_OK allows
+FACTORY_OK = HEADER + ["@-5\tA\tB", ">7\tA|C", "X\t-1\t8\tY", "A\t-4\t5\tX", "A\t-4\t6\tX", "_NORM\t1000\t2", "_BUILD_TIMESTAMP\t1\t2",
+                       "#PRAGMA:VANGUARD_HOMA_LEXICON_KEY_LINE_MAP", "ㄅ\t0\t5", "_NORM\t5\t1", "_BUILD_TIMESTAMP\t6\t1", ""]
+# the same shape with a Simplified-free, meta-free body: what a plain (no --simplified, no --vendor) output can satisfy
+FACTORY_PLAIN = HEADER[:5] + ["KEY_COUNT\t1", "#PRAGMA:VANGUARD_HOMA_LEXICON_VALUES", "@-5\t\x07\tB", ">7\tA", "A\t-4\t6\tX",
+                              "#PRAGMA:VANGUARD_HOMA_LEXICON_KEY_LINE_MAP", "ㄅ\t0\t3", ""]
+SPEC = os.path.join(ROOT, "docs", "spec", "vanguard-textmap.md")
+
+
+def write_lines(path, lines):
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines))
+    return path
+
+
+class FactoryCompareTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.base = os.path.realpath(cls.tmp.name)
+        root = make_root(cls.base)
+        folder, shas = make_opencc(cls.base)
+        cls.ours = os.path.join(cls.base, "ours.txtMap")
+        build_in_process(root, cls.ours, folder, shas, "--simplified", "--vendor", VENDOR)
+        cls.root = root
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def missing(self, lines):
+        table, missing = vt.compare_factory(write_lines(os.path.join(self.base, "f.txtMap"), lines), self.ours)
+        return table, missing
+
+    def test_count_categories_covers_every_kind(self):
+        lines = HEADER + ["@-5\tA|B\tA", "@-6\t\x07\tC", "@-7\tD\t", ">7\tA", ">7\tB", ">11\tC", "A\t-4\t5\tX", "B\t-4\t8", "!B\t6\t-3\tY\t-3.5\tZ|W",
+                          "!B\t5\t-3\tY\t-3.5\tZ|W", "_NORM\t1\t2", "#PRAGMA:VANGUARD_HOMA_LEXICON_KEY_LINE_MAP", "_NORM\t0\t1", "ㄅ\t1\t1", ""]
+        got = vt.count_categories(write_lines(os.path.join(self.base, "c.txtMap"), lines), "t")
+        self.assertEqual(got, {"header key VERSION": 1, "header key TYPE": 1, "header key READING_SEPARATOR": 1, "header key DEFAULT_PROB_7": 1,
+                               "B Simplified cell non-empty": 2, "B Traditional cell non-empty": 2, "A typeID 7": 2, "A typeID 11": 1,
+                               "C typeID 5": 1, "C typeID 8": 1, "D typeID 6": 1, "D typeID 5": 1, "C typeID 2": 1, "meta key _NORM": 1})
+
+    def test_1_everything_the_factory_has_is_present_or_allowed(self):
+        table, missing = self.missing(FACTORY_OK)
+        self.assertEqual(missing, [])
+        self.assertIn("meta key _NORM", table)
+        self.assertIn("absent, allowed", table)
+
+    def test_2_category_the_output_lacks_and_the_list_does_not_allow_fails(self):
+        table, missing = self.missing(FACTORY_OK[:9] + [">99\tX"] + FACTORY_OK[9:])
+        self.assertEqual(missing, ["A typeID 99"])
+        self.assertRegex(table, r"A typeID 99 +1 +0 +MISSING")
+
+    def test_3_the_same_category_passes_when_it_is_allowed(self):
+        with mock.patch.object(vt, "FACTORY_ABSENT_OK", vt.FACTORY_ABSENT_OK | {"A typeID 99"}):
+            self.assertEqual(self.missing(FACTORY_OK[:9] + [">99\tX"] + FACTORY_OK[9:])[1], [])
+
+    def test_4_an_extra_header_key_in_the_factory_file_fails(self):
+        self.assertEqual(self.missing(FACTORY_OK[:2] + ["NEWKEY\t1"] + FACTORY_OK[2:])[1], ["header key NEWKEY"])
+
+    def test_5_a_line_that_fits_no_category_exits_2_with_line_number_and_head(self):
+        junk = "x" * 50
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            self.missing(FACTORY_OK[:9] + [junk] + FACTORY_OK[9:])
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("line 10", err.getvalue())
+        self.assertIn("x" * 40, err.getvalue())
+        self.assertNotIn("x" * 41, err.getvalue())
+        for bad in (FACTORY_OK[:2] + ["#PRAGMA:SOMETHING_ELSE"] + FACTORY_OK[2:], FACTORY_OK[:-4] + ["ㄅ\t0"] + FACTORY_OK[-3:]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
+                self.missing(bad)
+            self.assertEqual(cm.exception.code, 2)
+
+    def test_command_line_prints_the_table_and_sets_the_exit_code(self):
+        os.makedirs(os.path.join(self.base, "cli"))
+        root = make_root(os.path.join(self.base, "cli"))
+        common = ["--shanjie-root", root, *BUILD_FLAGS]
+        ok = run_tool(*common, "--out-txtmap", os.path.join(self.base, "cli-ok.txtMap"),
+                      "--compare-factory", write_lines(os.path.join(self.base, "fp.txtMap"), FACTORY_PLAIN))
+        self.assertRegex(ok.stdout, r"B Traditional cell non-empty +1 +\d+ +ok")
+        bad = run_tool(*common, "--out-txtmap", os.path.join(self.base, "cli-bad.txtMap"),
+                       "--compare-factory", write_lines(os.path.join(self.base, "fo.txtMap"), FACTORY_OK), ok=False)
+        self.assertEqual(bad.returncode, 2)
+        self.assertRegex(bad.stdout, r"B Simplified cell non-empty +1 +0 +MISSING")
+        self.assertIn("B Simplified cell non-empty", bad.stderr)
+        gone = run_tool(*common, "--out-txtmap", os.path.join(self.base, "cli-gone.txtMap"), "--compare-factory", os.path.join(self.base, "nope"), ok=False)
+        self.assertEqual(gone.returncode, 2)
+        self.assertFalse(os.path.exists(os.path.join(self.base, "cli-gone.txtMap")))  # refused before building
+
+    def test_spec_allow_list_is_the_same_set_as_the_constant(self):
+        lines = open(SPEC, encoding="utf-8").read().split("\n")
+        start = next(i for i, ln in enumerate(lines) if ln.startswith("### ") and "FACTORY_ABSENT_OK" in ln)
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("#")), len(lines))
+        items = [re.fullmatch(r"- `([^`]+)`：(.+)", ln) for ln in lines[start + 1:end] if ln.startswith("- ")]
+        self.assertTrue(all(items), "every bullet in the allow-list section is '- `label`：reason'")
+        labels = [m.group(1) for m in items]
+        self.assertEqual(len(labels), len(set(labels)), "no entry listed twice")
+        self.assertEqual(set(labels), set(vt.FACTORY_ABSENT_OK))
+        self.assertTrue(all(m.group(2).strip() for m in items))
 
 
 class EndToEnd(unittest.TestCase):

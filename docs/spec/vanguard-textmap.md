@@ -105,11 +105,42 @@ TSV，每列 `讀音<TAB>值<TAB>前文<TAB>機率[<TAB>來源]`，第一列若�
 - `--out-txtmap X`：只寫 `X` 與旁檔 `X.build_stats.json`（完整檔名後面接，例如 `VanguardFactoryDict4Typing.txtMap.build_stats.json`）。
 - `--out-dict D`：建 `D`，寫 `D/VanguardFactoryDict4Typing.txtMap` 與 `D/build_stats.json`，並把 `--companion-dir` 裡的配套檔複製進去（`phonic_table_Z.txt`、`data-punctuations.txt`、`data-paired-punctuations.txt` 與所有 `template-*.txt`）。`--companion-dir` 沒有預設，`--out-dict` 沒給就報錯。配套檔是唯音的檔案，不屬於善解的資料。
 - 輸出路徑（`--out-txtmap` 或 `--out-dict`，以解析符號連結後的真實路徑判斷）不可以在 `--shanjie-root` 的工作樹內，免得 33 MB 的產物被 commit；已存在時要 `--force` 才覆寫。
-- 其餘旗標與預設值：`--include-colloq-readings`、`--no-names`、`--packs`（預設 `none`）、`--no-cap-overlay`、`--kn-path`、`--kn-beta`（預設 0，範圍 0–1）、`--colloq-path`、`--colloq-uni-w`、`--colloq-bi-w`（預設 0，範圍 0–1）、`--trigram-path`、`--extra-ngrams`、`--base-txtmap`、`--uni-lam`（預設 0，範圍 0–1）、`--len-bonus`（0）、`--decimals`（3）、`--no-bigrams`、`--bi-mode`（`blend`）、`--bi-lam`（0.7）、`--bi-offset`（0）、`--bi-gamma`（1）、`--bi-min-count`（3）、`--bi-min-ctx`（5）、`--max-ctx-len`（4）、`--max-val-len`（4）、`--max-reading-gap`（1.5）、`--bi-margin`（0.02）、`--bi-non-top1-only`、`--bi-budget`（0）、`--bi-rank`（`impact`）、`--bi-max-per-key`（0）、`--simplified`、`--opencc-dir`、`--vendor`（見 §2.1、§2.2）、`--tri-budget`（0）、`--tri-min-count`（3）、`--tri-min-ctx`（5）、`--tri-margin`（0.02）、`--validate` / `--no-validate`（預設開）。
+- 其餘旗標與預設值：`--include-colloq-readings`、`--no-names`、`--packs`（預設 `none`）、`--no-cap-overlay`、`--kn-path`、`--kn-beta`（預設 0，範圍 0–1）、`--colloq-path`、`--colloq-uni-w`、`--colloq-bi-w`（預設 0，範圍 0–1）、`--trigram-path`、`--extra-ngrams`、`--base-txtmap`、`--uni-lam`（預設 0，範圍 0–1）、`--len-bonus`（0）、`--decimals`（3）、`--no-bigrams`、`--bi-mode`（`blend`）、`--bi-lam`（0.7）、`--bi-offset`（0）、`--bi-gamma`（1）、`--bi-min-count`（3）、`--bi-min-ctx`（5）、`--max-ctx-len`（4）、`--max-val-len`（4）、`--max-reading-gap`（1.5）、`--bi-margin`（0.02）、`--bi-non-top1-only`、`--bi-budget`（0）、`--bi-rank`（`impact`）、`--bi-max-per-key`（0）、`--simplified`、`--opencc-dir`、`--vendor`（見 §2.1、§2.2）、`--compare-factory`（見 §8.2）、`--tri-budget`（0）、`--tri-min-count`（3）、`--tri-min-ctx`（5）、`--tri-margin`（0.02）、`--validate` / `--no-validate`（預設開）。
 
 ### 8.1 `build_stats.json`
 
 建置紀錄，內容是各步驟的筆數與秒數（開 `--simplified` 時另有 `chs_contextual_entries`、`chs_contextual_lines`）、`validated`、輸出的 `txtmap_sha256`、`entry_count`、`key_count`、所有旗標（`flags`）與 `inputs`。整份不出現絕對路徑：路徑類的值（`txtmap_path`、`base_txtmap`、`flags` 裡的路徑欄位，含 `opencc_dir`）記相對 `--shanjie-root` 的路徑，在它之外的只記檔名（`--shanjie-root` 本身記 `.`）。`inputs` 有 `git_commit`（`--shanjie-root` 的 `git rev-parse HEAD`；它不是 git 工作樹的頂層就是 `null`）、`git_dirty`（`git status --porcelain --untracked-files=no` 非空，不是 git 工作樹時 `null`）與 `files`：這次讀到的每個資料檔的相對路徑與 SHA-256（開 `--simplified` 時含兩個 OpenCC 檔）。標準輸出印同一份（不含 `flags`）。
+
+### 8.2 與原廠檔比對（`--compare-factory PATH`）
+
+`PATH` 是使用者自己的唯音原廠 `VanguardFactoryDict4Typing.txtMap`（工具只讀它，不散布、不複製）。輸出寫完後，工具對原廠檔與剛寫的輸出各數下面這些類別的行數（標籤就是表裡印的字）：
+
+| 標籤 | 數的是 |
+|---|---|
+| `B Simplified cell non-empty`、`B Traditional cell non-empty` | 型 B 行裡簡體格、繁體格非空的行（空與 `\a` 都算空） |
+| `A typeID n` | 型 A 行（`>typeID<TAB>…`），依 typeID |
+| `C typeID n` | 型 C 行（值、分數、typeID[、前文]），依 typeID |
+| `D typeID n` | 型 D 行（`!值<TAB>typeID<TAB>…`），依 typeID |
+| `meta key 鍵` | `KEY_LINE_MAP` 裡以 `_` 開頭的每個鍵，各算一類 |
+| `header key 鍵` | 標頭區 `ENTRY_COUNT`、`KEY_COUNT` 以外的每個鍵，各算一類（有就是 1） |
+
+標頭、`VALUES`、`KEY_LINE_MAP` 裡分不進這些類別的行（包含未知的分節標記），工具以結束碼 2 結束並印出行號與行首 40 個字元，不略過；輸出檔自己也用同一套規則數。工具印一張表（類別、原廠、輸出、狀態），通過與否都印。任何一類原廠大於 0、輸出等於 0、而且不在 §8.3 的允許清單，狀態是 `MISSING`，結束碼 2。給了這個旗標，原廠檔不存在或讀不到也以 2 結束（建置之前就檢查）。
+
+### 8.3 允許清單（`FACTORY_ABSENT_OK`）
+
+原廠檔有、輸出可以沒有的類別，一項一行。清單是模組常數 `FACTORY_ABSENT_OK`，這一節和常數是同一組（`tools/test_vanguard_textmap.py` 逐項比對）：
+
+- `A typeID 7`：CNS 條目；善解沒有這類資料的來源，辭典只有簡繁兩種條目，不產生。
+- `A typeID 9`：符號詞條目；同上，不產生。
+- `A typeID 10`：注音文條目；同上，不產生。
+- `A typeID 11`：GBEX 條目；同上，不產生。
+- `C typeID 8`：非漢字條目；同上，不產生。
+- `meta key _BUILD_TIMESTAMP`：原廠檔的建置時間 meta 行；善解沒有對應的資料，是否必要尚待向唯音作者確認，確認前允許缺。
+- `meta key _NORM`：原廠檔的 meta 行（鍵與值同名、分數欄放數字）；善解不產生這個值，是否必要與值怎麼算尚待向唯音作者確認，確認前允許缺。
+- `header key DEFAULT_PROB_7`：標頭的預設機率，對應型 A 的 typeID 7；那一類不產生，沒有條目可套。
+- `header key DEFAULT_PROB_9`：同上，對應 typeID 9。
+- `header key DEFAULT_PROB_10`：同上，對應 typeID 10。
+- `header key DEFAULT_PROB_11`：同上，對應 typeID 11。
 
 ## 9. 測試
 
@@ -118,6 +149,7 @@ TSV，每列 `讀音<TAB>值<TAB>前文<TAB>機率[<TAB>來源]`，第一列若�
 - 單元：格子的跳脫與嚴格解碼、`parse_extra_ngrams`（含空前文）、`override_unigram_lines`、`override_contextual_lines`、檢查器接受合法檔並拒絕各種壞檔。
 - 端對端：在暫存資料夾建一個合成的小 repo 根（`eval/golden/kn-tiny/lexicon.txt` 當 `mcbpmf-data.txt`、kn-tiny 的 `bigram.sjlm` 與 `kn.sjkn`、空的疊加層、變調、名單與異體表，`--packs none --bi-min-count 1 --bi-min-ctx 1`），以子程序跑三種模式（`--out-txtmap`、`--out-dict`、`--base-txtmap`）並通過自我驗證；`build_stats.json` 遞迴檢查沒有絕對路徑、`inputs` 的雜湊與 git 欄位正確；寫進工作樹內（含經符號連結）被拒絕；`--out-dict` 沒給 `--companion-dir` 被拒絕。
 - 簡體欄與作者標記：用合成的小 OpenCC 表（測試時把 `OPENCC_SHA256` 暫時換成合成表的雜湊，不讀真表，沒有因真表缺席而跳過的測試）在同一個程序裡建置：轉換函式（最長比對優先、字表後備、無列的字原樣、多值取第一個）、B 行簡體格與去重、同簡體詞的兩個繁體分數各留一行、typeID 5 的鏡像與同鍵取高分、行序、檢查器接受 typeID 5 並拒絕破壞鏡像的檔、不開 `--simplified` 時整份輸出等於開了之後拿掉簡體格、typeID 5 行與 meta 行、`--vendor` 的鍵與 `VALUES` 行、`build_stats.json` 無絕對路徑；以子程序用真常數跑命令列：OpenCC 雜湊不符、缺檔、`--vendor` 含 TAB 或空字串、`--base-txtmap` 加 `--simplified` 或 `--vendor`，結束碼都是 2。
+- 原廠檔比對：用合成的小原廠檔涵蓋全部通過、某類原廠大於 0 而輸出為 0 且不在允許清單（2）、同上但在允許清單（0）、原廠多一個標頭鍵輸出沒有（2）、原廠有一行分不進任何類別（2，訊息有行號），加命令列的通過與失敗各一次；另一支測試讀 §8.3 的清單，和 `FACTORY_ABSENT_OK` 逐項比對（多一項或少一項都失敗）。
 
 ## 10. 重現已發佈的檔案
 

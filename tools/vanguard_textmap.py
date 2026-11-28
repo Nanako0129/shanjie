@@ -21,6 +21,10 @@ word with OpenCC's TSPhrases.txt (longest match) and TSCharacters.txt (Apache-2.
 tables are not in the repo). Without it the output is byte-for-byte what it was. --vendor TEXT writes one meta unigram
 (key _VENDOR, value TEXT, score 0, typeID 2).
 
+--compare-factory PATH (the user's own vChewing factory dictionary; it is only read) counts line categories in that file and in the
+output and exits 2 when a category the factory file has is absent from the output and not in FACTORY_ABSENT_OK; see
+docs/spec/vanguard-textmap.md section 8.2.
+
 Purpose: tools/vanguard_textmap.py generates the Shanjie phonetic dictionary in the TextMap 2.0 layout
 that vChewing's Vanguard typing engine reads (VanguardFactoryDict4Typing.txtMap). The spec page is
 docs/spec/vanguard-textmap.md.
@@ -87,6 +91,17 @@ OPENCC_SHA256 = {
 }
 VENDOR_KEY = "_VENDOR"
 META_TYPE_ID = 2
+# --compare-factory: categories (labels as count_categories writes them) the output may lack although the factory file has them. One line
+# per entry with the reason in docs/spec/vanguard-textmap.md section 8.3; a test keeps the two lists equal.
+FACTORY_ABSENT_OK = frozenset({
+    "A typeID 7", "A typeID 9", "A typeID 10", "A typeID 11",
+    "C typeID 8",
+    "meta key _BUILD_TIMESTAMP", "meta key _NORM",
+    "header key DEFAULT_PROB_7", "header key DEFAULT_PROB_9", "header key DEFAULT_PROB_10", "header key DEFAULT_PROB_11",
+})
+_SECTION_HEADER = "#PRAGMA:VANGUARD_HOMA_LEXICON_HEADER"
+_SECTION_VALUES = "#PRAGMA:VANGUARD_HOMA_LEXICON_VALUES"
+_SECTION_KEY_MAP = "#PRAGMA:VANGUARD_HOMA_LEXICON_KEY_LINE_MAP"
 
 
 def die(msg: str, code: int = 2) -> None:
@@ -857,6 +872,79 @@ def validate_textmap_file(path: str, check_sorted: bool = True, t2s=None) -> tup
     return entry_count, key_count
 
 
+def count_categories(path: str, what: str) -> dict[str, int]:
+    """{category label: count} for a TextMap 2.0 file, for --compare-factory. Categories: B lines with a non-empty Simplified / Traditional
+    cell, type-A / C / D lines per typeID, KEY_LINE_MAP keys starting with "_" (meta keys), header keys other than ENTRY_COUNT and KEY_COUNT.
+    A header, VALUES or KEY_LINE_MAP line that fits none of them exits 2 with its line number and first 40 characters."""
+    try:
+        with open(path, "rb") as f:
+            lines = f.read().decode("utf-8").split("\n")
+    except (OSError, UnicodeDecodeError) as e:
+        die(f"{what}: cannot read {os.path.basename(path)}: {e}")
+    if lines and lines[-1] == "":
+        lines.pop()
+    counts: dict[str, int] = defaultdict(int)
+    section = None
+    for i, ln in enumerate(lines):
+        def unknown() -> None:
+            die(f"{what}: line {i + 1} fits no category: {ln[:40]}")
+        if ln.startswith("#PRAGMA:"):
+            if ln not in (_SECTION_HEADER, _SECTION_VALUES, _SECTION_KEY_MAP):
+                unknown()
+            section = ln
+            continue
+        if section is None:
+            unknown()
+        p = ln.split("\t")
+        if section == _SECTION_HEADER:
+            if ln and len(ln.split("\t", 1)) != 2:
+                unknown()
+            if ln and p[0] not in ("ENTRY_COUNT", "KEY_COUNT"):
+                counts[f"header key {p[0]}"] += 1
+        elif section == _SECTION_KEY_MAP:
+            if ln and len(p) != 3:
+                unknown()
+            if ln and p[0].startswith("_"):
+                counts[f"meta key {p[0]}"] += 1
+        elif ln.startswith(">") and len(p) == 2 and _parse_int32(p[0][1:]) is not None:
+            counts[f"A typeID {_parse_int32(p[0][1:])}"] += 1
+        elif ln.startswith("@") and len(p) == 3:
+            counts["B Simplified cell non-empty"] += p[1] not in ("", "\x07")
+            counts["B Traditional cell non-empty"] += p[2] not in ("", "\x07")
+        elif ln.startswith("!") and len(p) > 4 and len(p) % 2 == 0 and _parse_int32(p[1]) is not None:
+            counts[f"D typeID {_parse_int32(p[1])}"] += 1
+        elif len(p) in (3, 4) and _parse_int32(p[2]) is not None:
+            counts[f"C typeID {_parse_int32(p[2])}"] += 1
+        else:
+            unknown()
+    return dict(counts)
+
+
+def _category_order(label: str) -> tuple:
+    group = label.split(" ", 1)[0]
+    tid = int(label.rsplit(" ", 1)[1]) if group in ("A", "C", "D") else 0
+    return ({"B": 0, "A": 1, "C": 2, "D": 3, "meta": 4, "header": 5}[group], tid, label)
+
+
+def compare_factory(factory_path: str, ours_path: str) -> tuple[str, list[str]]:
+    """(table, missing): both files' category counts side by side, and the labels the factory file has (> 0), the output lacks (= 0)
+    and FACTORY_ABSENT_OK does not list."""
+    fac = count_categories(factory_path, "factory file")
+    ours = count_categories(ours_path, "output")
+    labels = sorted(set(fac) | set(ours), key=_category_order)
+    rows, missing = [f"{'category':<34}{'factory':>10}{'ours':>10}  status"], []
+    for lab in labels:
+        f, o = fac.get(lab, 0), ours.get(lab, 0)
+        if f > 0 and o == 0:
+            status = "absent, allowed" if lab in FACTORY_ABSENT_OK else "MISSING"
+            if lab not in FACTORY_ABSENT_OK:
+                missing.append(lab)
+        else:
+            status = "ok"
+        rows.append(f"{lab:<34}{f:>10}{o:>10}  {status}")
+    return "\n".join(rows), missing
+
+
 def assemble_companion_files(companion_dir: str, out_dict: str) -> list[str]:
     if not os.path.isdir(companion_dir):
         raise FileNotFoundError(f"companion dir not found: {companion_dir}")
@@ -1075,7 +1163,7 @@ def finish_stats(stats: dict, args: argparse.Namespace, packs: list[str], txtmap
     """Make the stats path-free, add "inputs", and write build_stats.json (inside --out-dict, else next to the txtMap)."""
     root = args.shanjie_root
     flags = dict(vars(args))
-    for k in ("shanjie_root", "out_dict", "out_txtmap", "companion_dir", "kn_path", "colloq_path", "trigram_path", "extra_ngrams", "base_txtmap", "opencc_dir"):
+    for k in ("shanjie_root", "out_dict", "out_txtmap", "companion_dir", "kn_path", "colloq_path", "trigram_path", "extra_ngrams", "base_txtmap", "opencc_dir", "compare_factory"):
         if flags.get(k):
             flags[k] = _rel(flags[k], root)
     stats["flags"] = flags
@@ -1235,6 +1323,8 @@ def build_textmap(args: argparse.Namespace) -> dict:
         except ValueError as e:
             die(f"--vendor: {e}")
     t2s = make_t2s(*load_opencc(args.opencc_dir)) if args.simplified else None
+    if args.compare_factory and not os.path.isfile(args.compare_factory):
+        die(f"--compare-factory file not found: {os.path.basename(args.compare_factory)}")
 
     # A 33 MB output inside the repo work tree would be committed by mistake: refuse it.
     root_real = os.path.realpath(args.shanjie_root)
@@ -1870,6 +1960,7 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--simplified", action="store_true", help="Also write the Simplified column (EntryType 5) and typeID 5 contextual lines, converted with OpenCC TSPhrases/TSCharacters from --opencc-dir")
     ap.add_argument("--opencc-dir", default=default_opencc_dir(), help="Folder with OpenCC TSPhrases.txt and TSCharacters.txt, sha256-checked (default $SHANJIE_CACHE/sources/opencc)")
     ap.add_argument("--vendor", default=None, help="Write one meta unigram: key _VENDOR, value TEXT, score 0, typeID 2")
+    ap.add_argument("--compare-factory", default=None, help="The user's own vChewing VanguardFactoryDict4Typing.txtMap: after writing, compare line categories with the output and exit 2 when the output lacks one the factory file has (except FACTORY_ABSENT_OK)")
     ap.add_argument("--base-txtmap", default=None, help="Existing TextMap 2.0 file: skip the Shanjie build, apply only --extra-ngrams overrides (other build flags ignored)")
 
     # Unigram tuning
@@ -1925,6 +2016,12 @@ def main() -> int:
 
     stats = build_textmap(args)
     print(json.dumps({k: v for k, v in stats.items() if k != "flags"}, ensure_ascii=False, indent=2))
+    if args.compare_factory:
+        out = os.path.join(os.path.realpath(args.out_dict), "VanguardFactoryDict4Typing.txtMap") if args.out_dict else os.path.realpath(args.out_txtmap)
+        table, missing = compare_factory(args.compare_factory, out)
+        print(table)
+        if missing:
+            die("the factory file has categories the output lacks and FACTORY_ABSENT_OK does not allow: " + ", ".join(missing))
     return 0
 
 
