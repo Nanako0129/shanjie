@@ -2,8 +2,10 @@ VanguardFactoryDict4Typing.txtMap (唯音辭典，善解資料第 2 版) - NOTIC
 =================================================================
 
 This file is a dictionary for the vChewing input method (唯音輸入法) in its
-TextMap v2.0 format, written to vChewing's third-party build tool rules of
-VanguardLexicon 5.1.0 (it needs vChewing 5.1.0 or later). Every entry, reading and score in it was converted from
+TextMap v2.0 format, built after vChewing's third-party build tool rules of
+VanguardLexicon 5.1.0 (it needs vChewing 5.1.0 or later; the Traditional
+column is not proofread against ChtOrthographySpec.md, see the release
+notes). Every entry, reading and score in it was converted from
 the data of the 善解 (shanjie) input method, repository
 https://github.com/Nanako0129/shanjie , commit 1a9899ac. It contains no entry
 from vChewing's own factory dictionary.
