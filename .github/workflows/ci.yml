@@ -844,6 +844,14 @@ jobs:
           set -euo pipefail
           "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest tools/test_build_trigram.py
 
+      # docs/spec/vanguard-textmap.md §9: tools/test_vanguard_textmap.py (the vChewing dictionary generator: codec, validator, three modes end to end on
+      # a synthetic repo root built from the kn-tiny toy model, path-free build_stats.json) needs numpy, so it runs in the same throwaway venv.
+      - name: Vanguard dictionary generator (Python)
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/x0c-venv/bin/python" -W ignore -m unittest tools/test_vanguard_textmap.py
+
   # docs/spec/release-and-ci.md: the Swift tests through the real core and model, on their own runner beside `shell`. They launch
   # no sandboxed build (the installer tests make their own throwaway bundles), so docs/spec/install-and-update.md §10.2's order does not bind
   # them, and they need only target/release/libcore.a (macos/Package.swift), the lexicon and the models: no `make bundle`.

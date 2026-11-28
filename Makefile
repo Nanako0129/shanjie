@@ -74,6 +74,7 @@ test-python:
 	python3 -W ignore -m unittest tools/test_holdout_guard.py tools/test_merge_guard_rows.py
 	python3 -W ignore -m unittest tools/test_build_attribution.py
 	python3 -W ignore -m unittest tools/test_build_trigram.py
+	python3 -W ignore -m unittest tools/test_vanguard_textmap.py
 	python3 -W ignore -m unittest tools/test_build_digits.py
 	cd reference/proto && python3 -W ignore -m unittest test_digits
 	# docs/spec/english-mixed.md §16: the English table's builder, the probes, the cell choice, and the scores' Python baseline with its golden.
