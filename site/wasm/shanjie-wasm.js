@@ -453,7 +453,7 @@
           events.push([KEY_CHAR, '7', 0, false]);
           pendingNeutralDot = false;
         }
-      } else if (ch === '˙' && i < str.length && SYM_TO_KEY[str[i]]) {
+      } else if (ch === '˙' && i < str.length && SYM_TO_KEY[str[i]] && !(i >= 2 && SYM_TO_KEY[str[i - 2]])) {
         // MOE/Taiwan notation places neutral-tone `˙` before the syllable (e.g. `ㄋㄟˋ ˙ㄍㄜ`);
         // defer key `'7'` until after that syllable's Bopomofo symbols so core applies the tone.
         pendingNeutralDot = true;

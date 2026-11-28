@@ -422,7 +422,7 @@
             layoutCode: 0,
             packsMask: 29
           });
-          if (terminated) return initRes;
+          if (terminated || stage === 'error') return initRes;
 
           stage = 'stage1-ready';
           emitProgress({
@@ -433,7 +433,7 @@
           });
 
           stage2Promise = client.loadStage2(urls.colloquialUrl, urls.tinylmUrl).then(function (s2Res) {
-            if (terminated) return s2Res;
+            if (terminated || stage === 'error') return s2Res;
             stage = 'stage2-ready';
             emitProgress({
               stage: 'stage2-ready',
@@ -443,7 +443,7 @@
             });
             return s2Res;
           }).catch(function (err) {
-            if (!terminated) {
+            if (!terminated && stage !== 'error') {
               emitProgress({
                 stage: 'stage1-ready',
                 label: 'WASM 真引擎就緒（語意校正載入失敗，維持 n-gram 解碼）',
@@ -457,14 +457,17 @@
 
           return initRes;
         } catch (err) {
+          var alreadyErrored = stage === 'error';
           stage = 'error';
-          emitProgress({
-            stage: 'error',
-            label: 'WASM 引擎載入失敗',
-            ready: false,
-            rerankReady: false,
-            error: String(err && err.message ? err.message : err)
-          });
+          if (!alreadyErrored) {
+            emitProgress({
+              stage: 'error',
+              label: 'WASM 引擎載入失敗',
+              ready: false,
+              rerankReady: false,
+              error: String(err && err.message ? err.message : err)
+            });
+          }
           if (client) {
             client.terminate();
             client = null;
