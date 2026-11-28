@@ -124,7 +124,7 @@ TSV，每列 `讀音<TAB>值<TAB>前文<TAB>機率[<TAB>來源]`，第一列若�
 
 ### 8.1 `build_stats.json`
 
-建置紀錄，內容是各步驟的筆數與秒數（開 `--simplified` 時另有 `chs_contextual_entries`、`chs_contextual_lines`）、`validated`、輸出的 `txtmap_sha256`、`entry_count`、`key_count`、所有旗標（`flags`）與 `inputs`。整份不出現絕對路徑：路徑類的值（`txtmap_path`、`base_txtmap`、`flags` 裡的路徑欄位，含 `opencc_dir`）記相對 `--shanjie-root` 的路徑，在它之外的只記檔名（`--shanjie-root` 本身記 `.`）。`inputs` 有 `git_commit`（`--shanjie-root` 的 `git rev-parse HEAD`；它不是 git 工作樹的頂層就是 `null`）、`git_dirty`（`git status --porcelain --untracked-files=no` 非空，不是 git 工作樹時 `null`）與 `files`：這次讀到的每個資料檔的相對路徑與 SHA-256（開 `--simplified` 時含兩個 OpenCC 檔）。標準輸出印同一份（不含 `flags`）。
+建置紀錄，內容是各步驟的筆數與秒數（開 `--simplified` 時另有 `chs_contextual_entries`、`chs_contextual_lines`）、`validated`、輸出的 `txtmap_sha256`、`entry_count`、`key_count`、所有旗標（`flags`）、`meta_lines`（`--vendor`、`--build-meta` 寫出的 meta 行：鍵對應整行文字）與 `inputs`。整份不出現絕對路徑：路徑類的值（`txtmap_path`、`base_txtmap`、`flags` 裡的路徑欄位，含 `opencc_dir`）記相對 `--shanjie-root` 的路徑，在它之外的只記檔名（`--shanjie-root` 本身記 `.`）。`inputs` 有 `git_commit`（`--shanjie-root` 的 `git rev-parse HEAD`；它不是 git 工作樹的頂層就是 `null`）、`git_dirty`（`git status --porcelain --untracked-files=no` 非空，不是 git 工作樹時 `null`）與 `files`：這次讀到的每個資料檔的相對路徑與 SHA-256（開 `--simplified` 時含兩個 OpenCC 檔）。標準輸出印同一份（不含 `flags`）。
 
 ### 8.2 與原廠檔比對（`--compare-factory PATH`）
 

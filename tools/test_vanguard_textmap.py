@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -62,12 +63,18 @@ def make_opencc(base):
     return d, shas
 
 
+FIXED_COMMIT_DATE = "2020-01-01T00:00:00Z"
+FIXED_COMMIT_SECONDS = "1577836800"
+
+
 def git_repo(root):
     """Commit everything under root as a throwaway git repo; returns (git argv prefix, HEAD sha, committer time)."""
     git = ["git", "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
     subprocess.run([*git, "init", "-q"], check=True, capture_output=True)
     subprocess.run([*git, "add", "-A"], check=True, capture_output=True)
-    subprocess.run([*git, "commit", "-q", "--no-verify", "-m", "x"], check=True, capture_output=True)
+    # a fixed past commit time, so a build that used the wall clock instead of %ct could not match
+    env = {**os.environ, "GIT_COMMITTER_DATE": FIXED_COMMIT_DATE, "GIT_AUTHOR_DATE": FIXED_COMMIT_DATE}
+    subprocess.run([*git, "commit", "-q", "--no-verify", "-m", "x"], check=True, capture_output=True, env=env)
     out = lambda *a: subprocess.run([*git, *a], check=True, capture_output=True, text=True).stdout.strip()
     return git, out("rev-parse", "HEAD"), out("log", "-1", "--format=%ct")
 
@@ -374,14 +381,23 @@ class ThirdPartyTablesAndBuildMeta(unittest.TestCase):
         out, stats = self.build("a.txtMap", "--simplified", "--vendor", VENDOR, "--build-meta")
         m = read_map(out)
         self.assertEqual(list(m)[:3], ["_BUILD_TIMESTAMP", "_COMMIT_HASH", "_VENDOR"])
-        self.assertEqual(m["_BUILD_TIMESTAMP"], [f"_BUILD_TIMESTAMP\t{self.ct}\t2"])
+        self.assertEqual(self.ct, FIXED_COMMIT_SECONDS)
+        self.assertEqual(m["_BUILD_TIMESTAMP"], [f"_BUILD_TIMESTAMP\t{FIXED_COMMIT_SECONDS}\t2"])
         self.assertEqual(m["_COMMIT_HASH"], [f"{self.sha}\t0\t2"])
         self.assertEqual(m["_VENDOR"], [f"{VENDOR}\t0\t2"])
         self.assertEqual(len(self.sha), 40)
         self.assertTrue(stats["validated"])
         self.assertNotIn("_NORM", m)
+        self.assertEqual(stats["meta_lines"], {"_VENDOR": f"{VENDOR}\t0\t2", "_BUILD_TIMESTAMP": f"_BUILD_TIMESTAMP\t{FIXED_COMMIT_SECONDS}\t2",
+                                               "_COMMIT_HASH": f"{self.sha}\t0\t2"})
+        time.sleep(1.1)   # the rebuild lands in a later second
         again, _ = self.build("b.txtMap", "--simplified", "--vendor", VENDOR, "--build-meta", "--force")
         self.assertEqual(open(out, "rb").read(), open(again, "rb").read())
+
+    def test_the_build_runs_the_third_party_table_check(self):
+        with mock.patch.object(vt, "check_third_party_tables") as chk:
+            self.build("c.txtMap")
+        chk.assert_called_once()
 
     def test_without_build_meta_there_are_no_build_meta_keys(self):
         out, _ = self.build("n.txtMap")
