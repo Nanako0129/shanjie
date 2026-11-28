@@ -182,9 +182,9 @@ TSV，每列 `讀音<TAB>值<TAB>前文<TAB>機率[<TAB>來源]`，第一列若�
 
 4. 期望：輸出的 SHA-256 等於上面那個值，`entry_count` 620,219、`key_count` 478,784、`validated` 為 true；旁檔 `VanguardFactoryDict4Typing.txtMap.build_stats.json` 的 `inputs.git_commit` 是 `1a9899ac…`、`git_dirty` 為 false。
 
-### 10.1 簡體版（vchewing-dict-2，暫定）
+### 10.1 簡體版（vchewing-dict-2）
 
-暫定（正式建檔等唯音 5.1.0 定版實測）：下面的數字是用未定版的規範寫法建出來的一次實測，唯音 5.1.0 定版後在定版的套件上驗收通過，才建正式的 dict-2、更新這一節。
+這是正式的 dict-2。唯音 5.1.0 定版後在定版的套件上驗收過：第三方規範 §七 #7 的四項檢查（`hasEntries` 對 2、5、6 為真、其餘為假；沒提供的表回退到內建表；提供的表缺鍵不回退；反查時本檔的讀音在前、內建表補在後並去重）全部通過，繁體模式的送出結果和 §10 的檔逐列相同，簡體模式打得出簡體字形。
 
 同一份資料與旗標，加上 `--simplified --vendor BopoMola_善解輸入法 --build-meta`（OpenCC 兩個表放在 `--opencc-dir`，雜湊對得上才會建；`--shanjie-root` 要是乾淨的 git 工作樹，`--build-meta` 才寫得出來）：
 
