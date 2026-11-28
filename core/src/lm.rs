@@ -1247,7 +1247,7 @@ impl CappedLexicon {
     }
 
     /// Every reading with its capped (word, score) list, best first (build-time use, allocates). Pack words are capped here like any
-    /// overlay word: the prediction index and the digits layer read this, and they are unchanged by the pack. A reading that holds a
+    /// overlay word: the digits layer reads this, and the prediction index reads the same lists through `readings_by_index`; both are unchanged by the pack. A reading that holds a
     /// pack word is rebuilt here the way `new` without the exemption orders it (base order, pack words capped with `lm`, the model the
     /// lexicon was built with, then a stable sort), so the engine keeps no second copy of those lists.
     pub fn readings<'s, 'm>(&'s self, lm: &'m Lm) -> impl Iterator<Item = (Vec<&'s str>, Vec<(&'s str, f64)>)> + use<'s, 'm> {
