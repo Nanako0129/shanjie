@@ -89,7 +89,7 @@ public final class SettingsModel: ObservableObject {
     /// the menu item (false: the toggle is greyed, the setting kept).
     @Published public private(set) var english = false
     @Published public private(set) var englishEnabled = true
-    /// The 模糊輸入 flags (docs/spec/decoder.md §6.1): bits 0-3 the four sound pairs, bit 4 the adjacent-key slips, as
+    /// The 模糊輸入 flags (docs/spec/decoder.md §6.1): bits 0-3 the four sound pairs, bit 4 the adjacent-key slips, bit 5 the one-symbol typos, as
     /// `shanjie_engine_set_fuzzy`. `fuzzyAdjacentEnabled` is false in the Eten layout, which greys the adjacent-key checkbox (the
     /// value is kept).
     @Published public private(set) var fuzzyFlags: UInt32 = 0
@@ -98,6 +98,8 @@ public final class SettingsModel: ObservableObject {
     @Published public private(set) var tone3 = true
     /// The checkbox's title and the sentence about it in the section's note (the settings window shows both; Tone3ShellTests pins them).
     public static let tone3Title = "變調與口語讀音"
+    /// The sentence about the 單一注音打錯 checkbox in the same note (the window shows it; FuzzyShellTests pins it).
+    public static let oneSymNote = "單一注音打錯：打出詞庫沒有的讀音時，把聲母、介音或韻母換一個符號來猜（標準與倚天排列皆適用）。單獨開著時，多鍵小寫英文（如 line、steam）維持英文，部分簡短小寫英文（如 go、cp、cpu）會收成中文；同時開啟「鄰鍵打錯」時由鄰鍵規則優先；要英文可按住 Shift 打，或關閉此項。"
     public static let tone3Note = "變調與口語讀音：照實際讀音打的變調（眨眼打 ㄓㄚˊ ㄧㄢˇ、小姐打 ㄒㄧㄠˊ ˙ㄐㄧㄝ）與口語讀音（厲害打 ㄌㄧˋ ˙ㄏㄞ、熱騰騰打 ㄖㄜˋ ㄊㄥ ㄊㄥ）也解得出來。"
     /// The 重打同一個位置算英文 choice under the 中英混打 toggle (docs/spec/english-mixed.md §11): a key over the symbol already in its column reverts
     /// to the raw keys as English. Default false since docs/spec/english-mixed.md §10.1. Enabled when the toggle is enabled and on.
@@ -260,9 +262,9 @@ public final class SettingsModel: ObservableObject {
     public func setSpacing(_ on: Bool) { shell.setSpacing(on) }
     public func setBrowserFirstSyllable(_ on: Bool) { shell.setBrowserFirstSyllable(on) }
     public func setEnglish(_ on: Bool) { shell.applyEnglish(on) }
-    /// One checkbox of 模糊輸入: `bit` is a bit of the flags (0-3 the pairs, 4 the adjacent-key slips).
+    /// One checkbox of 模糊輸入: `bit` is a bit of the flags (0-3 the pairs, 4 the adjacent-key slips, 5 the one-symbol typos).
     public func setFuzzy(bit: Int, _ on: Bool) {
-        precondition((0..<5).contains(bit))
+        precondition((0..<6).contains(bit))
         shell.applyFuzzy(on ? shell.fuzzyFlags | (1 << UInt32(bit)) : shell.fuzzyFlags & ~(1 << UInt32(bit)))
     }
     public func setTone3(_ on: Bool) { shell.applyTone3(on) }

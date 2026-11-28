@@ -44,11 +44,69 @@ final class FuzzyShellTests: XCTestCase {
         XCTAssertEqual(shell.fuzzySent.last, 17)
     }
 
-    /// A stored value from outside the window (a hand-edited default) keeps only the bits the core knows; the core would refuse the rest.
+    /// A stored value from outside the window (a hand-edited default) keeps only the bits the core knows (0-5); the core would refuse the rest.
     func testStoredFlagsKeepOnlyKnownBits() {
         let shell = makeShell(MemoryFuzzyStore(0xffff))
-        XCTAssertEqual(shell.fuzzyFlags, 31)
-        XCTAssertEqual(shell.fuzzySent, [31])
+        XCTAssertEqual(shell.fuzzyFlags, 63)
+        XCTAssertEqual(shell.fuzzySent, [63])
+    }
+
+    /// TYPO-ONE-SYM (docs/spec/decoder.md §6.2): the 單一注音打錯 checkbox is bit 5 of the same stored flags (value 32), off until chosen,
+    /// independent of the other bits, and the settings window's sentence about it is pinned.
+    func testOneSymbolBitIsStoredAsBit5() {
+        let store = MemoryFuzzyStore()
+        let model = SettingsModel(shell: makeShell(store))
+        XCTAssertEqual(CoreEngine.fuzzyOneSymBit, 5)
+        XCTAssertEqual(CoreEngine.fuzzyAllMask, 63)
+        XCTAssertEqual(model.fuzzyFlags & 32, 0, "off by default")
+        model.setFuzzy(bit: 5, true)
+        XCTAssertEqual(store.fuzzyFlags, 32)
+        model.setFuzzy(bit: 4, true)
+        XCTAssertEqual(store.fuzzyFlags, 48)
+        model.setFuzzy(bit: 5, false)
+        XCTAssertEqual(store.fuzzyFlags, 16)
+        XCTAssertTrue(SettingsModel.oneSymNote.hasPrefix("單一注音打錯："))
+        XCTAssertTrue(SettingsModel.oneSymNote.contains("line、steam）維持英文"))
+    }
+
+    /// The real core: `ㄨㄛˇ ㄒㄧㄟˇ ㄑㄩˋ` (keys `我 v u o 3 …`, ㄒㄧㄟˇ is not a syllable of the lexicon) shows 我想去 with bit 5 and not without,
+    /// the window turning it on with the engine running takes effect on the next keys, and it works in the Eten layout too (bit 4 does not).
+    func testOneSymbolBitReachesTheCore() {
+        let off = Controller(makeShell(MemoryFuzzyStore()))
+        off.session.activate()
+        off.type(Layouts.keys("ㄨㄛˇ ㄒㄧㄟˇ ㄑㄩˋ", eten: false))
+        XCTAssertNotEqual(off.client.marked, "我想去", "bit 5 off: the slip is not guessed")
+
+        let shell = makeShell(MemoryFuzzyStore())
+        let model = SettingsModel(shell: shell)
+        let c = Controller(shell)
+        c.session.activate()
+        model.setFuzzy(bit: 5, true)  // turned on from the window with the engine already running: no restart
+        c.type(Layouts.keys("ㄨㄛˇ ㄒㄧㄟˇ ㄑㄩˋ", eten: false))
+        XCTAssertEqual(c.client.marked, "我想去", "effective at once")
+
+        let on = Controller(makeShell(MemoryFuzzyStore(32)))
+        on.session.activate()
+        on.type(Layouts.keys("ㄨㄛˇ ㄒㄧㄟˇ ㄑㄩˋ", eten: false))
+        XCTAssertEqual(on.client.marked, "我想去")
+    }
+
+    /// Eten: the adjacent-key checkbox is greyed but the one-symbol one is not (it has no such state in the model), and the core reads it there.
+    func testOneSymbolBitWorksInTheEtenLayout() {
+        let store = MemoryFuzzyStore(32)
+        let shell = Shell(resources: resources, panel: FakePanel(), isSecureInput: { false }, layoutStore: MemoryLayoutStore("eten"),
+                          learningDirectory: nil, dialogs: FakeDialogs(), demoteStore: MemoryDemoteStore(), predictionStore: MemoryPredictionStore(),
+                          abbreviationStore: MemoryAbbreviationStore(), englishStore: MemoryEnglishStore(overwrite: true), acgPackStore: MemoryAcgPackStore(), quotePackStore: MemoryQuotePackStore(),
+                          glassTintStore: MemoryGlassTintStore(), candidateOrientationStore: MemoryCandidateOrientationStore(),
+                          rerankStore: MemoryRerankStore(), rerankRunner: HeldRerankRunner(), profileModeStore: MemoryProfileModeStore(),
+                          appProfileStore: MemoryAppProfileStore(), fuzzyStore: store, spacingStore: MemorySpacingStore())
+        let model = SettingsModel(shell: shell)
+        XCTAssertFalse(model.fuzzyAdjacentEnabled, "layout is Eten")
+        XCTAssertEqual(model.fuzzyFlags, 32, "the value is kept")
+        let c = Controller(shell)
+        c.session.activate()
+        c.type(Layouts.keys("ㄨㄛˇ ㄒㄧㄟˇ ㄑㄩˋ", eten: true))
+        XCTAssertEqual(c.client.marked, "我想去")
     }
 
     /// The flags reach the core: with ㄓ/ㄗ on, `ㄗ ㄉㄠˋ` shows 知道; with the stored default (all off) it shows what it showed before.

@@ -1575,7 +1575,7 @@ struct Source {
     /// The reading's syllables when it is a tolerant one (what learning is looked up under); `None` for the typed one.
     names: Option<Vec<String>>,
     /// The fuzzy-word marker (docs/spec/decoder.md §6.5): a tolerant source of a span with no unknown syllable, i.e. a fuzzy-sound
-    /// alternative. An adjacent-key source (a span with an unknown syllable) and the typed reading are not.
+    /// alternative. An adjacent-key or one-symbol source (a span with an unknown syllable) and the typed reading are not.
     sound: bool,
     /// A tolerant source's words (entry positions), already chosen; unused for the exact one.
     picked: Vec<usize>,
@@ -1604,12 +1604,26 @@ impl CappedLexicon {
             }
         };
         if fuzzy & crate::fuzzy::FUZZY_SOUND != 0 || ids.contains(&u32::MAX) {
-            let pen = if ids.contains(&u32::MAX) { crate::fuzzy::DELTA_ADJACENT } else { delta_sound };
+            let unknown = ids.contains(&u32::MAX);
+            // docs/spec/decoder.md §6.3: bit 5 alone reads an unknown syllable through the one-symbol table only (its own penalty, and
+            // the larger cap for one syllable alone); without bit 5 only through the adjacent table (every flags value before bit 5); both bits: the
+            // adjacent table first, then (below) the one-symbol readings it does not hold.
+            let one_only = fuzzy & crate::fuzzy::FUZZY_ONE_SYM != 0 && fuzzy & crate::fuzzy::FUZZY_ADJACENT == 0;
+            let pen = match (unknown, one_only) {
+                (false, _) => delta_sound,
+                (true, false) => crate::fuzzy::DELTA_ADJACENT,
+                (true, true) => crate::fuzzy::DELTA_ONE_SYM,
+            };
+            let one_total = if ids.len() == 1 { crate::fuzzy::ONE_SYM_SINGLE_TOTAL } else { PER_KEY };
+            let t3_span = tone3.map_or(&[][..], |t| t.0);
             // The words and the readings are chosen by the one function the candidate window uses too (`Lexicon::tolerant_pick`), here with the
             // capped scores and the cap per key.
             // An unaccepted syllable of the sandhi table has no adjacent reading (docs/spec/decoder.md §6.6): it is read through the sandhi source only.
-            let (readings, words) = base.tolerant_pick(ids, span, fuzzy, tone3.map_or(&[][..], |t| t.0), PER_KEY, PER_KEY, entry);
-            put(readings, words, pen, !ids.contains(&u32::MAX));
+            let (readings, words) = base.tolerant_pick(ids, span, fuzzy, t3_span, PER_KEY, if one_only && unknown { one_total } else { PER_KEY }, entry);
+            let taken: HashSet<&str> = words.iter().map(|w| w.0).collect();
+            put(readings, words, pen, !unknown);
+            let (readings, words) = base.tolerant_pick_extra(ids, span, fuzzy, t3_span, PER_KEY, one_total, entry, &taken);
+            put(readings, words, crate::fuzzy::DELTA_ONE_SYM, false);
         }
         if let Some((t3, delta)) = tone3 {
             let (readings, words) = base.tone3_pick(ids, t3, PER_KEY, PER_KEY, entry);
@@ -1634,9 +1648,11 @@ impl CappedLexicon {
 /// `decode_segment_learned` with fuzzy input (docs/spec/decoder.md §6.2). `fuzzy` holds the sound-pair bits 0-3: a
 /// word may also be read through one syllable replaced by its fuzzy-sound alternative, scored `delta_sound` lower (the engine and the app
 /// always pass `fuzzy::DELTA_SOUND`; another value is for the evaluation CLI, docs/spec/decoder.md §6.1). A syllable the lexicon does not have is
-/// always read through its adjacent-key alternatives (`fuzzy::DELTA_ADJACENT` lower), whatever `fuzzy` says: the switch only decides
-/// whether such a syllable is accepted when typed. With `fuzzy` 0 and only known syllables the arithmetic is exactly that of
-/// `decode_segment_learned` before this existed.
+/// read through its adjacent-key alternatives (`fuzzy::DELTA_ADJACENT` lower), whatever bits 0-4 say: the switch only decides
+/// whether such a syllable is accepted when typed. Bit 5 (docs/spec/decoder.md §6) changes which table: with it alone the one-symbol
+/// alternatives (`fuzzy::DELTA_ONE_SYM` lower, up to `fuzzy::ONE_SYM_SINGLE_TOTAL` words for a syllable alone), with it and bit 4 the adjacent ones first
+/// and the one-symbol ones they do not hold after them. Without bit 5 the one-symbol table is never read. With `fuzzy` 0 and only known syllables the
+/// arithmetic is exactly that of `decode_segment_learned` before this existed.
 #[allow(clippy::too_many_arguments)]
 pub fn decode_segment_fuzzy<'a>(
     lex: &'a CappedLexicon,

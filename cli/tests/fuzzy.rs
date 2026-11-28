@@ -53,10 +53,10 @@ fn fuzzy_tags_the_summary_counts_an_uncovered_row_wrong_and_goes_on() {
     assert!(summary(&lm(ROWS, &["--fuzzy", "16"])).contains("'top1': 1,"));
 }
 
-/// Flags outside 0-31 and text are refused before anything runs.
+/// Flags outside 0-63 and text are refused before anything runs.
 #[test]
 fn fuzzy_flags_are_validated() {
-    for bad in ["32", "-1", "x", ""] {
+    for bad in ["64", "-1", "x", ""] {
         assert!(!lm(ROWS, &["--fuzzy", bad]).status.success(), "--fuzzy {bad:?}");
     }
 }
@@ -123,4 +123,24 @@ fn fuzzy_delta_sound_is_validated() {
         assert!(msg(&["--fuzzy", "2", "--fuzzy-delta-sound", bad]).contains("takes a number above 0"), "{bad}");
     }
     assert!(lm("|知道|ㄗ ㄉㄠˋ\n", &["--fuzzy", "2", "--fuzzy-delta-sound", "2"]).status.success());
+}
+
+/// docs/spec/decoder.md §6.3: ㄋㄟ is a syllable only the one-symbol table has an alternative for. With the flags 0, 15, 16 and 31 (no bit 5) the
+/// decoder never reads that table: no path, the row counts wrong with an empty dump, as before bit 5 existed. With 32, 48 and 63 the row has candidates (非 is one), and the single
+/// syllable keeps the larger cap of one syllable alone (24 words, `fuzzy::ONE_SYM_SINGLE_TOTAL`, against 12 for a span of several).
+#[test]
+fn a_one_symbol_only_syllable_has_no_path_below_bit_5_and_a_capped_list_with_it() {
+    let rows = "|非|ㄋㄟ\n";
+    for flags in ["0", "15", "16", "31"] {
+        let (s, c) = dump_of(rows, flags, &[]);
+        assert!(c.is_empty() && s.contains("'top1': 0,"), "--fuzzy {flags}: {s} {c:?}");
+    }
+    for flags in ["32", "48", "63"] {
+        let (_, c) = dump_of(rows, flags, &[]);
+        assert!(c.iter().any(|x| x.0 == "非"), "--fuzzy {flags}: {c:?}");
+        assert_eq!(c.len(), core::fuzzy::ONE_SYM_SINGLE_TOTAL, "--fuzzy {flags}");
+    }
+    let (s, _) = dump_of("|我想去|ㄨㄛˇ ㄒㄧㄟˇ ㄑㄩˋ\n", "32", &[]);
+    assert!(s.contains("+fz:32+") && s.contains("'top1': 1,"), "{s}");
+    assert!(summary(&lm("|我想去|ㄨㄛˇ ㄒㄧㄟˇ ㄑㄩˋ\n", &["--fuzzy", "63"])).contains("'top1': 1,"));
 }

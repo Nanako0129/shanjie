@@ -1092,7 +1092,7 @@ public final class Shell {
         englishKeyOrderOn = englishStore.englishKeyOrder ?? true // zhen-revert: was false; a saved false stays false
         englishReversalGuardOn = englishStore.englishReversalGuard ?? true
         self.fuzzyStore = fuzzyStore
-        fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & 0b11111
+        fuzzyFlags = (fuzzyStore.fuzzyFlags ?? 0) & CoreEngine.fuzzyAllMask
         tone3On = fuzzyStore.tone3Sandhi ?? true
         self.acgPackStore = acgPackStore
         acgDataDate = Shell.readAcgDataDate(resources.appendingPathComponent("packs/acg.json"))
@@ -1339,7 +1339,7 @@ public final class Shell {
     /// The settings window's 模糊輸入 flags (docs/spec/decoder.md §6.1): stored, and sent to the engine, which recomputes the composition
     /// (an accepted syllable keeps decoding whatever the flags are); the snapshot is for the caller to show.
     func setFuzzy(_ flags: UInt32) -> CoreResult? {
-        fuzzyFlags = flags & 0b11111
+        fuzzyFlags = flags & CoreEngine.fuzzyAllMask
         fuzzyStore.fuzzyFlags = fuzzyFlags
         defer { changed() }
         return engine?.setFuzzy(fuzzyFlags)

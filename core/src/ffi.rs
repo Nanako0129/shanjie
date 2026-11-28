@@ -2831,8 +2831,8 @@ mod tests {
         let shown = send(e, key(SPACE, '\0')).1;
         assert!(shown == "星", "exact reading, got {shown}");
 
-        // Any bit above bit 4 is 2 with a NULL out and the state unchanged: 0b1_0001 must not turn bit 0 on.
-        for flags in [32, 33, 0xffff_ffff] {
+        // Any bit above bit 5 is 2 with a NULL out and the state unchanged: 0b100_0001 must not turn bit 0 on.
+        for flags in [64, 65, 0xffff_ffff] {
             let (rc, null, ..) = fuzzy(e, flags);
             assert!(rc == 2 && null, "undefined bit {flags}");
         }
@@ -2841,8 +2841,9 @@ mod tests {
         let (rc, null, handled, preedit, commit) = fuzzy(e, 1);
         assert!(rc == 0 && !null && handled == 1 && commit.is_empty(), "snapshot");
         assert!(preedit == "鑫", "the composition is recomputed with the pair on, got {preedit}");
-        // 0 and 31 are valid; 0 puts the exact answer back.
+        // 0, 31 and 63 (bit 5, one-symbol slips) are valid; 0 puts the exact answer back.
         assert!(fuzzy(e, 31).0 == 0);
+        assert!(fuzzy(e, 63).0 == 0 && fuzzy(e, 32).0 == 0, "bit 5 is a defined bit");
         let (rc, _, _, preedit, _) = fuzzy(e, 0);
         assert!(rc == 0 && preedit == "星", "all off again");
         unsafe { shanjie_engine_free(e) };
