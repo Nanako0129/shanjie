@@ -22,6 +22,9 @@ attributions are in LICENSES/data.md of the repository at that commit:
   data/packs/acg-add.tsv, data/packs/it-add.tsv, data/packs/meme-add.tsv:
   CC BY-SA 4.0 (attributions below).
 - data/packs/beauty-add.tsv: CC0.
+- data/lexicon/variant-order.tsv: written for this project, CC0 1.0; no
+  third-party data.
+- data/lexicon/demote.tsv: written for this project; no third-party data.
 - data/lm/bigram.sjlm (SJ-LM-7-9.7M) and data/lm/kn.sjkn (SJ-KN-2-397K):
   CC BY-SA 4.0 (attributions below).
 
