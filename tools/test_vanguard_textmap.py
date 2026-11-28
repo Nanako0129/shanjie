@@ -3,7 +3,12 @@
 The unit tests cover the grouped-cell codec, parse_extra_ngrams, the two override functions and the strict validator. The end-to-end tests run the
 tool as a subprocess on a synthetic repo root built from the kn-tiny toy model (eval/golden/kn-tiny): three modes (--out-txtmap, --out-dict,
 --base-txtmap), the path-free build_stats.json, the "inputs" record, and the refusal to write inside the repo work tree. Everything is written
-under a throwaway folder; no real data, models or private files are read."""
+under a throwaway folder; no real data, models or private files are read.
+
+The --simplified tests build in-process against a synthetic OpenCC folder (two small tables whose sha256 replaces vt.OPENCC_SHA256 for the
+duration of the call); only the "hash differs" and "file missing" cases run the command line against the real constants. None of them
+needs the real OpenCC tables."""
+import hashlib
 import json
 import os
 import shutil
@@ -11,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -33,6 +39,31 @@ EXTRAS = [  # reading, value, context, prob
     ("ㄅ", "A", "", -2), ("ㄅ", "E", "", -6), ("ㄅ", "F", "", -5.5), ("ㄆ", "D", "", -7), ("ㄈ", "G", "", -9),
     ("ㄅ", "A", "X", -1), ("ㄅ", "B", "Y", -2), ("ㄅ", "B", "Q", -4), ("ㄅ", "C", "P|Q", -3),
 ]
+
+
+SYN_PHRASES = "# synthetic OpenCC table\n世界線\t世界线\n"
+SYN_CHARS = "# synthetic OpenCC table\n綫\t线\n線\t线 綫\n牀\t床\n佔\t占\n"
+VENDOR = "SHANJIE_善解輸入法"
+
+
+def make_opencc(base):
+    """A synthetic OpenCC folder and the OPENCC_SHA256 that matches it."""
+    d = os.path.realpath(os.path.join(base, "opencc"))
+    os.makedirs(d)
+    shas = {}
+    for name, text in (("TSPhrases.txt", SYN_PHRASES), ("TSCharacters.txt", SYN_CHARS)):
+        raw = text.encode("utf-8")
+        with open(os.path.join(d, name), "wb") as f:
+            f.write(raw)
+        shas[name] = hashlib.sha256(raw).hexdigest()
+    return d, shas
+
+
+def build_in_process(root, out_txtmap, opencc_dir, shas, *extra):
+    """vt.build_textmap on the synthetic root with the synthetic OpenCC folder trusted; returns the stats dict."""
+    args = vt.make_parser().parse_args(["--shanjie-root", root, "--out-txtmap", out_txtmap, *BUILD_FLAGS, "--opencc-dir", opencc_dir, *extra])
+    with mock.patch.dict(vt.OPENCC_SHA256, shas):
+        return vt.build_textmap(args)
 
 
 def read_map(path):
@@ -166,6 +197,125 @@ class CodecTests(unittest.TestCase):
             open(p, "wb").write(FIXTURE.replace("\n", "\r\n").encode())
             with self.assertRaises(ValueError):
                 vt.validate_textmap_file(p, check_sorted=False)
+
+
+class SimplifiedTests(unittest.TestCase):
+    def test_t2s_longest_phrase_then_character_then_as_is(self):
+        t2s = vt.make_t2s({"頭髮": "头发", "髮廊": "发廊", "發財": "发财", "發財神": "发財神"}, {"髮": "发", "頭": "头", "發": "发", "臺": "台"})
+        self.assertEqual(t2s("頭髮廊"), "头发廊")    # left to right: 頭髮 wins at position 0, so 髮廊 never gets its turn
+        self.assertEqual(t2s("髮廊"), "发廊")
+        self.assertEqual(t2s("發財神"), "发財神")    # the 3-character key beats the 2-character one
+        self.assertEqual(t2s("發髮"), "发发")        # no phrase: character table
+        self.assertEqual(t2s("臺灣"), "台灣")        # 灣 has no row: kept
+        self.assertEqual(t2s(""), "")
+
+    def test_opencc_file_takes_first_value_and_skips_comments(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder, shas = make_opencc(os.path.realpath(d))
+            with mock.patch.dict(vt.OPENCC_SHA256, shas):
+                phrases, chars = vt.load_opencc(folder)
+        self.assertEqual((phrases, chars), ({"世界線": "世界线"}, {"綫": "线", "線": "线", "牀": "床", "佔": "占"}))
+
+    def test_mirror_check_accepts_c_and_d_lines_of_type_5(self):
+        t2s = vt.make_t2s({}, {"佔": "占", "線": "线", "牀": "床"})
+        good = ["@-3\t占\t占|佔", "占\t-1\t5\t他", "!占\t5\t-1\t他\t-2\t床|他", "占\t-1\t6\t他", "!佔\t6\t-1\t他\t-2\t牀|他", "_NORM\t1\t2"]
+        vt.check_simplified_mirror("k", good, t2s)
+        for name, block in [("empty chs cell", ["@-3\t\x07\t占"]), ("chs cell not the conversion", ["@-3\t占\t佔|線"]),
+                            ("missing typeID 5", good[:1] + good[3:]), ("extra typeID 5", good + ["占\t-1\t5\t她"])]:
+            with self.assertRaises(ValueError, msg=name):
+                vt.check_simplified_mirror("k", block, t2s)
+
+    def test_build_writes_the_simplified_column_the_mirror_lines_and_the_vendor_meta_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = os.path.realpath(d)
+            root = make_root(base)
+            folder, shas = make_opencc(base)
+            plain = os.path.join(base, "plain.txtMap")
+            vt_plain = build_in_process(root, plain, folder, shas)
+            out = os.path.join(base, "chs.txtMap")
+            stats = build_in_process(root, out, folder, shas, "--simplified", "--vendor", VENDOR)
+            m = read_map(out)
+            self.assertEqual(list(m)[0], "_VENDOR")  # "_" sorts before every bopomofo key
+            self.assertEqual(m["_VENDOR"], [f"{VENDOR}\t0\t2"])
+            self.assertEqual(m["ㄊㄚ"], ["@-2\t他\t他"])
+            # two Traditional spellings at different scores that convert to the same Simplified word each keep their own line
+            self.assertEqual(m["ㄑㄧˇ-ㄔㄨㄤˊ"][:2], ["@-4.9\t起床\t起床", "@-7.2\t起床\t起牀"])
+            self.assertEqual(m["ㄕˋ-ㄐㄧㄝˋ-ㄒㄧㄢˋ"], ["@-7.17\t世界线\t世界綫|世界線"])  # same score: one Simplified token after dedupe
+            # typeID 5 lines come after the B lines and before the typeID 6 lines; 佔 and 占 both become 占 and keep the higher score
+            self.assertEqual(m["ㄓㄢˋ"], ["@-3\t占\t占", "@-3.5\t占\t佔", "占\t-1.156\t5\t他", "佔\t-1.612\t6\t他", "占\t-1.156\t6\t他"])
+            self.assertEqual((stats["chs_contextual_entries"], stats["chs_contextual_lines"]), (3, 3))
+            self.assertEqual(stats["contextual_total_entries"], 4)
+            self.assertTrue(stats["validated"])
+            self.assertEqual(stats["entry_count"], vt_plain["entry_count"] + 4)  # 1 vendor line + 3 typeID 5 lines
+            self.assertEqual(stats["key_count"], vt_plain["key_count"] + 1)
+            # without the two flags the output is the same file minus the Simplified column, the typeID 5 lines and the meta line
+            def strip(line):
+                p = line.split("\t")
+                return "\t".join([p[0], "\x07", p[2]]) if line.startswith("@") else line
+            plain_map = read_map(plain)
+            self.assertEqual(vt_plain["chs_contextual_entries"], 0)
+            self.assertEqual({k: [strip(ln) for ln in v if "\t5\t" not in ln] for k, v in m.items() if k != "_VENDOR"}, plain_map)
+            self.assertTrue(all(ln.split("\t")[1] == "\x07" for v in plain_map.values() for ln in v if ln.startswith("@")))
+            # the checker enforces the mirror rules on the finished file, and rejects a file that breaks them
+            self.assertEqual(vt.validate_textmap_file(out, t2s=vt.make_t2s(*self._tables())), (stats["entry_count"], stats["key_count"]))
+            text = open(out, encoding="utf-8").read()
+            for old, new in [("占\t-1.156\t5\t他", "占\t-1.156\t5\t她"), ("@-2\t他\t他", "@-2\t\x07\t他")]:
+                bad = os.path.join(base, "bad.txtMap")
+                open(bad, "w", encoding="utf-8").write(text.replace(old, new, 1))
+                with self.assertRaises(ValueError, msg=old):
+                    vt.validate_textmap_file(bad, t2s=vt.make_t2s(*self._tables()))
+            # build_stats: the two OpenCC files are inputs, no absolute path anywhere, the vendor is a flag
+            sidecar = json.load(open(out + ".build_stats.json", encoding="utf-8"))
+            for s in strings(sidecar):
+                self.assertFalse(os.path.isabs(s), f"absolute path in build_stats: {s}")
+            files = {f["path"]: f["sha256"] for f in sidecar["inputs"]["files"]}
+            self.assertEqual({k: v for k, v in files.items() if k.startswith("TS")}, shas)
+            self.assertEqual((sidecar["flags"]["vendor"], sidecar["flags"]["simplified"], sidecar["flags"]["opencc_dir"]), (VENDOR, True, "opencc"))
+
+    @staticmethod
+    def _tables():
+        return ({"世界線": "世界线"}, {"綫": "线", "線": "线", "牀": "床", "佔": "占"})
+
+    def test_vendor_alone_adds_only_the_meta_line(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = os.path.realpath(d)
+            root = make_root(base)
+            folder, shas = make_opencc(base)
+            build_in_process(root, os.path.join(base, "a.txtMap"), folder, shas)
+            stats = build_in_process(root, os.path.join(base, "b.txtMap"), folder, shas, "--vendor", VENDOR)
+            a, b = read_map(os.path.join(base, "a.txtMap")), read_map(os.path.join(base, "b.txtMap"))
+            self.assertTrue(stats["validated"])
+            self.assertEqual(stats["chs_contextual_entries"], 0)
+            self.assertEqual(b.pop("_VENDOR"), [f"{VENDOR}\t0\t2"])
+            self.assertEqual(a, b)
+
+    def test_command_line_refusals_exit_2(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = os.path.realpath(d)
+            root = make_root(base)
+            folder, _ = make_opencc(base)   # synthetic tables: right format, but not the real sha256
+            out = os.path.join(base, "o.txtMap")
+            common = ["--shanjie-root", root, "--out-txtmap", out, *BUILD_FLAGS]
+            r = run_tool(*common, "--simplified", "--opencc-dir", folder, ok=False)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn(vt.OPENCC_SHA256["TSPhrases.txt"], r.stderr)  # names the expected hash
+            self.assertIn(folder, r.stderr)                              # and where it looked
+            empty = os.path.join(base, "empty")
+            os.makedirs(empty)
+            r = run_tool(*common, "--simplified", "--opencc-dir", empty, ok=False)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("not found", r.stderr)
+            r = run_tool(*common, "--vendor", "a\tb", ok=False)
+            self.assertEqual(r.returncode, 2)
+            r = run_tool(*common, "--vendor", "", ok=False)
+            self.assertEqual(r.returncode, 2)
+            base_map = os.path.join(base, "base.txtMap")
+            run_tool(*common[:2], "--out-txtmap", base_map, *BUILD_FLAGS)
+            for flag in (["--simplified", "--opencc-dir", folder], ["--vendor", VENDOR]):
+                r = run_tool("--shanjie-root", root, "--base-txtmap", base_map, "--out-txtmap", out, *flag, ok=False)
+                self.assertEqual(r.returncode, 2)
+                self.assertIn("--base-txtmap", r.stderr)
+            self.assertFalse(os.path.exists(out))
 
 
 class EndToEnd(unittest.TestCase):

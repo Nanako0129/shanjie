@@ -14,11 +14,19 @@ Overrides:
     Vanguard factory dict), apply only the --extra-ngrams overrides (unigram and contextual) and
     write it back. Untouched lines are preserved verbatim.
 
+Simplified column (--simplified, off by default): vChewing reads the Simplified candidates of a unigram line from its second
+column (EntryType 5) and the Traditional ones from the third (6), and a contextual line's typeID 5 only in Simplified mode, 6
+only in Traditional mode. With the flag, every word and every contextual entry also gets its Simplified form, converted word by
+word with OpenCC's TSPhrases.txt (longest match) and TSCharacters.txt (Apache-2.0; hash-checked, read from --opencc-dir; the
+tables are not in the repo). Without it the output is byte-for-byte what it was. --vendor TEXT writes one meta unigram
+(key _VENDOR, value TEXT, score 0, typeID 2).
+
 Purpose: tools/vanguard_textmap.py generates the Shanjie phonetic dictionary in the TextMap 2.0 layout
 that vChewing's Vanguard typing engine reads (VanguardFactoryDict4Typing.txtMap). The spec page is
 docs/spec/vanguard-textmap.md.
 
-Licence: the whole output is distributed under CC BY-SA 4.0. It also carries MIT parts (McBopomofo's
+Licence: the whole output is distributed under CC BY-SA 4.0. With --simplified the Simplified forms are produced with OpenCC's
+TSPhrases.txt and TSCharacters.txt (Apache-2.0). It also carries MIT parts (McBopomofo's
 mcbpmf-data.txt and sandhi-add.tsv; full text LICENSES/McBopomofo-MIT.txt) and BSD parts (libtabe's phrases);
 their notices must be kept. A build that includes the name layer and the IT pack also carries
 name-suggestion-index parts (BSD-3-Clause; full text LICENSES/name-suggestion-index-BSD-3-Clause.txt; keep the
@@ -45,6 +53,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from dataclasses import dataclass
+import functools
 import glob
 import hashlib
 import json
@@ -70,11 +79,71 @@ _EDGE = (" ", "\t", "\r", "\x0b", "\x0c", "\u00a0")
 _DECIMAL_RE = re.compile(r"^[0-9]+(?:\.[0-9]+)?$", re.ASCII)
 _NEWLINE_CHARS = frozenset(("\n", "\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x1f", "\x85", "\u2028", "\u2029"))
 _TONE_MARKS = frozenset(("ˊ", "ˇ", "ˋ", "˙"))
+# OpenCC commit 3ac34aa (Apache-2.0): the only Traditional-to-Simplified tables --simplified reads. Nothing on the command line
+# or in the environment can skip or replace this check.
+OPENCC_SHA256 = {
+    "TSPhrases.txt": "9a23666e95c97dbf8668b5d71ca19f09f33b4f3a3aa9e05677dab4b608cef102",
+    "TSCharacters.txt": "9ff46a7d30e5765375eb13d33f2b03a34d298913caf2b120380679f33ae1642d",
+}
+VENDOR_KEY = "_VENDOR"
+META_TYPE_ID = 2
 
 
 def die(msg: str, code: int = 2) -> None:
     print(f"ERROR: {msg}", file=sys.stderr)
     raise SystemExit(code)
+
+
+def default_opencc_dir() -> str:
+    return os.path.join(os.path.expanduser(os.environ.get("SHANJIE_CACHE", "~/.cache/shanjie")), "sources", "opencc")
+
+
+def load_opencc(opencc_dir: str) -> tuple[dict[str, str], dict[str, str]]:
+    """(TSPhrases, TSCharacters) as {key: first value} after checking both files against OPENCC_SHA256; exit 2 when one is missing or differs."""
+    tables = []
+    for name, want in OPENCC_SHA256.items():
+        path = os.path.join(opencc_dir, name)
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+        except OSError:
+            die(f"OpenCC table not found: {path} (expected sha256 {want}); give the folder with --opencc-dir")
+        got = hashlib.sha256(raw).hexdigest()
+        if got != want:
+            die(f"OpenCC table {path} has sha256 {got}, expected {want}")
+        table = {}
+        for line in raw.decode("utf-8").split("\n"):
+            p = line.split("\t")
+            if len(p) == 2 and not line.startswith("#"):
+                table[p[0]] = p[1].split(" ")[0]
+        tables.append(table)
+    return tables[0], tables[1]
+
+
+def make_t2s(phrases: dict[str, str], chars: dict[str, str]):
+    """Word-level Traditional-to-Simplified: left to right, the longest TSPhrases key at each position, else the character's TSCharacters value, else the character as is."""
+    longest = max(map(len, phrases), default=0)
+
+    @functools.lru_cache(maxsize=None)
+    def t2s(word: str) -> str:
+        out, i = [], 0
+        while i < len(word):
+            for n in range(min(longest, len(word) - i), 0, -1):
+                hit = phrases.get(word[i : i + n])
+                if hit is not None:
+                    out.append(hit)
+                    i += n
+                    break
+            else:
+                out.append(chars.get(word[i], word[i]))
+                i += 1
+        return "".join(out)
+
+    return t2s
+
+
+def dedupe(items):
+    return list(dict.fromkeys(items))
 
 
 def is_bopomofo_symbol(word: str) -> bool:
@@ -654,7 +723,39 @@ def validate_value_line_strict(line: str, is_typing: bool, default_probs: dict[i
     raise ValueError(f"Malformed VALUES line: {line!r}")
 
 
-def validate_textmap_file(path: str, check_sorted: bool = True) -> tuple[int, int]:
+def contextual_items(line: str) -> list[tuple[int | None, str, tuple[str, ...]]]:
+    """(typeID, value, context) of each entry of a type-C or type-D line; [] for any other line (A, B, meta)."""
+    p = line.split("\t")
+    if line.startswith("!") and len(p) > 4:
+        return [(_parse_int32(p[1]), p[0][1:], tuple(_decode_grouped_values_strict(p[3 + 2 * i]))) for i in range((len(p) - 2) // 2)]
+    if line[:1] not in ("@", ">", "!") and len(p) == 4:
+        return [(_parse_int32(p[2]), p[0], tuple(_decode_grouped_values_strict(p[3])))]
+    return []
+
+
+def check_simplified_mirror(key: str, block: list[str], t2s) -> None:
+    """--simplified rule for one key: each B line's Simplified cell is its Traditional cell converted and deduplicated (so never empty),
+    and the (value, context) set of typeID 5 is the typeID 6 set converted."""
+    chs_set: set = set()
+    cht_set: set = set()
+    for ln in block:
+        p = ln.split("\t")
+        if ln.startswith("@") and len(p) == 3:
+            v5 = _decode_grouped_values_strict(p[1], allows_empty_cell=True)
+            v6 = _decode_grouped_values_strict(p[2], allows_empty_cell=True)
+            if not v5 or v5 != dedupe(t2s(w) for w in v6):
+                raise ValueError(f"key {key!r}: Simplified cell {p[1]!r} does not mirror Traditional cell {p[2]!r}")
+        for tid, val, ctx in contextual_items(ln):
+            if tid == 5:
+                chs_set.add((val, ctx))
+            elif tid == 6:
+                cht_set.add((t2s(val), tuple(t2s(c) for c in ctx)))
+    if chs_set != cht_set:
+        raise ValueError(f"key {key!r}: typeID 5 entries are not the converted typeID 6 entries")
+
+
+def validate_textmap_file(path: str, check_sorted: bool = True, t2s=None) -> tuple[int, int]:
+    """t2s (from make_t2s) additionally checks the --simplified mirror rules (check_simplified_mirror) on every key."""
     with open(path, "rb") as f:
         raw = f.read()
     try:
@@ -748,6 +849,11 @@ def validate_textmap_file(path: str, check_sorted: bool = True) -> tuple[int, in
     if expected_start != entry_count:
         raise ValueError(f"KEY_LINE_MAP covers {expected_start} lines != ENTRY_COUNT {entry_count}")
 
+    if t2s is not None:
+        for ln in km_lines:
+            key_s, s_str, c_str = ln.split("\t")
+            check_simplified_mirror(key_s, val_lines[int(s_str) : int(s_str) + int(c_str)], t2s)
+
     return entry_count, key_count
 
 
@@ -799,14 +905,15 @@ def parse_packs(packs_arg: str) -> list[str]:
     return out
 
 
-def emit_contextual_lines(val: str, items: list[tuple[tuple[str, ...], float]], decimals: int) -> list[str]:
-    """VALUES lines for one (reading, value) contextual group: Format C for 1 entry, Format D chunks (2..16) otherwise."""
+def emit_contextual_lines(val: str, items: list[tuple[tuple[str, ...], float]], decimals: int, type_id: int = 6) -> list[str]:
+    """VALUES lines for one (reading, value) contextual group: Format C for 1 entry, Format D chunks (2..16) otherwise.
+    type_id is 6 (Traditional) or, for the --simplified mirror, 5."""
     validate_bare_value(val)
     items = sorted(items, key=lambda it: (-it[1], it[0]))
     if len(items) == 1:
         ctx_t, sc = items[0]
         validate_context_tokens(ctx_t)
-        return [f"{val}\t{format_prob(sc, decimals)}\t6\t{encode_grouped_values(ctx_t)}"]
+        return [f"{val}\t{format_prob(sc, decimals)}\t{type_id}\t{encode_grouped_values(ctx_t)}"]
     out: list[str] = []
     pos = 0
     total_items = len(items)
@@ -814,7 +921,7 @@ def emit_contextual_lines(val: str, items: list[tuple[tuple[str, ...], float]], 
         rem = total_items - pos
         chunk_cnt = 15 if rem == 17 else min(rem, 16)
         chunk = items[pos : pos + chunk_cnt]
-        cells = [f"!{val}", "6"]
+        cells = [f"!{val}", str(type_id)]
         for ctx_t, sc in chunk:
             validate_context_tokens(ctx_t)
             cells.append(format_prob(sc, decimals))
@@ -959,6 +1066,8 @@ def _input_files(args: argparse.Namespace, packs: list[str]) -> list[str]:
     if args.colloq_uni_w > 0.0 or args.colloq_bi_w > 0.0:
         files.append(args.colloq_path or os.path.join(lm_dir, "colloquial.sjlm"))
     files += [f for f in (args.trigram_path, args.extra_ngrams) if f]
+    if args.simplified:
+        files += [os.path.join(args.opencc_dir, n) for n in OPENCC_SHA256]
     return [f for f in files if os.path.isfile(f)]  # demote.tsv is the only optional one
 
 
@@ -966,7 +1075,7 @@ def finish_stats(stats: dict, args: argparse.Namespace, packs: list[str], txtmap
     """Make the stats path-free, add "inputs", and write build_stats.json (inside --out-dict, else next to the txtMap)."""
     root = args.shanjie_root
     flags = dict(vars(args))
-    for k in ("shanjie_root", "out_dict", "out_txtmap", "companion_dir", "kn_path", "colloq_path", "trigram_path", "extra_ngrams", "base_txtmap"):
+    for k in ("shanjie_root", "out_dict", "out_txtmap", "companion_dir", "kn_path", "colloq_path", "trigram_path", "extra_ngrams", "base_txtmap", "opencc_dir"):
         if flags.get(k):
             flags[k] = _rel(flags[k], root)
     stats["flags"] = flags
@@ -1117,6 +1226,15 @@ def build_from_base(args: argparse.Namespace, out_dict: str | None, txtmap_path:
 def build_textmap(args: argparse.Namespace) -> dict:
     t_start = time.perf_counter()
     packs = parse_packs(args.packs)
+    # Base mode copies an existing file's lines and has no Simplified or meta step: refuse the flags rather than ignore them.
+    if args.base_txtmap and (args.simplified or args.vendor is not None):
+        die("--simplified and --vendor are not supported together with --base-txtmap")
+    if args.vendor is not None:
+        try:
+            validate_bare_value(args.vendor)
+        except ValueError as e:
+            die(f"--vendor: {e}")
+    t2s = make_t2s(*load_opencc(args.opencc_dir)) if args.simplified else None
 
     # A 33 MB output inside the repo work tree would be committed by mistake: refuse it.
     root_real = os.path.realpath(args.shanjie_root)
@@ -1585,16 +1703,33 @@ def build_textmap(args: argparse.Namespace) -> dict:
     for (reading, value, ctx_tuple), prob in contextual_entries.items():
         ctx_by_reading[reading][value].append((ctx_tuple, prob))
 
-    all_keys = sorted(set(uni_final.keys()) | set(ctx_by_reading.keys()), key=lambda k: k.encode("utf-8"))
+    # --simplified: every typeID 6 entry again as typeID 5 with value and context converted; entries that collapse keep the highest score.
+    chs_entries: dict[tuple[str, str, tuple[str, ...]], float] = {}
+    if t2s is not None:
+        for (reading, value, ctx_tuple), prob in contextual_entries.items():
+            ckey = (reading, t2s(value), tuple(t2s(c) for c in ctx_tuple))
+            if prob > chs_entries.get(ckey, -math.inf):
+                chs_entries[ckey] = prob
+    chs_by_reading: dict[str, dict[str, list[tuple[tuple[str, ...], float]]]] = defaultdict(lambda: defaultdict(list))
+    for (reading, value, ctx_tuple), prob in chs_entries.items():
+        chs_by_reading[reading][value].append((ctx_tuple, prob))
+
+    key_set = set(uni_final.keys()) | set(ctx_by_reading.keys())
+    if args.vendor is not None:
+        key_set.add(VENDOR_KEY)
+    all_keys = sorted(key_set, key=lambda k: k.encode("utf-8"))
 
     value_lines: list[str] = []
     key_map_lines: list[str] = []
     unigram_entry_count = 0
     unigram_line_count = 0
     contextual_line_count = 0
+    chs_contextual_line_count = 0
 
     for reading in all_keys:
         start_line = len(value_lines)
+        if reading == VENDOR_KEY:
+            value_lines.append(f"{args.vendor}\t0\t{META_TYPE_ID}")
 
         # Unigrams: Format B grouped by descending rounded score
         u_entries = uni_final.get(reading)
@@ -1606,10 +1741,18 @@ def build_textmap(args: argparse.Namespace) -> dict:
                 unigram_entry_count += 1
             for sc in sorted(prob_groups.keys(), reverse=True):
                 words_cell = encode_grouped_values(prob_groups[sc])
-                value_lines.append(f"@{format_prob(sc, decimals)}\t\x07\t{words_cell}")
+                # Simplified cell (EntryType 5): the same words converted, deduplicated in order; \a (no words) without --simplified.
+                chs_cell = encode_grouped_values(dedupe(t2s(w) for w in prob_groups[sc])) if t2s is not None else "\x07"
+                value_lines.append(f"@{format_prob(sc, decimals)}\t{chs_cell}\t{words_cell}")
                 unigram_line_count += 1
 
-        # Contextuals: grouped by (value, typeID=6), Format C for 1 entry, Format D (chunk 2..16) for >= 2
+        # Contextuals: grouped by (value, typeID), Format C for 1 entry, Format D (chunk 2..16) for >= 2; typeID 5 lines (--simplified) first
+        chs_by_val = chs_by_reading.get(reading)
+        if chs_by_val:
+            for val in sorted(chs_by_val.keys(), key=lambda x: x.encode("utf-8")):
+                new_lines = emit_contextual_lines(val, chs_by_val[val], decimals, 5)
+                value_lines.extend(new_lines)
+                chs_contextual_line_count += len(new_lines)
         c_by_val = ctx_by_reading.get(reading)
         if c_by_val:
             for val in sorted(c_by_val.keys(), key=lambda x: x.encode("utf-8")):
@@ -1654,7 +1797,7 @@ def build_textmap(args: argparse.Namespace) -> dict:
     t0 = time.perf_counter()
     if args.validate:
         try:
-            v_entries, v_keys = validate_textmap_file(txtmap_path)
+            v_entries, v_keys = validate_textmap_file(txtmap_path, t2s=t2s)
         except Exception as e:
             die(f"self-validation failed for {txtmap_path}: {e}", code=2)
     else:
@@ -1681,6 +1824,8 @@ def build_textmap(args: argparse.Namespace) -> dict:
         "extra_unigram_added": uni_added,
         "contextual_total_entries": len(contextual_entries),
         "contextual_lines": contextual_line_count,
+        "chs_contextual_entries": len(chs_entries),
+        "chs_contextual_lines": chs_contextual_line_count,
         "copied_companions": copied_companions,
         "validated": args.validate,
         "timing_sec": {
@@ -1722,6 +1867,9 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--colloq-bi-w", type=float, default=0.0, help="Colloquial bigram blend weight (default 0.0)")
     ap.add_argument("--trigram-path", default=None, help="Optional SJT30001 trigram table path")
     ap.add_argument("--extra-ngrams", default=None, help="Optional TSV (reading\\tvalue\\tcontext\\tprob[\\tsource]) overrides; empty context = unigram override/add")
+    ap.add_argument("--simplified", action="store_true", help="Also write the Simplified column (EntryType 5) and typeID 5 contextual lines, converted with OpenCC TSPhrases/TSCharacters from --opencc-dir")
+    ap.add_argument("--opencc-dir", default=default_opencc_dir(), help="Folder with OpenCC TSPhrases.txt and TSCharacters.txt, sha256-checked (default $SHANJIE_CACHE/sources/opencc)")
+    ap.add_argument("--vendor", default=None, help="Write one meta unigram: key _VENDOR, value TEXT, score 0, typeID 2")
     ap.add_argument("--base-txtmap", default=None, help="Existing TextMap 2.0 file: skip the Shanjie build, apply only --extra-ngrams overrides (other build flags ignored)")
 
     # Unigram tuning

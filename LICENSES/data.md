@@ -106,6 +106,7 @@
 |---|---|---|---|
 | `packaging/AppIcon.icon/`（macOS App 與 macOS 安裝程式的圖示） | 本專案的設計；圖層 `glyph.svg` 的「解」是 Noto Serif CJK TC Black（Adobe／Google）的字形外框，由 `scripts/make-app-icon.swift` 轉成路徑；字型檔不進 repo、不隨 App 內附 | 圖示：Apache-2.0（和專案程式一致）；字型：SIL Open Font License 1.1。OFL FAQ 1.1 允許把字型用在 logo 與設計，1.13 寫明用字型做出的圖不受 OFL 約束（https://openfontlicense.org/ofl-faq/ ） | Noto Serif CJK TC（Adobe／Google） |
 | 執行期模型（S5 起） | Gemma 4 E2B 等；不隨安裝檔散布，第一次啟用時下載並顯示授權 | 各自授權（Gemma 4：Apache-2.0） | — |
+| `tools/vanguard_textmap.py` 產生的唯音辭典（`vchewing-dict-*`，`VanguardFactoryDict4Typing.txtMap`） | 由本專案的詞庫、詞包與模型轉成唯音（vChewing）讀的辭典（`docs/spec/vanguard-textmap.md`）：`mcbpmf-data.txt`、`sandhi-add.tsv`、疊加層、名單層、詞包（定版用 `acg`、`it`、`meme`、`beauty`），分數由 `bigram.sjlm`、`kn.sjkn` 算出，上面各列的授權與署名都帶進來。開 `--simplified` 時簡體字形由 OpenCC 的 `TSPhrases.txt`、`TSCharacters.txt`（Apache-2.0）轉出，表本身不在 repo 內、也不在輸出檔裡。不隨 App 內附 | 整份以 **CC BY-SA 4.0** 散布（內含 MIT、BSD、BSD-3-Clause 與政府資料開放授權條款第 1 版的成分，聲明照上面各列保留）；OpenCC 為 Apache-2.0 | 上面各列的署名，加 OpenCC contributors（`--simplified` 時） |
 
 ## Windows 安裝程式（MSI）
 
