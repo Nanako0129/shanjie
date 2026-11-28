@@ -3,145 +3,1353 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>善解輸入法｜開源 macOS 注音輸入法，看前文選對同音字</title>
-<meta name="description" content="善解是開源（Apache-2.0）的 macOS 注音輸入法，需要 macOS 26 與 Apple 晶片。整句在本機轉換，看前文選同音字，語意校正在背景重排；用安裝程式或 Homebrew 安裝。">
-<meta property="og:title" content="善解輸入法｜開源 macOS 注音輸入法，看前文選對同音字">
-<meta property="og:description" content="善解是開源（Apache-2.0）的 macOS 注音輸入法，需要 macOS 26 與 Apple 晶片。整句在本機轉換，看前文選同音字，語意校正在背景重排；用安裝程式或 Homebrew 安裝。">
+<title>善解輸入法（BopoMola）｜開源 macOS 注音輸入法，打完一整句不用回頭改同音字</title>
+<meta name="description" content="善解輸入法（BopoMola）是開源（Apache-2.0）的 macOS 注音輸入法，需要 macOS 26 與 Apple 晶片。看游標前文整句解碼（每鍵 p95 1.9 ms），停頓時本機小模型重排前 8 名；除了檢查更新，善解不連網。">
+<meta property="og:title" content="善解輸入法（BopoMola）｜開源 macOS 注音輸入法，打完一整句不用回頭改同音字">
+<meta property="og:description" content="善解輸入法（BopoMola）：看游標前文整句解碼，停頓時本機小模型重排。開源 Apache-2.0，支援 macOS 26 以上與 Apple 晶片。">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://shanjie.nyanako.com/">
-<meta property="og:site_name" content="善解輸入法">
+<meta property="og:site_name" content="善解輸入法（BopoMola）">
 <meta property="og:locale" content="zh_TW">
 <meta property="og:image" content="https://shanjie.nyanako.com/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="善解：朱紅「解」字印章，標語「善解，所以選對。」">
+<meta property="og:image:alt" content="善解輸入法（BopoMola）：朱紅「解」字印章與海藍曼波魚副識別，標語「善解，所以選對。」">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="善解輸入法｜開源 macOS 注音輸入法，看前文選對同音字">
-<meta name="twitter:description" content="善解是開源（Apache-2.0）的 macOS 注音輸入法，需要 macOS 26 與 Apple 晶片。整句在本機轉換，看前文選同音字，語意校正在背景重排；用安裝程式或 Homebrew 安裝。">
+<meta name="twitter:title" content="善解輸入法（BopoMola）｜開源 macOS 注音輸入法，打完一整句不用回頭改同音字">
+<meta name="twitter:description" content="善解輸入法（BopoMola）：看游標前文整句解碼，停頓時本機小模型重排。開源 Apache-2.0，支援 macOS 26 以上與 Apple 晶片。">
 <meta name="twitter:image" content="https://shanjie.nyanako.com/og.png">
 <link rel="canonical" href="https://shanjie.nyanako.com/">
 <meta name="theme-color" content="#F6F1E7" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#1A1816" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#161413" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
-<!-- softwareVersion and datePublished follow the latest v* release; change them with the release PR. -->
 <script type="application/ld+json">
-{"@context":"https://schema.org","@graph":[
- {"@type":"WebSite","@id":"https://shanjie.nyanako.com/#website","url":"https://shanjie.nyanako.com/",
-  "name":"善解輸入法","alternateName":["善解","shanjie"],"inLanguage":"zh-Hant-TW"},
- {"@type":"SoftwareApplication","@id":"https://shanjie.nyanako.com/#software",
-  "name":"善解輸入法","alternateName":["善解","shanjie"],"url":"https://shanjie.nyanako.com/",
-  "applicationCategory":"UtilitiesApplication","operatingSystem":"macOS 26 以上（Apple 晶片）",
-  "softwareVersion":"0.9.1","datePublished":"2026-11-25",
-  "downloadUrl":"https://github.com/Nanako0129/shanjie/releases/latest",
-  "license":"https://www.apache.org/licenses/LICENSE-2.0",
-  "offers":{"@type":"Offer","price":"0","priceCurrency":"TWD"},
-  "description":"開源的 macOS 注音輸入法：整句在本機轉換，看前文選同音字。"}]}
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://shanjie.nyanako.com/#website",
+      "url": "https://shanjie.nyanako.com/",
+      "name": "善解輸入法",
+      "alternateName": ["BopoMola", "善解", "善解注音輸入法", "善解注音", "Shanjie", "shanjie"],
+      "sameAs": ["https://github.com/Nanako0129/shanjie"],
+      "author": {
+        "@type": "Person",
+        "name": "Nanako Tsai",
+        "url": "https://nyanako.com/"
+      },
+      "inLanguage": "zh-Hant-TW"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://shanjie.nyanako.com/#software",
+      "name": "善解輸入法",
+      "alternateName": ["BopoMola", "善解", "善解注音輸入法", "善解注音", "Shanjie", "shanjie"],
+      "url": "https://shanjie.nyanako.com/",
+      "sameAs": ["https://github.com/Nanako0129/shanjie"],
+      "codeRepository": "https://github.com/Nanako0129/shanjie",
+      "author": {
+        "@type": "Person",
+        "name": "Nanako Tsai",
+        "url": "https://nyanako.com/"
+      },
+      "applicationCategory": "UtilitiesApplication",
+      "operatingSystem": "macOS 26 以上（Apple 晶片）",
+      "softwareVersion": "0.9.1",
+      "datePublished": "2026-11-25",
+      "downloadUrl": "https://github.com/Nanako0129/shanjie/releases/latest",
+      "license": "https://www.apache.org/licenses/LICENSE-2.0",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "TWD"
+      },
+      "description": "善解輸入法（BopoMola）是開源的 macOS 注音輸入法：看游標前文整句解碼，停頓時本機小模型重排，選出正確的同音字。"
+    }
+  ]
+}
 </script>
-<script src="/theme.js"></script>
-<link rel="stylesheet" href="/site.css">
+<script>
+(function () {
+  document.documentElement.classList.add("has-js");
+  try {
+    var t = localStorage.getItem("theme");
+    if (t === "light" || t === "dark") {
+      document.documentElement.setAttribute("data-theme", t);
+    }
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="/home.css">
 </head>
 <body>
-<nav class="site-nav" aria-label="網站"><div class="in">
-  <a class="home" href="/" aria-current="page">善解</a>
-  <a href="/how">怎麼選字</a>
-  <a href="/install">安裝</a>
-  <a href="/guide">使用說明</a>
-  <a href="/updates">更新紀錄</a>
-  <a class="btn primary dl" href="/install#download">下載</a>
-</div></nav>
-<main>
+<a class="skip-link" href="#main-content">跳到主要內容</a>
 
-<header class="hero">
-  <div class="seal" aria-hidden="true"><span>解</span></div>
-  <div>
-    <h1 class="name">善解<span>輸入法</span></h1>
-    <p class="tagline">善解，所以選對。</p>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="/" aria-current="page">
+      <img src="/assets/shanjie-icon-64.png" alt="" width="28" height="28" decoding="async">
+      <span class="brand-name">善解</span>
+      <span class="brand-en">BopoMola</span>
+    </a>
+
+    <nav class="site-nav" aria-label="主要導覽">
+      <a href="/how">怎麼選字</a>
+      <a href="/install">安裝</a>
+      <a href="/guide">使用說明</a>
+      <a href="/updates">更新紀錄</a>
+    </nav>
+
+    <div class="topbar-actions">
+      <div class="theme-switch" role="group" aria-label="頁面深淺色設定">
+        <button type="button" class="theme-opt" data-theme-choice="system" aria-pressed="true">跟隨系統</button>
+        <button type="button" class="theme-opt" data-theme-choice="light" aria-pressed="false">淺色</button>
+        <button type="button" class="theme-opt" data-theme-choice="dark" aria-pressed="false">深色</button>
+      </div>
+      <a class="btn btn-primary nav-dl" href="/install#download">下載 v0.9.1</a>
+    </div>
   </div>
-  <p class="lede">一個開源的 macOS 注音輸入法，專心把同音字選對：看懂你前面寫了什麼，選出你真正要打的那個字。</p>
-  <div class="actions"><a class="btn primary" href="/install#download">下載 v0.9.1</a><a class="btn secondary" href="#examples">看它怎麼選字</a></div>
-  <p class="req">macOS 26 以上・Apple 晶片・開源 Apache-2.0</p>
 </header>
 
-<hr class="rule">
+<main id="main-content">
+  <!-- Section 1: Asymmetric 2-Column Hero (Demo A Layout + Interactive ShanjieEngine Workbench) -->
+  <section class="hero" aria-labelledby="hero-heading">
+    <div class="container hero-grid">
+      <div class="hero-copy">
+        <div class="hero-eyebrow">
+          <span class="mola-pill">
+            <svg class="mola-mark" viewBox="0 0 64 64" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M51 30 C49 21.5 40 17.5 31 17.5 C29.5 11.5 26.5 6 22 6 C19.5 6 18.5 12 18.5 18.5 C14 20.5 13.5 24 16.5 26 C12.5 28 12.5 32 16.5 34 C13.5 36 14 39.5 18.5 41.5 C18.5 48 19.5 53.5 22 53.5 C26.5 53.5 29.5 48 31 42.5 C40 42.5 49 38.5 51 30 Z" />
+              <path d="M34 28.5 C38 28 38.5 33.5 33.5 34" />
+              <circle cx="43.5" cy="27" r="1.5" fill="currentColor" stroke="none" />
+              <path d="M12 57.5 Q19 55.2 26 57.5 T40 57.5 T52 57.5" />
+              <path d="M18 61.5 Q24.5 59.5 31 61.5 T44 61.5" />
+            </svg>
+            <span>BopoMola・台灣東岸曼波魚 <em>Mola mola</em></span>
+          </span>
+        </div>
 
-<section id="examples">
-  <h2>看前文，選對同音字</h2>
-  <p class="sub">注音輸入最常見的困擾不是打不出字，而是打出了「同音的另一個字」。</p>
-  <div class="pairs">
-    <div class="pair"><div class="zy">ㄔㄤˊ ㄔㄤˊ</div><div><span class="right">常常</span><span class="wrong">嚐嚐</span></div><div class="ctx">改選過一次「嚐嚐」，之後每句都被搶走</div></div>
-    <div class="pair"><div class="zy">ㄋㄚˋ ㄅㄧㄢ</div><div><span class="right">那邊</span><span class="wrong">納編</span></div><div class="ctx">詞頻來自新聞語料，口語反而排在後面</div></div>
-    <div class="pair"><div class="zy">ㄕˋ ㄐㄧㄥˋ ㄅㄨˋ</div><div><span class="right">拭鏡布</span><span class="wrong">是竟不</span></div><div class="ctx">詞庫沒收的日常用語，只能一字一字湊</div></div>
-  </div>
-</section>
+        <div class="hero-mark">
+          <img class="app-icon" src="/assets/shanjie-icon-256.png" alt="善解輸入法 Liquid Glass 圖示" width="64" height="64" decoding="async">
+          <h1 id="hero-heading"><span class="h1-brand">善解輸入法（BopoMola）</span><span class="h1-tagline">打完一整句，不用回頭改同音字</span></h1>
+        </div>
 
-<section id="numbers">
-  <h2>量到多少</h2>
-  <div class="stats">
-    <div class="stat"><b>95.0%</b><span>開發集整句正確（聊天設定，302 句）</span></div>
-    <div class="stat"><b>90.0%／87.3%</b><span>保留集整句正確：口語／新聞，各 150 句，發版前量一次</span></div>
-    <div class="stat"><b>1.9 ms</b><span>每個按鍵的處理時間（p95）</span></div>
-  </div>
-  <p class="note">v0.9.1。<a href="/how#measure">怎麼量的 →</a></p>
-</section>
+        <p class="hero-lead lede">善解輸入法（BopoMola）看游標前文整句解碼，停頓時本機小模型重排。自由試打、切換設定、實測與蘋果注音的差別。</p>
 
-<section id="how">
-  <h2>怎麼做到</h2>
-  <div class="layers">
-    <div class="layer"><div><h3>每一鍵：整句解碼</h3><p>詞庫與語言模型在本機列出候選，也看每個字的讀音對不對得上你打的音，接著前文選出整句。</p></div></div>
-    <div class="layer"><div><h3>停頓時：語意校正</h3><p>小模型看前文，在背景從前 8 名裡挑最通順的一句，不產生新字。</p></div></div>
-    <div class="layer"><div><h3>改選時：記住</h3><p>你改選的字依前文記住，只存在這台 Mac。</p></div></div>
-  </div>
-  <p class="note"><a href="/how">善解怎麼選字 →</a></p>
-</section>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="/install#download">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 3v12"></path>
+              <path d="M7 10l5 5 5-5"></path>
+              <path d="M4 19h16"></path>
+            </svg>
+            <span>下載 v0.9.1</span>
+          </a>
 
-<section id="features">
-  <h2>現在有的</h2>
-  <ul class="feats">
-    <li><a href="/guide#context">看前文選字</a>：接著游標前已經送出的字選。</li>
-    <li><a href="/guide#prediction">即時預測</a>：打第一個注音就列出接得上的詞，按 Tab 選。</li>
-    <li><a href="/guide#learning">選字記憶</a>：依前文記住你的改選，可以逐詞忘記。</li>
-    <li><a href="/guide#profiles">聊天與書面</a>：依 App 自動切換，也可以自己選。</li>
-    <li><a href="/guide#rerank">語意校正</a>：保守、標準、積極三段，可以關。</li>
-    <li><a href="/guide#english">中英混打</a>：打英文不用切換輸入法；<code>ok</code>、<code>gta6</code> 這類字與單按 Shift 切換中英，在設定裡打開。</li>
-    <li><a href="/guide#packs">詞包</a>：動漫與遊戲、資訊與 AI、美妝與保養、迷因、口頭禪與實況用語、經典台詞。</li>
-    <li><a href="/guide#fuzzy">模糊輸入</a>：ㄣ／ㄥ、ㄓ／ㄗ 等四組，預設關。</li>
-  </ul>
-</section>
+          <button type="button" class="brew-pill" data-copy="brew install --cask nanako0129/tap/shanjie" aria-label="複製 Homebrew 安裝指令">
+            <code>brew install --cask nanako0129/tap/shanjie</code>
+            <span class="copy-state" aria-live="polite">
+              <svg class="copy-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+              <span class="copy-label">複製</span>
+            </span>
+          </button>
+        </div>
 
-<section id="install" class="install">
-  <h2>安裝</h2>
-  <p class="sub">需要 macOS 26（Tahoe）以上、Apple 晶片。兩種方式擇一。</p>
-  <div class="layers alt">
-    <div class="layer"><div><h3>安裝程式</h3><p>從 GitHub Releases 下載 <code>shanjie-installer</code> 開頭的 zip，打開「安裝善解輸入法」照四個步驟。</p><div class="when">推薦</div></div></div>
-    <div class="layer"><div><h3>Homebrew</h3><pre><code>brew install --cask nanako0129/tap/shanjie</code></pre></div></div>
-  </div>
-  <p class="note"><a href="/install">完整步驟、更新與解除安裝 →</a></p>
-</section>
+        <p class="hero-req">macOS 26 以上・Apple 晶片・開源 Apache-2.0・Windows 版開發中</p>
 
-<section id="recent">
-  <h2>最近</h2>
-  <ul class="feats">
-    <li><a href="https://github.com/Nanako0129/shanjie/releases/tag/vchewing-dict-1">唯音辭典</a>：給唯音輸入法（vChewing）用的辭典檔，條目全部從善解的詞庫與模型轉出來，在 GitHub Release 下載（CC BY-SA 4.0）；合作經過見 <a href="https://github.com/Nanako0129/shanjie/issues/143">issue #143</a>。</li>
-    <li><a href="/updates#v0.9.1">v0.9.1</a>・<time datetime="2026-11-25">2026-11-25</time>：電腦很忙時語意校正不再跟不上打字；口語的輕聲與疊字讀法照唸的打也會出對的詞；英文字母接中文的詞（K書、T恤、CP值）直接打得出來；在 Orca 裡打字的前文改成和其他終端機一樣。</li>
-    <li><a href="/updates#v0.9.0">v0.9.0</a>・<time datetime="2026-11-23">2026-11-23</time>：語意校正換成讀得到較長前文的新模型；照實際唸法打的三聲變調也會出對的詞；預設設定下也打得出常見的英文；Option 加符號鍵照蘋果注音打出全形字與中文標點；修正照平常唸法打卻選出罕用字的錯（例如「他啦」）。</li>
-    <li><a href="/updates#v0.8.0">v0.8.0</a>・<time datetime="2026-11-17">2026-11-17</time>：選字會參考游標前已經打出來的字，加上迷因與實況用語詞包、英文寫成正式的大小寫與中英混合詞、有新版本時發系統通知；切換詞包不再讓輸入法停住。</li>
-    <li><a href="/updates#v0.7.0">v0.7.0</a>・<time datetime="2026-11-11">2026-11-11</time>：整句選字多看你打的讀音，語意校正換成會意 SJ-SR-8-15M，加上美妝與保養詞包；中英混打兩個容易誤觸的設定改成預設關。</li>
-    <li>進行中：Windows 版（<a href="/roadmap">路線圖</a>）。</li>
-  </ul>
-</section>
+        <dl class="hero-metrics" aria-label="v0.9.1 實測關鍵指標">
+          <div class="metric">
+            <dt>開發集整句（聊天）</dt>
+            <dd>95.0%</dd>
+          </div>
+          <div class="metric">
+            <dt>保留集口語・新聞</dt>
+            <dd>90.0%・87.3%</dd>
+          </div>
+          <div class="metric">
+            <dt>每鍵 p95</dt>
+            <dd>1.9 ms</dd>
+          </div>
+        </dl>
+      </div>
 
-<section id="privacy">
-  <h2>留在這台 Mac</h2>
-  <p>除了檢查更新，善解不連網。你打的字不寫進任何日誌。選字記憶只存在這台 Mac，可以忘記一個詞或全部清除。</p>
-  <p class="note"><a href="/privacy">隱私與資料 →</a></p>
-</section>
+      <!-- Right Column: 3-Mode Interactive Workbench + Shared Settings Drawer -->
+      <div class="hero-stage">
+        <div class="workbench" role="region" aria-label="善解實境試打與對決台" data-wasm-base="/wasm-assets/v1-p35-2ff55dcc" data-wasm-worker="/wasm/shanjie-worker.js" data-engine-mode="table" data-wasm-stage="idle">
+          <div class="workbench-bar">
+            <div class="window-dots" aria-hidden="true">
+              <span class="dot dot-close"></span>
+              <span class="dot dot-min"></span>
+              <span class="dot dot-zoom"></span>
+            </div>
+            <div class="mode-tabs" role="tablist" aria-label="工作台模式">
+              <button type="button" class="mode-tab is-active" role="tab" id="tab-free" aria-selected="true" aria-controls="panel-free" data-mode="free">自由試打</button>
+              <button type="button" class="mode-tab" role="tab" id="tab-corpus" aria-selected="false" aria-controls="panel-corpus" data-mode="corpus">分類例句實測庫</button>
+              <button type="button" class="mode-tab" role="tab" id="tab-duel" aria-selected="false" aria-controls="panel-duel" data-mode="duel">情境對決（自動播）</button>
+            </div>
+            <button type="button" class="settings-toggle" id="wb-settings-toggle" aria-expanded="false" aria-controls="wb-settings-drawer">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+              <span>設定</span>
+              <span class="settings-summary-badge" id="wb-settings-badge">標準</span>
+            </button>
+          </div>
 
-<div class="actions"><a class="btn primary" href="/install#download">下載 v0.9.1</a><a class="btn secondary" href="/faq#report">回報選錯的字</a></div>
+          <!-- Shared Settings Drawer (Synced with Section 3 Feature Lab) -->
+          <div class="wb-settings-drawer" id="wb-settings-drawer" hidden>
+            <div class="drawer-head">
+              <span class="drawer-title">即時設定調整（同步套用到試打與例句庫）</span>
+              <button type="button" class="ctrl-btn" id="wb-settings-reset">恢復預設</button>
+            </div>
+            <div class="drawer-grid">
+              <div class="setting-row">
+                <span class="setting-label">語意校正強度</span>
+                <div class="seg-group" role="group" aria-label="語意校正強度">
+                  <button type="button" class="seg-btn" data-setting-rerank="off">關閉</button>
+                  <button type="button" class="seg-btn" data-setting-rerank="conservative">保守</button>
+                  <button type="button" class="seg-btn is-active" data-setting-rerank="standard">標準</button>
+                  <button type="button" class="seg-btn" data-setting-rerank="aggressive">積極</button>
+                </div>
+              </div>
 
+              <div class="setting-row">
+                <span class="setting-label">聊天／書面設定</span>
+                <div class="seg-group" role="group" aria-label="聊天或書面設定">
+                  <button type="button" class="seg-btn is-active" data-setting-profile="auto">依 App 自動</button>
+                  <button type="button" class="seg-btn" data-setting-profile="chat">一律聊天</button>
+                  <button type="button" class="seg-btn" data-setting-profile="formal">一律書面</button>
+                </div>
+              </div>
+
+              <div class="setting-row setting-toggles">
+                <label class="toggle-chip">
+                  <input type="checkbox" data-setting-bool="cjkSpacing">
+                  <span>盤古之白（中英文自動加空格，預設關）</span>
+                </label>
+                <label class="toggle-chip">
+                  <input type="checkbox" data-setting-bool="toneSandhi" checked>
+                  <span>變調與口語讀音（預設開）</span>
+                </label>
+                <label class="toggle-chip">
+                  <input type="checkbox" data-setting-bool="fuzzy">
+                  <span>四組模糊輸入 ㄣ/ㄥ・ㄓ/ㄗ・ㄔ/ㄘ・ㄕ/ㄙ（預設關）</span>
+                </label>
+                <label class="toggle-chip">
+                  <input type="checkbox" data-setting-bool="adjacentKey">
+                  <span>鄰鍵打錯容錯（標準排列，預設關）</span>
+                </label>
+              </div>
+
+              <div class="setting-row">
+                <span class="setting-label">五類詞包開關</span>
+                <div class="pack-toggles">
+                  <label class="toggle-chip"><input type="checkbox" data-setting-pack="acg" checked><span>動漫與遊戲（44,552）</span></label>
+                  <label class="toggle-chip"><input type="checkbox" data-setting-pack="it" checked><span>資訊與 AI（1,016）</span></label>
+                  <label class="toggle-chip"><input type="checkbox" data-setting-pack="beauty" checked><span>美妝與保養（539）</span></label>
+                  <label class="toggle-chip"><input type="checkbox" data-setting-pack="meme" checked><span>迷因與實況用語（139）</span></label>
+                  <label class="toggle-chip"><input type="checkbox" data-setting-pack="quote"><span>經典台詞（208 列・預設關）</span></label>
+                </div>
+                <p class="packs-wasm-note" id="wb-packs-wasm-note" hidden>WASM 模式固定使用出貨預設 4 詞包（動漫與遊戲、資訊與 AI、美妝與保養、迷因與實況用語）；切換詞包請切回範例對照模式或安裝 App</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mode 1: Free Typing Fake-Engine Workbench (Default Active) -->
+          <div class="workbench-panel" id="panel-free" role="tabpanel" aria-labelledby="tab-free">
+            <div class="free-top-bar">
+              <div class="genre-pills" id="free-genre-pills" role="tablist" aria-label="快速選取分類例句">
+                <button type="button" class="chip" data-free-cat="colloquial">口語</button>
+                <button type="button" class="chip" data-free-cat="long">長句</button>
+                <button type="button" class="chip" data-free-cat="news">新聞</button>
+                <button type="button" class="chip" data-free-cat="fiction">小說</button>
+                <button type="button" class="chip is-active" data-free-cat="mixed">中英數混打</button>
+              </div>
+              <button type="button" class="ctrl-btn" id="jump-duel-btn">自動對決示範 →</button>
+            </div>
+
+            <div class="free-sample-strip" id="free-sample-strip" aria-label="載入例句到試打區"></div>
+
+            <div class="free-inputs">
+              <div class="input-field-row">
+                <label class="field-tag" for="free-context">前文</label>
+                <input type="text" id="free-context" class="wb-input wb-context-input" placeholder="游標前最多 64 字（選填，例如：這家店我以前）" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="input-field-row">
+                <label class="field-tag" for="free-input">輸入</label>
+                <input type="text" id="free-input" class="wb-input wb-main-input" value="5k4 ek7 bug au/6 wu0 y94 vu." placeholder="請先切英文輸入法，直接敲大千鍵（如 ji3push2l4githubxk7 或 su3cl3）" autocomplete="off" spellcheck="false" aria-describedby="free-hint">
+                <button type="button" class="ctrl-btn" id="free-clear-btn" title="清空輸入與記憶">清空</button>
+              </div>
+              <div class="ime-switch-warn" id="free-ime-warn" role="alert" hidden>
+                <span class="ime-switch-warn-text">偵測到系統中文輸入法。網頁試打需直接接收實體鍵位，請先按 <kbd>Caps Lock</kbd> 或切換為<strong>英文輸入法（ABC）</strong>再直接敲大千注音鍵（例：<code>su3cl3</code> → 你好）。</span>
+                <button type="button" class="ctrl-btn" id="free-ime-clear-btn">清空重打</button>
+              </div>
+            </div>
+
+            <div class="wasm-bar" id="wasm-bar">
+              <div class="wasm-bar-top">
+                <button type="button" class="wasm-enable-btn" id="wasm-enable-btn" aria-pressed="false">啟用瀏覽器真引擎（WASM）</button>
+                <span class="wasm-status-badge" id="wasm-status-badge" aria-live="polite">目前：54 句實測對照</span>
+              </div>
+              <p class="wasm-memory-note" id="wasm-memory-note">約 19 MiB 先開打、背景 +13 MiB 語意校正，佔用約 300 MiB 記憶體（建議桌機；按鍵不出本機）</p>
+            </div>
+
+            <!-- Live Simulated Composition Stage -->
+            <div class="sim-stage" aria-live="polite">
+              <div class="sim-header">
+                <span class="sim-mode-tag">善解 v0.9.1 組字區</span>
+                <span class="sim-bopomofo" id="free-bopomofo">ㄓㄜˋ ㄍㄜ˙ bug ㄇㄧㄥˊ ㄊㄧㄢ ㄗㄞˋ ㄒㄧㄡ</span>
+              </div>
+              <div class="sim-composition-line">
+                <span class="editor-context" id="free-stage-context"></span><span class="editor-output is-right" id="free-stage-output">這個 bug 明天再修</span><span class="caret" aria-hidden="true"></span>
+              </div>
+
+              <!-- Authentic macOS 26 Single-Row Liquid Glass Prediction / Candidate Bar -->
+              <div class="pill-stage-row">
+                <div class="liquid-pill" id="free-pill" data-bar-mode="prediction">
+                  <div class="pill-candidates" id="free-candidates" aria-label="即時預測或游標候選列">
+                    <button type="button" class="cand" data-cand-idx="0"><b>⇥</b> 修正</button>
+                    <button type="button" class="cand" data-cand-idx="1">休</button>
+                    <button type="button" class="cand" data-cand-idx="2">修改</button>
+                    <button type="button" class="cand" data-cand-idx="3">休息</button>
+                    <button type="button" class="cand" data-cand-idx="4">修法</button>
+                    <button type="button" class="cand" data-cand-idx="5">修煉</button>
+                  </div>
+                  <span class="pill-chevron" id="free-pill-chevron" aria-hidden="true">
+                    <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.25L6 7.75l3.5-3.5"/></svg>
+                  </span>
+                </div>
+                <div class="pill-right-actions">
+                  <button type="button" class="ctrl-btn" id="free-down-btn" aria-pressed="false" title="模擬按 ↓ 開啟游標處單排候選窗">↓ 游標候選</button>
+                  <button type="button" class="pred-pill" id="free-prediction-btn" hidden>
+                    <kbd>Tab</kbd> <span id="free-prediction-text"></span>
+                  </button>
+                  <button type="button" class="ctrl-btn" id="free-forget-btn" hidden title="忘記這條選字記憶">⌘⌫ 忘記</button>
+                </div>
+              </div>
+
+              <div class="sim-compare-row" id="free-apple-row">
+                <span class="cmp-badge cmp-badge-err">macOS 內建對照</span>
+                <span class="sim-apple-text" id="free-apple-output">這個咪贏天在修</span>
+                <span class="sim-source-note" id="free-source-note"></span>
+              </div>
+            </div>
+
+            <!-- Compact Virtual Daqian Key Strip -->
+            <div class="keypad-wrap">
+              <div class="keypad-head">
+                <span class="keypad-label" id="free-hint">點虛擬大千鍵或直接打標準鍵盤英文鍵／注音；按 ↓ 或點「游標候選」看真實單排候選窗</span>
+                <button type="button" class="ctrl-btn" id="toggle-keypad-btn" aria-expanded="false" aria-controls="virtual-keypad">展開大千鍵盤</button>
+              </div>
+              <div class="virtual-keypad" id="virtual-keypad" hidden></div>
+            </div>
+
+            <!-- Engine Trace & Honest Notice -->
+            <div class="trace-footer">
+              <div class="trace-pills" id="free-trace-pills">
+                <span class="trace-chip">通語 SJ-LM-7-9.7M</span>
+                <span class="trace-chip">會意重排：標準</span>
+              </div>
+              <p class="honest-notice" id="free-honest-notice">網頁預設對照表介面（54 句已全數經實機 VM 或真實核心 2ff55dcc 實測驗證；完整自由打字請啟用 WASM 或安裝善解輸入法 v0.9.1）。</p>
+            </div>
+          </div>
+
+          <!-- Mode 2: Categorized Sentence Corpus Browser -->
+          <div class="workbench-panel" id="panel-corpus" role="tabpanel" aria-labelledby="tab-corpus" hidden>
+            <div class="corpus-toolbar">
+              <div class="genre-pills" id="corpus-cat-tabs" role="tablist" aria-label="例句分類">
+                <button type="button" class="chip is-active" data-corpus-cat="colloquial">口語</button>
+                <button type="button" class="chip" data-corpus-cat="long">長句</button>
+                <button type="button" class="chip" data-corpus-cat="news">新聞</button>
+                <button type="button" class="chip" data-corpus-cat="fiction">小說</button>
+                <button type="button" class="chip" data-corpus-cat="mixed">中英數混打</button>
+              </div>
+              <span class="corpus-count" id="corpus-count"></span>
+            </div>
+            <div class="corpus-list" id="corpus-list">
+              <!-- Populated from ShanjieEngine.getByCategory; fallback below for no-JS -->
+            </div>
+            <noscript>
+              <ul class="noscript-duels">
+                <li><strong>口語</strong>：這家店真的超划算（出處：eval/dev/user-typing.txt:32）</li>
+                <li><strong>長句</strong>：我在網路上買了一個無線充電座和一包抗菌濕紙巾（出處：eval/dev/user-typing.txt:9）</li>
+                <li><strong>新聞</strong>：氣象署預估本週末東北季風增強北部與東半部將轉為濕涼天氣（原創新聞語氣，CLI 實測）</li>
+                <li><strong>小說</strong>：我買幾個橘子去你就在此地不要走動（公有領域：朱自清《背影》，1925，卒於 1948 年，CLI 實測）</li>
+                <li><strong>中英數混打</strong>：我 push 到 GitHub 了（實機 VM 驗證 seg4_C2）／我用Claude寫下午3點要交的PDF檔（真實核心實測）</li>
+              </ul>
+            </noscript>
+          </div>
+
+          <!-- Mode 3: Auto-Playing Dual-Track Scenario Duel (from Demo A) -->
+          <div class="workbench-panel" id="panel-duel" role="tabpanel" aria-labelledby="tab-duel" hidden>
+            <div class="duel-controls">
+              <div class="scenario-chips" role="tablist" aria-label="對決情境">
+                <button type="button" class="chip is-active" role="tab" aria-selected="true" data-scenario="github">中英混打・GitHub</button>
+                <button type="button" class="chip" role="tab" aria-selected="false" data-scenario="bug">同音字・明天再修</button>
+                <button type="button" class="chip" role="tab" aria-selected="false" data-scenario="chang">看前文・常常／嚐嚐</button>
+                <button type="button" class="chip" role="tab" aria-selected="false" data-scenario="rerank">停頓重排・一夜</button>
+                <button type="button" class="chip" role="tab" aria-selected="false" data-scenario="anime">動漫詞包・三角初華</button>
+              </div>
+              <div class="playback-controls">
+                <button type="button" class="ctrl-btn" id="duel-pause" aria-pressed="false" title="暫停或繼續自動輪播">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="6" y="4" width="4" height="16"></rect>
+                    <rect x="14" y="4" width="4" height="16"></rect>
+                  </svg>
+                  <span id="duel-pause-label">暫停</span>
+                </button>
+                <button type="button" class="ctrl-btn" id="duel-replay" title="重播目前情境">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path>
+                    <path d="M3 3v5h5"></path>
+                  </svg>
+                  <span>重播</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="keystream-bar" aria-live="off">
+              <span class="keystream-label">同一串按鍵</span>
+              <code class="keystream-seq" id="duel-keys">ㄨㄛˇ push ㄉㄠˋ GitHub ㄌㄜ˙</code>
+            </div>
+
+            <div class="tracks">
+              <div class="track track-apple">
+                <div class="track-head">
+                  <span class="track-name">macOS 內建注音</span>
+                  <span class="track-status track-status-err" id="apple-badge">同音／英文誤判</span>
+                </div>
+                <div class="track-editor" aria-live="polite">
+                  <span class="editor-context" id="apple-context"></span><span class="editor-output is-wrong" id="apple-output">我調Ｇㄌㄧㄜ˙</span>
+                </div>
+              </div>
+
+              <div class="track track-shanjie">
+                <div class="track-head">
+                  <span class="track-name">善解 v0.9.1</span>
+                  <span class="track-status track-status-ok" id="shanjie-badge">通語整句解碼</span>
+                </div>
+                <div class="track-editor" aria-live="polite">
+                  <span class="editor-context" id="shanjie-context"></span><span class="editor-output is-right" id="shanjie-output">我 push 到 GitHub 了</span><span class="caret" aria-hidden="true"></span>
+                </div>
+                <div class="duel-pill-row">
+                  <div class="liquid-pill" id="duel-pill" data-bar-mode="none" hidden>
+                    <div class="pill-candidates" id="duel-pill-items"></div>
+                    <span class="pill-chevron" id="duel-pill-chevron" aria-hidden="true">
+                      <svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.25L6 7.75l3.5-3.5"/></svg>
+                    </span>
+                  </div>
+                  <div class="pill-rerank" id="duel-rerank-tag" hidden>
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"></path>
+                    </svg>
+                    <span>會意小模型原地重排組字區</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="engine-readout" id="duel-readout" aria-live="polite">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M12 8v4l2.5 2.5"></path>
+              </svg>
+              <span id="duel-readout-text">中英混打自動判讀＋英文正式大小寫（GitHub），免切換輸入法。</span>
+            </div>
+          </div>
+
+          <div class="wb-mobile-desktop-note">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="4" width="20" height="14" rx="2"></rect>
+              <path d="M8 20h8"></path>
+              <path d="M12 18v2"></path>
+            </svg>
+            <span>自由試打與瀏覽器真引擎（WASM）請以桌機開啟</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 2: Real macOS VM Theatre (4 Unedited WebM/MP4 Clips + WebP Posters) + Homophone Traps Cycler -->
+  <section class="section vm-section" id="vm-evidence" aria-labelledby="vm-heading">
+    <div class="container">
+      <div class="section-head">
+        <h2 id="vm-heading">實機 macOS VM 錄影展演與常見同音陷阱</h2>
+        <p class="section-sub">在同一台 macOS 虛擬機裡，把無剪輯的同一串按鍵同時送進蘋果內建注音與善解 v0.9.1。</p>
+      </div>
+
+      <div class="theatre-layout">
+        <!-- Main Theatre Screen -->
+        <div class="theatre-stage">
+          <div class="theatre-bar">
+            <span class="theatre-badge" id="theatre-badge">C2・中英混打與大小寫</span>
+            <button type="button" class="ctrl-btn" id="theatre-motion-toggle" aria-pressed="true">暫停動畫</button>
+          </div>
+          <!-- Real-VM Theatre media budgets: WebM ≤350 KB、MP4 ≤500 KB、WebP poster ≤35 KB -->
+          <div class="theatre-frame" id="theatre-frame">
+            <video id="theatre-video" class="theatre-video" autoplay loop muted playsinline preload="metadata" width="820" height="386" poster="/assets/vm_c2_github_poster.webp" aria-label="macOS 實機錄影：蘋果注音輸出「我調Ｇㄌㄧㄜ˙」，善解 0.9.1 輸出「我 push 到 GitHub 了」">
+              <source id="theatre-src-webm" src="/assets/vm_c2_github.webm" type="video/webm">
+              <source id="theatre-src-mp4" src="/assets/vm_c2_github.mp4" type="video/mp4">
+            </video>
+            <img id="theatre-poster-img" class="theatre-poster-img" src="/assets/vm_c2_github_poster.webp" width="820" height="386" decoding="async" alt="macOS 實機錄影靜態畫面：蘋果注音輸出「我調Ｇㄌㄧㄜ˙」，善解 0.9.1 輸出「我 push 到 GitHub 了」" hidden>
+          </div>
+          <div class="theatre-caption-bar">
+            <div class="theatre-keys">
+              <span class="cap-label">實際敲鍵</span>
+              <code id="theatre-keys-text">ㄨㄛˇ push ␣ ㄉㄠˋ GitHub ␣ ㄌㄜ˙ ↵</code>
+            </div>
+            <div class="theatre-outputs">
+              <span class="out-apple">macOS 內建注音：<strong id="theatre-apple-text">我調Ｇㄌㄧㄜ˙</strong></span>
+              <span class="out-shanjie">善解 v0.9.1：<strong id="theatre-shanjie-text">我 push 到 GitHub 了</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Static 4-Clip Ledger -->
+        <div class="theatre-ledger" role="tablist" aria-label="選擇實機錄影片段">
+          <button type="button" class="ledger-item is-active" role="tab" aria-selected="true"
+            data-code="C2・中英混打與大小寫"
+            data-video-webm="/assets/vm_c2_github.webm"
+            data-video-mp4="/assets/vm_c2_github.mp4"
+            data-poster-webp="/assets/vm_c2_github_poster.webp"
+            data-keys="ㄨㄛˇ push ␣ ㄉㄠˋ GitHub ␣ ㄌㄜ˙ ↵"
+            data-apple="我調Ｇㄌㄧㄜ˙"
+            data-shanjie="我 push 到 GitHub 了"
+            data-alt="macOS 實機錄影：蘋果注音輸出「我調Ｇㄌㄧㄜ˙」，善解 0.9.1 輸出「我 push 到 GitHub 了」">
+            <span class="ledger-code">C2・中英混打與大小寫</span>
+            <span class="ledger-pair">
+              <span class="l-bad">我調Ｇㄌㄧㄜ˙</span>
+              <span class="l-good">我 push 到 GitHub 了</span>
+            </span>
+          </button>
+
+          <button type="button" class="ledger-item" role="tab" aria-selected="false"
+            data-code="C1・工作對話英文穿插"
+            data-video-webm="/assets/vm_c1_pr.webm"
+            data-video-mp4="/assets/vm_c1_pr.mp4"
+            data-poster-webp="/assets/vm_c1_pr_poster.webp"
+            data-keys="ㄅㄤ ㄨㄛˇ review ␣ ㄓㄜˋ ㄍㄜ˙ PR ␣ ↵"
+            data-apple="幫我這個ＰＲ"
+            data-shanjie="幫我 review 這個 PR"
+            data-alt="macOS 實機錄影：蘋果注音輸出「幫我這個ＰＲ」，善解 0.9.1 輸出「幫我 review 這個 PR」">
+            <span class="ledger-code">C1・工作對話英文穿插</span>
+            <span class="ledger-pair">
+              <span class="l-bad">幫我這個ＰＲ</span>
+              <span class="l-good">幫我 review 這個 PR</span>
+            </span>
+          </button>
+
+          <button type="button" class="ledger-item" role="tab" aria-selected="false"
+            data-code="C5・英文後接「明天再修」"
+            data-video-webm="/assets/vm_c5_bug.webm"
+            data-video-mp4="/assets/vm_c5_bug.mp4"
+            data-poster-webp="/assets/vm_c5_bug_poster.webp"
+            data-keys="ㄓㄜˋ ㄍㄜ˙ bug ␣ ㄇㄧㄥˊ ㄊㄧㄢ ㄗㄞˋ ㄒㄧㄡ ↵"
+            data-apple="這個咪贏天在修"
+            data-shanjie="這個 bug 明天再修"
+            data-alt="macOS 實機錄影：蘋果注音輸出「這個咪贏天在修」，善解 0.9.1 輸出「這個 bug 明天再修」">
+            <span class="ledger-code">C5・英文後接「明天再修」</span>
+            <span class="ledger-pair">
+              <span class="l-bad">這個咪贏天在修</span>
+              <span class="l-good">這個 bug 明天再修</span>
+            </span>
+          </button>
+
+          <button type="button" class="ledger-item" role="tab" aria-selected="false"
+            data-code="D2・動漫與遊戲詞包"
+            data-video-webm="/assets/vm_d2_anime.webm"
+            data-video-mp4="/assets/vm_d2_anime.mp4"
+            data-poster-webp="/assets/vm_d2_anime_poster.webp"
+            data-keys="ㄙㄢ ㄐㄧㄠˇ ㄔㄨ ㄏㄨㄚˊ ㄏㄠˇ ㄨㄣ ㄖㄡˊ ↵"
+            data-apple="三角出華好溫柔"
+            data-shanjie="三角初華好溫柔"
+            data-alt="macOS 實機錄影：蘋果注音輸出「三角出華好溫柔」，善解 0.9.1 輸出「三角初華好溫柔」">
+            <span class="ledger-code">D2・動漫與遊戲詞包</span>
+            <span class="ledger-pair">
+              <span class="l-bad">三角出華好溫柔</span>
+              <span class="l-good">三角初華好溫柔</span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Homophone Traps Cycler (from Demo D) -->
+      <div class="trap-panel" aria-label="常見同音陷阱輪播">
+        <div class="trap-bar">
+          <div class="trap-heading-group">
+            <h3>常見同音陷阱</h3>
+            <span class="trap-sub">你沒打錯音，是輸入法沒看前文</span>
+          </div>
+          <div class="trap-tabs" role="tablist" aria-label="切換同音字例句">
+            <button type="button" class="trap-tab is-active" role="tab" aria-selected="true" data-trap="0">在／再</button>
+            <button type="button" class="trap-tab" role="tab" aria-selected="false" data-trap="1">氣／企</button>
+            <button type="button" class="trap-tab" role="tab" aria-selected="false" data-trap="2">常／嚐</button>
+            <button type="button" class="trap-tab" role="tab" aria-selected="false" data-trap="3">仙／先</button>
+          </div>
+        </div>
+
+        <div class="trap-grid" aria-live="polite">
+          <article class="trap-item is-active" data-trap-panel="0">
+            <div class="trap-meta">
+              <span class="trap-bopomofo">ㄓㄜˋ ㄍㄜ˙ bug ㄇㄧㄥˊ ㄊㄧㄢ ㄗㄞˋ ㄒㄧㄡ</span>
+              <button type="button" class="ctrl-btn trap-load-btn" data-load-keys="5k4 ek7 bug au/6 wu0␣ y94 vu.␣" data-load-ctx="">載入自由試打</button>
+            </div>
+            <div class="trap-compare">
+              <div class="cmp-box cmp-wrong">
+                <span class="cmp-tag">常見錯字</span>
+                <span class="cmp-text">這個 bug 明天<strong>在</strong>修</span>
+              </div>
+              <div class="cmp-box cmp-right">
+                <span class="cmp-tag">善解直出</span>
+                <span class="cmp-text">這個 bug 明天<strong>再</strong>修</span>
+              </div>
+            </div>
+            <p class="trap-note">把整句搭配與前文一次算進分數，不再把「再／在」混成同一個高頻字（實機 VM 驗證 seg4_C5）。</p>
+          </article>
+
+          <article class="trap-item" data-trap-panel="1">
+            <div class="trap-meta">
+              <span class="trap-bopomofo">他一邊聊天一邊吃飯 ＋ … ㄑㄧˋ ㄍㄨㄢˇ …</span>
+              <button type="button" class="ctrl-btn trap-load-btn" data-load-keys="w8␣ t␣ w94 dj94 g6 j4 d83 rup4 fu4 ej03 dk6 xk7 cl3 ru.3" data-load-ctx="他一邊聊天一邊吃飯">載入自由試打</button>
+            </div>
+            <div class="trap-compare">
+              <div class="cmp-box cmp-wrong">
+                <span class="cmp-tag">常見錯字</span>
+                <span class="cmp-text">他吃太快食物卡進<strong>企管</strong>咳了好久</span>
+              </div>
+              <div class="cmp-box cmp-right">
+                <span class="cmp-tag">善解直出</span>
+                <span class="cmp-text">他吃太快食物卡進<strong>氣管</strong>咳了好久</span>
+              </div>
+            </div>
+            <p class="trap-note">前文「一邊聊天一邊吃飯」送進會意小模型重排，同音「氣管／企管」依語境精準分流。</p>
+          </article>
+
+          <article class="trap-item" data-trap-panel="2">
+            <div class="trap-meta">
+              <span class="trap-bopomofo">我最喜歡這家店 ＋ ㄔㄤˊ ㄔㄤˊ ㄌㄞˊ</span>
+              <button type="button" class="ctrl-btn trap-load-btn" data-load-keys="t;6 t;6 x96" data-load-ctx="我最喜歡這家店">載入自由試打</button>
+            </div>
+            <div class="trap-compare">
+              <div class="cmp-box cmp-wrong">
+                <span class="cmp-tag">常見錯字</span>
+                <span class="cmp-text">我最喜歡這家店<strong>嚐嚐</strong>來</span>
+              </div>
+              <div class="cmp-box cmp-right">
+                <span class="cmp-tag">善解直出</span>
+                <span class="cmp-text">我最喜歡這家店<strong>常常</strong>來</span>
+              </div>
+            </div>
+            <p class="trap-note">改選過一次「嚐嚐」不會污染別句；單字與詞組依前文各自記憶。</p>
+          </article>
+
+          <article class="trap-item" data-trap-panel="3">
+            <div class="trap-meta">
+              <span class="trap-bopomofo">那位老爺爺白鬍子長長的 ＋ … ㄒㄧㄢ ㄖㄣˊ …</span>
+              <button type="button" class="ctrl-btn trap-load-btn" data-load-keys="w8␣ y94 g0␣ g;4 vu.␣ vu/6 vu;4 ek4 vu0␣ bp6 u␣ u;4" data-load-ctx="那位老爺爺白鬍子長長的">載入自由試打</button>
+            </div>
+            <div class="trap-compare">
+              <div class="cmp-box cmp-wrong">
+                <span class="cmp-tag">常見錯字</span>
+                <span class="cmp-text">他在山上修行像個<strong>先人</strong>一樣</span>
+              </div>
+              <div class="cmp-box cmp-right">
+                <span class="cmp-tag">善解直出</span>
+                <span class="cmp-text">他在山上修行像個<strong>仙人</strong>一樣</span>
+              </div>
+            </div>
+            <p class="trap-note">同一行游標前最多讀 64 個已送出的字，「白鬍子長長的」搭配修行語境導向「仙人」；前文出現過「先人」時，後文同音詞優先沿用「先人」。</p>
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 3: Full Shipped v0.9.1 Feature Interactive Showcase (All 9 Modules) -->
+  <section class="section lab-section" id="features" aria-labelledby="features-heading">
+    <div class="container">
+      <div class="section-head">
+        <h2 id="features-heading">全功能互動示範工坊</h2>
+        <p class="section-sub">v0.9.1 已經出貨的每一項細節都在這裡——點切換即時看預設值、行為差異與設定開關位置。</p>
+      </div>
+
+      <div class="lab-shell">
+        <div class="lab-nav" role="tablist" aria-label="選擇要示範的功能">
+          <button type="button" class="lab-tab is-active" role="tab" aria-selected="true" data-lab-tab="pangu">1. 盤古之白（中英空格）</button>
+          <button type="button" class="lab-tab" role="tab" aria-selected="false" data-lab-tab="context">2. 看前文選字（64 字）</button>
+          <button type="button" class="lab-tab" role="tab" aria-selected="false" data-lab-tab="rerank">3. 語意校正（三段強度）</button>
+          <button type="button" class="lab-tab" role="tab" aria-selected="false" data-lab-tab="prediction">4. 即時預測按 Tab</button>
+          <button type="button" class="lab-tab" role="tab" aria-selected="false" data-lab-tab="english">5. 中英混打與混合詞</button>
+          <button type="button" class="lab-tab" role="tab" aria-selected="false" data-lab-tab="packs">6. 五類內建詞包</button>
+          <button type="button" class="lab-tab" role="tab" aria-selected="false" data-lab-tab="fuzzy">7. 模糊輸入與鄰鍵容錯</button>
+          <button type="button" class="lab-tab" role="tab" aria-selected="false" data-lab-tab="memory">8. 選字記憶與 ⌘⌫ 忘記</button>
+          <button type="button" class="lab-tab" role="tab" aria-selected="false" data-lab-tab="profile">9. 聊天／書面・變調・標點</button>
+        </div>
+
+        <div class="lab-stage">
+          <!-- Lab 1: Pangu Spacing -->
+          <article class="lab-pane is-active" data-lab-pane="pangu">
+            <div class="lab-pane-head">
+              <div>
+                <h3>盤古之白：中英文之間自動加空格</h3>
+                <p class="lab-meta-line">設定預設：<strong>關</strong>・位置：善解設定 → 選字 → 中英文之間自動加空格（送出時自動補空白）</p>
+              </div>
+              <label class="switch-pill">
+                <input type="checkbox" id="lab-pangu-toggle" data-setting-bool="cjkSpacing">
+                <span>開啟盤古之白（示範設定開啟時）</span>
+              </label>
+            </div>
+            <div class="lab-demo-grid">
+              <div class="lab-card">
+                <span class="lab-card-label">輸入原文</span>
+                <p class="lab-example">我用claude寫／2026年1月15日開會</p>
+                <span class="lab-card-label">目前設定輸出（<span id="lab-pangu-state">設定關閉時保持原樣</span>）</span>
+                <p class="lab-result" id="lab-pangu-samples">我用claude寫／2026年1月15日開會</p>
+              </div>
+              <div class="lab-card">
+                <label class="lab-card-label" for="lab-pangu-input">自己輸入中英數字混雜句子測試</label>
+                <input type="text" id="lab-pangu-input" class="wb-input" value="我用claude在macOS上寫PR，下午3點發版" autocomplete="off">
+                <span class="lab-card-label">即時盤古之白結果</span>
+                <p class="lab-result" id="lab-pangu-live">我用claude在macOS上寫PR，下午3點發版</p>
+              </div>
+            </div>
+            <p class="lab-foot-note">開啟「中英文之間自動加空格」時生效；未開啟時照你原本打出的字送出，不擅自加空白。</p>
+          </article>
+
+          <!-- Lab 2: Context (64 chars + Context Recurrence) -->
+          <article class="lab-pane" data-lab-pane="context">
+            <div class="lab-pane-head">
+              <div>
+                <h3>看前文選字：游標前最多 64 字與前文重現</h3>
+                <p class="lab-meta-line">預設：<strong>開</strong>・終端機（含 Orca）僅讀緊接 2 個漢字・密碼欄不讀前文</p>
+              </div>
+              <div class="seg-group" role="group" aria-label="切換前文語境">
+                <button type="button" class="seg-btn is-active" data-lab-ctx="myth">前文：神話傳說裡的</button>
+                <button type="button" class="seg-btn" data-lab-ctx="taste">前文：這間店的蛋糕很好吃</button>
+                <button type="button" class="seg-btn" data-lab-ctx="wiki">前文重現：剛才打開維基百科</button>
+              </div>
+            </div>
+            <div class="lab-demo-box" id="lab-ctx-display">
+              <div class="lab-line"><span>讀取游標前已送出的字：</span><strong id="lab-ctx-prev">神話傳說裡的</strong></div>
+              <div class="lab-line"><span>接著打注音：</span><code id="lab-ctx-zhuyin">ㄒㄧㄢ ㄖㄣˊ</code></div>
+              <div class="lab-line is-ok"><span>善解選出：</span><strong id="lab-ctx-out">仙人</strong></div>
+              <p class="lab-explain" id="lab-ctx-note">分好幾次送出的句子仍接得上；同一行、游標前 64 字出現過的詞（例如「維基」）再打同音詞時優先寫同一個寫法。</p>
+            </div>
+          </article>
+
+          <!-- Lab 3: Semantic Reranker -->
+          <article class="lab-pane" data-lab-pane="rerank">
+            <div class="lab-pane-head">
+              <div>
+                <h3>停頓時語意校正：會意 <code>SJ-SR-10-31M</code></h3>
+                <p class="lab-meta-line">約 3,057 萬參數・讀游標前最多 62 字・重排前 8 名・絕不產生新字</p>
+              </div>
+              <div class="seg-group" role="group" aria-label="示範語意校正強度">
+                <button type="button" class="seg-btn" data-setting-rerank="off">關閉</button>
+                <button type="button" class="seg-btn" data-setting-rerank="conservative">保守</button>
+                <button type="button" class="seg-btn is-active" data-setting-rerank="standard">標準（預設）</button>
+                <button type="button" class="seg-btn" data-setting-rerank="aggressive">積極</button>
+              </div>
+            </div>
+            <div class="lab-demo-box">
+              <div class="lab-line"><span>輸入注音：</span><code>ㄨㄛˇ ㄕ ㄇㄧㄢˊ ㄌㄜ˙ ㄧ ㄧㄝˋ</code>（CLI 與 WASM 實測）</div>
+              <div class="lab-rerank-compare">
+                <div class="rerank-col">
+                  <span class="lab-card-label">通語內部前 8 名排序（背景計算，不彈出整句選單）</span>
+                  <ol class="rerank-list" id="lab-rerank-before">
+                    <li>我失眠了一頁（初解第 1 名）</li>
+                    <li>我失眠了一夜（前 8 名候選）</li>
+                  </ol>
+                </div>
+                <div class="rerank-col">
+                  <span class="lab-card-label">停頓原地重排組字區（<span id="lab-rerank-mode-label">標準</span>）</span>
+                  <p class="lab-result" id="lab-rerank-after">我失眠了一夜</p>
+                  <p class="lab-explain" id="lab-rerank-explain">讀入游標前最後 62 個字元後，會意小模型只在既有的前 8 名整句候選之間挑最通順的一句，直接更新組字區底線文字。</p>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- Lab 4: Real-Time Prediction -->
+          <article class="lab-pane" data-lab-pane="prediction">
+            <div class="lab-pane-head">
+              <div>
+                <h3>即時預測：打第一個注音列最多 9 項，按 <kbd>Tab</kbd> 採納</h3>
+                <p class="lab-meta-line">預設：<strong>開</strong>（選單可關）・往回找最多 5 個音節・不擅自替換畫面上的字</p>
+              </div>
+              <div class="seg-group" role="group" aria-label="切換即時預測範例">
+                <button type="button" class="seg-btn is-active" data-lab-pred="0">按 Shift 打「K」（實機）</button>
+                <button type="button" class="seg-btn" data-lab-pred="1">打「今天會議 ㄧˇ」接續</button>
+                <button type="button" class="seg-btn" data-lab-pred="2">打「這個 bug 明天再修」接續</button>
+              </div>
+            </div>
+            <div class="lab-demo-box">
+              <div class="lab-line"><span>已打組字：</span><strong id="lab-pred-input">K（粗底線英文段）</strong><button type="button" class="ctrl-btn" id="lab-pred-tab-btn" aria-pressed="false">模擬按 Tab 進入預測列</button></div>
+              <div class="lab-pred-bar" id="lab-pred-list" data-entered="false">
+                <button type="button" class="cand" data-pred-pick="K線"><b>⇥</b> K線</button>
+                <button type="button" class="cand" data-pred-pick="K歌">K歌</button>
+                <button type="button" class="cand" data-pred-pick="K書">K書</button>
+                <button type="button" class="cand" data-pred-pick="Kd">Kd</button>
+                <button type="button" class="cand" data-pred-pick="Kt">Kt</button>
+                <button type="button" class="cand" data-pred-pick="Kerr">Kerr</button>
+                <span class="pill-chevron" aria-hidden="true"><svg viewBox="0 0 12 12" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.25L6 7.75l3.5-3.5"/></svg></span>
+              </div>
+              <div class="lab-line is-ok"><span>按 <kbd>Tab</kbd> 或點選預測詞：</span><strong id="lab-pred-result">未進入時第一格顯示 ⇥ 且無藍底；按 Tab 進入後才顯示 1–9 與藍底膠囊</strong></div>
+            </div>
+          </article>
+
+          <!-- Lab 5: English Mixed Typing & 82 Hybrid Words -->
+          <article class="lab-pane" data-lab-pane="english">
+            <div class="lab-pane-head">
+              <div>
+                <h3>中英混打免切換・200+ 正式大小寫・82 個中英混合詞・單按 Shift</h3>
+                <p class="lab-meta-line">v0.9.1 預設開：英文留在組字區一起送出；數字列直打；按錯即時 <kbd>Esc</kbd> 退回注音</p>
+              </div>
+            </div>
+            <div class="lab-english-grid">
+              <div class="lab-card">
+                <span class="lab-card-label">200+ 產品與品牌正式大小寫（點試打）</span>
+                <div class="mini-chip-row">
+                  <button type="button" class="chip lab-en-chip" data-en-in="Github" data-en-out="GitHub">Github → GitHub</button>
+                  <button type="button" class="chip lab-en-chip" data-en-in="Chatgpt" data-en-out="ChatGPT">Chatgpt → ChatGPT</button>
+                  <button type="button" class="chip lab-en-chip" data-en-in="Macos" data-en-out="macOS">Macos → macOS</button>
+                  <button type="button" class="chip lab-en-chip" data-en-in="Iphone" data-en-out="iPhone">Iphone → iPhone</button>
+                </div>
+              </div>
+              <div class="lab-card">
+                <span class="lab-card-label">82 個中英混合詞（84 組讀音，v0.9.1 直出）</span>
+                <div class="mini-chip-row">
+                  <button type="button" class="chip lab-en-chip" data-en-in="K + ㄕㄨ" data-en-out="K書">K書</button>
+                  <button type="button" class="chip lab-en-chip" data-en-in="T + ㄒㄩˋ" data-en-out="T恤">T恤</button>
+                  <button type="button" class="chip lab-en-chip" data-en-in="cp + ㄓˊ" data-en-out="CP值">CP值</button>
+                  <button type="button" class="chip lab-en-chip" data-en-in="sim + ㄎㄚˇ" data-en-out="SIM卡">SIM卡</button>
+                  <button type="button" class="chip lab-en-chip" data-en-in="QR + ㄇㄚˇ" data-en-out="QR碼">QR碼</button>
+                  <button type="button" class="chip lab-en-chip" data-en-in="hold + ㄓㄨˋ" data-en-out="hold住">hold住</button>
+                </div>
+              </div>
+            </div>
+            <p class="lab-result" id="lab-en-output">點上方範例看自動轉換結果；單按 Shift 切換中英預設關（可在設定開啟，每個 App 各自記住）。</p>
+          </article>
+
+          <!-- Lab 6: 5 Word Packs -->
+          <article class="lab-pane" data-lab-pane="packs">
+            <div class="lab-pane-head">
+              <div>
+                <h3>五類內建詞包（設定 → 選字 → 詞包）</h3>
+                <p class="lab-meta-line">前四類預設開啟；「經典台詞」預設關閉・開關同步工作台</p>
+              </div>
+            </div>
+            <div class="packs-interactive">
+              <div class="pack-card-row">
+                <label class="toggle-chip"><input type="checkbox" data-setting-pack="acg" checked><span>動漫與遊戲（44,552 詞・預設開）</span></label>
+                <span class="pack-live" data-pack-preview="acg">開啟 → 三角初華／若葉睦／葬送的芙莉蓮</span>
+              </div>
+              <div class="pack-card-row">
+                <label class="toggle-chip"><input type="checkbox" data-setting-pack="it" checked><span>資訊與 AI（1,016 詞・預設開）</span></label>
+                <span class="pack-live" data-pack-preview="it">開啟 → 圖像生成／訓練集／螢幕保護器</span>
+              </div>
+              <div class="pack-card-row">
+                <label class="toggle-chip"><input type="checkbox" data-setting-pack="beauty" checked><span>美妝與保養（539 詞・預設開）</span></label>
+                <span class="pack-live" data-pack-preview="beauty">開啟 → 眉彩膏／細閃／界面活性劑</span>
+              </div>
+              <div class="pack-card-row">
+                <label class="toggle-chip"><input type="checkbox" data-setting-pack="meme" checked><span>迷因與實況用語（139 詞・預設開）</span></label>
+                <span class="pack-live" data-pack-preview="meme">開啟 → 可是瑞凡／計畫通／好耶</span>
+              </div>
+              <div class="pack-card-row">
+                <label class="toggle-chip"><input type="checkbox" data-setting-pack="quote"><span>經典台詞（208 列・預設關）</span></label>
+                <span class="pack-live" data-pack-preview="quote">關閉時不介入；開啟 → 原句與常打說法整句收錄</span>
+              </div>
+            </div>
+          </article>
+
+          <!-- Lab 7: Fuzzy Input & Adjacent Key -->
+          <article class="lab-pane" data-lab-pane="fuzzy">
+            <div class="lab-pane-head">
+              <div>
+                <h3>四組模糊輸入與標準排列鄰鍵打錯容錯</h3>
+                <p class="lab-meta-line">設定預設：<strong>全關</strong>・可於設定 → 選字 → 模糊輸入分別開啟</p>
+              </div>
+            </div>
+            <div class="lab-demo-grid">
+              <div class="lab-card">
+                <label class="toggle-chip"><input type="checkbox" id="lab-fuzzy-toggle" data-setting-bool="fuzzy"><span>開啟四組模糊音（ㄣ/ㄥ・ㄓ/ㄗ・ㄔ/ㄘ・ㄕ/ㄙ）</span></label>
+                <p class="lab-example">打 <code>ㄧㄥ ㄨㄟˋ</code> 或 <code>ㄓ ㄉㄠˋ</code>（打成 <code>ㄗ ㄉㄠˋ</code>）</p>
+                <p class="lab-result" id="lab-fuzzy-result">預設關閉：嚴格區分 ㄣ/ㄥ 與捲舌平舌音。</p>
+              </div>
+              <div class="lab-card">
+                <label class="toggle-chip"><input type="checkbox" id="lab-adj-toggle" data-setting-bool="adjacentKey"><span>開啟鄰鍵打錯容錯（僅標準排列）</span></label>
+                <p class="lab-example">標準排列同一列鄰鍵按偏（例如欲打「奶茶」誤按鄰鍵 <code>ㄋㄞˇ ㄐㄚˊ</code>）</p>
+                <p class="lab-result" id="lab-adj-result">預設關閉：只在開啟時容許標準排列同一列鄰鍵容錯。</p>
+              </div>
+            </div>
+          </article>
+
+          <!-- Lab 8: Selection Memory -->
+          <article class="lab-pane" data-lab-pane="memory">
+            <div class="lab-pane-head">
+              <div>
+                <h3>選字記憶：依前文分開記，絕不污染別句</h3>
+                <p class="lab-meta-line">逐字改選拼出 2–4 字自動成新詞・候選窗按 <kbd>⌘</kbd><kbd>⌫</kbd> 逐詞忘記或一次清除</p>
+              </div>
+              <button type="button" class="ctrl-btn" id="lab-mem-reset">⌘⌫ 清除示範記憶</button>
+            </div>
+            <div class="lab-demo-grid">
+              <div class="lab-card">
+                <span class="lab-card-label">情境 A：前文「來一口」＋ <code>ㄔㄤˊ ㄔㄤˊ</code></span>
+                <p class="lab-result" id="lab-mem-a-out">嚐嚐（或點下方改選）</p>
+                <div class="mini-chip-row">
+                  <button type="button" class="chip" id="lab-mem-pick-taste">在情境 A 改選「嚐嚐」</button>
+                </div>
+              </div>
+              <div class="lab-card">
+                <span class="lab-card-label">情境 B：前文「這家店我以前」＋ <code>ㄔㄤˊ ㄔㄤˊ</code></span>
+                <p class="lab-result" id="lab-mem-b-out">常常（完全不受情境 A 影響）</p>
+                <p class="lab-explain">單字與改選只在緊接相同前文時套用；逐字拼出 2–4 字詞（如人名）會自動記成新詞。</p>
+              </div>
+            </div>
+          </article>
+
+          <!-- Lab 9: Chat/Formal, Tone Sandhi, Punctuation -->
+          <article class="lab-pane" data-lab-pane="profile">
+            <div class="lab-pane-head">
+              <div>
+                <h3>聊天／書面切換、變調與口語讀音、Option 全形標點</h3>
+                <p class="lab-meta-line">聊天參考「常談」・書面看「連文」・變調與口語讀音預設開</p>
+              </div>
+            </div>
+            <div class="lab-demo-grid">
+              <div class="lab-card">
+                <label class="toggle-chip"><input type="checkbox" id="lab-sandhi-toggle" data-setting-bool="toneSandhi" checked><span>變調與口語讀音（預設開）</span></label>
+                <p class="lab-result" id="lab-sandhi-out"><code>ㄨㄛˊ ㄒㄧㄤˇ</code> → 我想・<code>ㄌㄧˋ ˙ㄏㄞ</code> → 厲害・<code>ㄖㄜˋ ㄊㄥ ㄊㄥ</code> → 熱騰騰・<code>ㄋㄟˋ ˙ㄍㄜ</code> → 那個</p>
+              </div>
+              <div class="lab-card">
+                <span class="lab-card-label">標準／倚天排列 ＋ Option 全形標點（v0.9.0 起）</span>
+                <p class="lab-example"><kbd>Option</kbd>＋<kbd>;</kbd> 出「；」・<kbd>Option</kbd>＋<kbd>Shift</kbd>＋<kbd>;</kbd> 出「：」・<kbd>Option</kbd>＋<kbd>[</kbd> 出「「」・<kbd>Option</kbd>＋<kbd>\</kbd> 出「、」</p>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 4: Sticky 3-Layer Local Engine Breakdown (Demo D Choreography) -->
+  <section id="story" class="section story-section" aria-labelledby="story-heading">
+    <div class="container">
+      <div class="section-head">
+        <h2 id="story-heading">三層本機引擎，跟著每一鍵接力選字</h2>
+        <p class="section-sub">7 個本機模型與詞庫全部隨 App 內附。每一鍵先用詞庫與語言模型解出整句，停頓時再讓 3,057 萬參數小模型看前文重排；改選只留在本機。</p>
+      </div>
+
+      <div class="story-grid">
+        <!-- Left Sticky Live Engine Stage -->
+        <aside class="story-stage-col" aria-label="三層引擎即時示範舞台">
+          <div class="sticky-stage">
+            <div class="stage-tabs" role="tablist" aria-label="跳轉引擎步驟">
+              <button type="button" class="stage-tab is-active" role="tab" aria-selected="true" data-stage-tab="1">1 / 整句解碼</button>
+              <button type="button" class="stage-tab" role="tab" aria-selected="false" data-stage-tab="2">2 / 語意校正</button>
+              <button type="button" class="stage-tab" role="tab" aria-selected="false" data-stage-tab="3">3 / 選字記憶</button>
+            </div>
+
+            <div class="macos-stage">
+              <div class="macos-chrome">
+                <span class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span class="chrome-title" data-stage-chrome-title>步驟 1・每一鍵 1.9 ms 整句解碼</span>
+                <span class="chrome-pill">BopoMola 0.9.1</span>
+              </div>
+
+              <!-- Stage Panel 1 -->
+              <div class="stage-view is-active" data-stage-view="1">
+                <div class="stage-context-line">
+                  <span class="ctx-label">游標前文（最多 64 字）</span>
+                  <span class="ctx-body">這家店快打烊了，</span>
+                </div>
+                <div class="stage-compose-box">
+                  <span class="compose-committed">今天先回家，下次</span><span class="compose-active">再來吃</span>
+                  <span class="compose-bopomofo">ㄗㄞˋ ㄌㄞˊ ㄔ・核心內部前 64 名整句評分（背景計算，直接更新組字底線）</span>
+                </div>
+                <div class="stage-candidates">
+                  <div class="cand-item is-winner">
+                    <span class="cand-num">1</span>
+                    <span class="cand-word">再來吃</span>
+                    <span class="cand-score">通語＋前文勝出</span>
+                  </div>
+                  <div class="cand-item">
+                    <span class="cand-num">2</span>
+                    <span class="cand-word">在來吃</span>
+                    <span class="cand-score">候選 #2</span>
+                  </div>
+                  <div class="cand-item">
+                    <span class="cand-num">3</span>
+                    <span class="cand-word">載來吃</span>
+                    <span class="cand-score">候選 #3</span>
+                  </div>
+                </div>
+                <div class="stage-telemetry">
+                  <span>模型：<code>SJ-LM-7-9.7M</code>（9,709,510 組搭配）</span>
+                  <span class="tel-badge">p95 1.9 ms／鍵・前 64 名候選</span>
+                </div>
+              </div>
+
+              <!-- Stage Panel 2 -->
+              <div class="stage-view" data-stage-view="2">
+                <div class="stage-context-line is-highlighted">
+                  <span class="ctx-label">語意校正讀取前文（最多 62 字）</span>
+                  <span class="ctx-body">剛剛約好週末去鹿港吃晚餐，這家店下次</span>
+                </div>
+                <div class="stage-compose-box">
+                  <span class="compose-committed">一定要</span><span class="compose-active">再來吃</span>
+                  <span class="compose-bopomofo">會意背景重排內部前 8 名・直接原地更新組字區，不彈出整句選單</span>
+                </div>
+                <div class="stage-candidates">
+                  <div class="cand-item is-promoted">
+                    <span class="cand-num">2 → 1</span>
+                    <span class="cand-word">再來吃</span>
+                    <span class="cand-score">前文「下次…」語意更順</span>
+                  </div>
+                  <div class="cand-item is-demoted">
+                    <span class="cand-num">1 → 2</span>
+                    <span class="cand-word">在來吃</span>
+                    <span class="cand-score">重排後讓位</span>
+                  </div>
+                </div>
+                <div class="stage-telemetry">
+                  <span>模型：<code>SJ-SR-10-31M</code>（約 3,057 萬參數）</span>
+                  <span class="tel-badge">背景執行・保守／標準／積極可關</span>
+                </div>
+              </div>
+
+              <!-- Stage Panel 3 -->
+              <div class="stage-view" data-stage-view="3">
+                <div class="stage-context-line">
+                  <span class="ctx-label">同前文限定記憶</span>
+                  <span class="ctx-body">前文「這家店」＋ 改選紀錄</span>
+                </div>
+                <div class="stage-compose-box">
+                  <span class="compose-committed">這家店的</span><span class="compose-active">常客</span>
+                  <span class="compose-bopomofo">逐字改選拼出的 2–4 字詞自動學成新詞</span>
+                </div>
+                <div class="stage-memory-rules">
+                  <div class="mem-row">
+                    <span><strong>只在前文相同時套用</strong>：單字改選不會污染其他句子。</span>
+                  </div>
+                  <div class="mem-row">
+                    <span><strong>可逐詞忘記或清除</strong>：候選窗按 <kbd>⌘</kbd><kbd>⌫</kbd> 即忘記反白的詞。</span>
+                  </div>
+                </div>
+                <div class="stage-telemetry">
+                  <span>除了檢查更新，善解不連網</span>
+                  <span class="tel-badge">只存在這台 Mac</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- Right Editorial Story Chapters -->
+        <div class="story-steps">
+          <article class="story-step is-active" data-step="1" id="step-1">
+            <h3><span class="step-index">01</span>每一鍵：1.9 ms 整句解碼</h3>
+            <p class="step-lead">詞庫列出每一段可能的詞，語言模型「通語」<code>SJ-LM-7-9.7M</code> 依 9,709,510 組詞搭配算出整句分數，產生前 64 名整句候選。</p>
+            <ul class="step-specs">
+              <li><strong>讀游標前最多 64 字</strong>：接著你已經送出的前文選第一個詞，同一行出現過的詞再打同音詞時優先寫同一個字（前文重現）。</li>
+              <li><strong>讀音與字形並看</strong>：每個字也計算讀成你打的音的機率，即使語意校正關著也生效。</li>
+              <li><strong>穩定極快</strong>：開發集重播 8,336 鍵實測，聊天每鍵 p95 1.91 ms、書面 1.93 ms。</li>
+            </ul>
+            <div class="step-mini-diagram" aria-hidden="true">
+              <div class="mini-line"><span>輸入</span><code>我在路上，下次 ㄗㄞˋ ㄌㄞˊ ㄔ</code></div>
+              <div class="mini-line is-ok"><span>第 1 名</span><strong>我在路上，下次再來吃</strong>（1.9 ms）</div>
+            </div>
+          </article>
+
+          <article class="story-step" data-step="2" id="step-2">
+            <h3><span class="step-index">02</span>停頓時：語意校正</h3>
+            <p class="step-lead">打完字稍微停頓或準備送出時，約 3,057 萬參數的小型字元語言模型「會意」<code>SJ-SR-10-31M</code> 在背景看更長的前文重排。</p>
+            <ul class="step-specs">
+              <li><strong>讀游標前最多 62 字</strong>：把句子前面語境帶進來，判斷哪一句最自然。</li>
+              <li><strong>只在前 8 名間重排</strong>：絕不憑空生出沒打過的字，有把握才把第 2 名換到第 1 名。</li>
+              <li><strong>不拖慢打字・強度可調</strong>：背景執行不阻塞按鍵；設定視窗可選保守、標準（預設）、積極，也能完全關閉。</li>
+            </ul>
+            <div class="step-mini-diagram" aria-hidden="true">
+              <div class="mini-line"><span>會意重排</span><code>前 8 名候選（讀前文 62 字）</code></div>
+              <div class="mini-line is-ok"><span>2 → 1</span><strong>前文更通順才換掉第一名</strong></div>
+            </div>
+          </article>
+
+          <article class="story-step" data-step="3" id="step-3">
+            <h3><span class="step-index">03</span>改選時：記住，但不出這台 Mac</h3>
+            <p class="step-lead">你在候選窗的每一次改選、從預測列選的詞，善解只會依前文記在這台 Mac 自己的資料夾。</p>
+            <ul class="step-specs">
+              <li><strong>單字只同前文套用</strong>：單字改選只在緊接相同前文時套用，不會因為改了一次就污染所有句子。</li>
+              <li><strong>逐字拼出自動學新詞</strong>：你逐字改選拼出的 2–4 字詞會學成新詞，下次整段直接打得出來。</li>
+              <li><strong>隨時可忘記・可清除</strong>：候選窗按 <kbd>⌘</kbd><kbd>⌫</kbd> 忘記單詞，或由選單一次全部清除；除了檢查更新，善解不連網。</li>
+            </ul>
+            <div class="step-mini-diagram" aria-hidden="true">
+              <div class="mini-line"><span>記憶規則</span><code>單字限同前文・2–4 字拼出成詞</code></div>
+              <div class="mini-line is-ok"><span>隱私邊界</span><strong>除了檢查更新，善解不連網</strong></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 5: Verified Benchmark Monuments + 7 Local Models Table -->
+  <section class="section benchmark-section" id="benchmarks" aria-labelledby="benchmarks-heading">
+    <div class="container">
+      <div class="section-head">
+        <h2 id="benchmarks-heading">公開實測數據與 7 個本機模型</h2>
+        <p class="section-sub">錯一個字整句就算錯，以下全為 v0.9.1 出貨設定實測（「她／他」「臺／台」寫法視為相同）。</p>
+      </div>
+
+      <div class="monuments" aria-label="v0.9.1 實測基準數字">
+        <div class="monument">
+          <div class="monument-num">95.0%</div>
+          <div class="monument-label">開發集 dev302 整句正確</div>
+          <p class="monument-detail">聊天設定 95.0%（287／302 句），書面設定 95.7%（289／302 句）。</p>
+        </div>
+        <div class="monument">
+          <div class="monument-num">90.0%／87.3%</div>
+          <div class="monument-label">保留集口語／新聞各 150 句</div>
+          <p class="monument-detail">開發時不看內容、僅於發版前量一次。口語（聊天）135／150 句、新聞（書面）131／150 句。</p>
+        </div>
+        <div class="monument">
+          <div class="monument-num">1.9 ms</div>
+          <div class="monument-label">每個按鍵處理時間（p95）</div>
+          <p class="monument-detail">重播 8,336 鍵實測聊天 1.91 ms、書面 1.93 ms；引擎記憶體（RSS）約 496 MB。</p>
+        </div>
+      </div>
+
+      <div class="sub-metrics-row">
+        <div class="sub-metric">
+          <span class="sub-metric-val">97.4%</span>
+          <span class="sub-metric-desc">打字測驗（76 句）：聊天與書面皆為 74／76 句整句正確</span>
+        </div>
+        <div class="sub-metric">
+          <span class="sub-metric-val">88.8%／91.3%</span>
+          <span class="sub-metric-desc">使用者回報錯字（80 句）：聊天 71／80 句、書面 73／80 句</span>
+        </div>
+      </div>
+
+      <div class="models-block">
+        <h3>隨 App 內附的 7 個本機模型</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>名稱</th>
+                <th>代號</th>
+                <th>用途</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>通語</td>
+                <td><code>SJ-LM-7-9.7M</code></td>
+                <td>語言模型：詞與詞兩兩搭配的頻率（9,709,510 組）</td>
+              </tr>
+              <tr>
+                <td>辨類</td>
+                <td><code>SJ-WC-6-512C</code></td>
+                <td>詞類表：兩個詞沒一起出現過時，用「哪類詞後面常接哪類詞」補估計</td>
+              </tr>
+              <tr>
+                <td>承接</td>
+                <td><code>SJ-KN-2-397K</code></td>
+                <td>Kneser–Ney 平滑：看一個詞接在幾種不同的詞後面</td>
+              </tr>
+              <tr>
+                <td>連文</td>
+                <td><code>SJ-CX-2-7.7M</code>、<code>SJ-CX-2-950K</code></td>
+                <td>前兩個詞接下一個詞（三元表），書面與聊天各一張</td>
+              </tr>
+              <tr>
+                <td>會意</td>
+                <td><code>SJ-SR-10-31M</code></td>
+                <td>語意校正：約 3,057 萬參數小型字元語言模型，背景重排前 8 名</td>
+              </tr>
+              <tr>
+                <td>常談</td>
+                <td><code>SJ-CL-2-69K</code></td>
+                <td>口語詞頻表，聊天設定用</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="section-link"><a href="/how#measure">看完整實測數字、模型授權與防背題目方法 →</a></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Section 6: Install (Installer vs Homebrew 2-Line) + FAQ + Privacy Seal -->
+  <section class="section install-section" id="install" aria-labelledby="install-heading">
+    <div class="container">
+      <div class="section-head">
+        <h2 id="install-heading">兩種安裝方式</h2>
+        <p class="section-sub">需要 macOS 26（Tahoe）以上與 Apple 晶片。兩種方式擇一，升級不會動到選字記憶。</p>
+      </div>
+
+      <div class="install-grid">
+        <div class="install-panel">
+          <div class="panel-top">
+            <h3>安裝程式</h3>
+            <span class="badge-rec">推薦・圖形介面四步驟</span>
+          </div>
+          <p>從 GitHub Releases 下載 <code>shanjie-installer</code> 開頭的 zip，打開「安裝善解輸入法」照歡迎、安裝、加入輸入方式、試打四步完成。</p>
+          <p class="install-note">可選「這台 Mac」（密碼管理器或終端機開著安全輸入時也照常能用）或「只有我的帳號」。</p>
+          <div class="panel-actions">
+            <a class="btn btn-primary" href="/install#download">下載 v0.9.1 安裝程式</a>
+            <a class="text-link" href="/install">完整安裝與解除步驟 →</a>
+          </div>
+        </div>
+
+        <div class="install-panel">
+          <div class="panel-top">
+            <h3>Homebrew</h3>
+            <span class="badge-sub">兩行指令安裝並啟用</span>
+          </div>
+          <p>習慣用終端機管理軟體的話，安裝到目前帳號並向系統註冊啟用輸入方式：</p>
+          <div class="code-row">
+            <pre id="brew-two-line"><code>brew install --cask nanako0129/tap/shanjie
+"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install</code></pre>
+            <button type="button" class="btn btn-secondary copy-btn" data-copy='brew install --cask nanako0129/tap/shanjie
+"$HOME/Library/Input Methods/善解輸入法.app/Contents/MacOS/shanjie" install'>
+              <span class="copy-label">複製兩行指令</span>
+            </button>
+          </div>
+          <p class="install-note">結束碼是 3 時，到「系統設定 → 鍵盤 → 輸入方式」按「+」，在「繁體中文」加入「善解輸入法」。</p>
+        </div>
+      </div>
+
+      <div class="recent-block" id="recent">
+        <div class="recent-head">
+          <h3>最近</h3>
+          <a class="text-link" href="/updates">完整更新紀錄 →</a>
+        </div>
+        <ul class="recent-list">
+          <li><a href="https://github.com/Nanako0129/shanjie/releases/tag/vchewing-dict-1">唯音辭典</a>：給唯音輸入法（vChewing）用的辭典檔，條目全部從善解的詞庫與模型轉出來，在 GitHub Release 下載（CC BY-SA 4.0）；合作經過見 <a href="https://github.com/Nanako0129/shanjie/issues/143">issue #143</a>。</li>
+          <li><a href="/updates#v0.9.1">v0.9.1</a>・<time datetime="2026-11-25">2026-11-25</time>：電腦很忙時語意校正不再跟不上打字；口語的輕聲與疊字讀法照唸的打也會出對的詞；英文字母接中文的詞（K書、T恤、CP值）直接打得出來；在 Orca 裡打字的前文改成和其他終端機一樣。</li>
+          <li><a href="/updates#v0.9.0">v0.9.0</a>・<time datetime="2026-11-23">2026-11-23</time>：語意校正換成讀得到較長前文的新模型；照實際唸法打的三聲變調也會出對的詞；預設設定下也打得出常見的英文；Option 加符號鍵照蘋果注音打出全形字與中文標點；修正照平常唸法打卻選出罕用字的錯（例如「他啦」）。</li>
+          <li><a href="/updates#v0.8.0">v0.8.0</a>・<time datetime="2026-11-17">2026-11-17</time>：選字會參考游標前已經打出來的字，加上迷因與實況用語詞包、英文寫成正式的大小寫與中英混合詞、有新版本時發系統通知；切換詞包不再讓輸入法停住。</li>
+        </ul>
+      </div>
+
+      <div class="faq-block" id="faq">
+        <h3>常見問題</h3>
+        <div class="faq-list">
+          <details class="faq-item">
+            <summary>和 macOS 內建注音、傳統詞頻注音輸入法差在哪裡？</summary>
+            <div class="faq-body">
+              <p>傳統以詞頻為主的注音輸入法多半只看當前組字區裡的這一段；善解輸入法（BopoMola）則以「看前文整句解碼＋本機背景重排＋依前文記憶」三層接力處理同音字：</p>
+              <ul>
+                <li><strong>讀取游標前文與前文重現</strong>：每按一鍵就在本機用「通語」語言模型（<code>SJ-LM-7-9.7M</code>）重算整句，並讀取同一行游標前最多 64 個已送出的字（終端機含 Orca 僅讀緊接 2 個漢字；密碼欄不讀前文），同時讓同一行前面出現過的詞在後文打同音詞時維持一致寫法。</li>
+                <li><strong>停頓時本機小模型重排</strong>：停頓或送出前，約 3,057 萬參數的字元語言模型「會意」（<code>SJ-SR-10-31M</code>）在背景讀取游標前最多 62 個字元，從既有的前 8 名候選之間挑最通順的一句，絕不產生沒打過的新字。</li>
+                <li><strong>依前文分開的選字記憶</strong>：候選窗改選過的單字只在前文完全相同時才會套用，不會改選一次就影響其他句子；逐字改選拼出的 2–4 字詞會學成新詞，隨時可按 <kbd>⌘</kbd><kbd>⌫</kbd> 忘記。</li>
+                <li><strong>原生中英混打與開源本機執行</strong>：同一組字區直接支援中英混打、200 多個產品與品牌的正式大小寫、82 個中英混合詞（免切換輸入法），並內建五類詞包與「變調與口語讀音」。整個引擎採 Apache-2.0 開源授權，7 個模型皆在本機執行；除了檢查更新，善解不連網。</li>
+              </ul>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>選單裡找不到善解，或更新後某個 App 打不出字怎麼辦？</summary>
+            <div class="faq-body">
+              <p>到「系統設定 → 鍵盤 → 輸入方式」按「+」，選「繁體中文」裡的「善解輸入法」加入；第一次安裝給「這台 Mac」時要先登出再登入一次。若更新後單一 App 無法打字，把該 App 完全結束（<kbd>⌘</kbd><kbd>Q</kbd>）再重開即可。</p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>為什麼有時善解會反灰，只剩 ABC 能用？</summary>
+            <div class="faq-body">
+              <p>有程式開啟「安全輸入」（例如密碼欄、密碼管理器或終端機的加密鍵盤輸入）時，macOS 會暫時停用個人帳號下的輸入法，離開密碼欄即恢復。若希望安全輸入時也能照常使用，可用安裝程式重裝並選擇「這台 Mac」。</p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>改選過一次某個字，之後會一直被那個字搶走嗎？</summary>
+            <div class="faq-body">
+              <p>不會。選字記憶依前文分開記錄，單字只在前文完全相同時才會套用。在候選窗選到不想要的記憶詞按 <kbd>⌘</kbd><kbd>⌫</kbd> 就能逐詞忘記，也可在輸入選單執行「清除選字記憶…」。</p>
+            </div>
+          </details>
+
+          <details class="faq-item">
+            <summary>可以關掉語意校正或即時預測嗎？</summary>
+            <div class="faq-body">
+              <p>可以。即時預測與語意校正都能在輸入選單或設定視窗裡關閉；語意校正另外提供保守、標準、積極三段強度可以調整。</p>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <div class="privacy-seal-card" role="region" aria-labelledby="privacy-heading">
+        <img class="closing-seal" src="/assets/shanjie-icon-128.png" alt="善解輸入法 Liquid Glass「解」字印章" width="76" height="76" decoding="async">
+        <div class="privacy-seal-body">
+          <div class="privacy-eyebrow">
+            <h3 id="privacy-heading">善解，所以選對。</h3>
+            <span class="mola-companion-tag">
+              <svg class="mola-mark" viewBox="0 0 64 64" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M51 30 C49 21.5 40 17.5 31 17.5 C29.5 11.5 26.5 6 22 6 C19.5 6 18.5 12 18.5 18.5 C14 20.5 13.5 24 16.5 26 C12.5 28 12.5 32 16.5 34 C13.5 36 14 39.5 18.5 41.5 C18.5 48 19.5 53.5 22 53.5 C26.5 53.5 29.5 48 31 42.5 C40 42.5 49 38.5 51 30 Z" />
+                <path d="M34 28.5 C38 28 38.5 33.5 33.5 34" />
+                <circle cx="43.5" cy="27" r="1.5" fill="currentColor" stroke="none" />
+                <path d="M12 57.5 Q19 55.2 26 57.5 T40 57.5 T52 57.5" />
+                <path d="M18 61.5 Q24.5 59.5 31 61.5 T44 61.5" />
+              </svg>
+              <span>BopoMola</span>
+            </span>
+          </div>
+          <p>除了檢查更新，善解不連網。你打的字不寫進任何日誌；選字記憶只存在這台 Mac，可以逐詞忘記或全部清除。</p>
+        </div>
+        <div class="privacy-seal-actions">
+          <a class="btn btn-primary" href="/install#download">下載 v0.9.1</a>
+          <a class="btn btn-secondary" href="/privacy">隱私與資料</a>
+        </div>
+      </div>
+    </div>
+  </section>
 </main>
-<footer class="site-foot"><div class="in">
-  <nav aria-label="其他頁面"><a href="/paper">論文</a><a href="/faq">常見問題</a><a href="/roadmap">路線圖</a><a href="/privacy">隱私與資料</a><a href="/licenses">開源與授權</a><a href="https://github.com/Nanako0129/shanjie">GitHub</a><a href="https://www.patreon.com/cw/Nanako0129/membership">贊助</a></nav>
-  <span>善解輸入法・最後更新：<time datetime="2026-11-23">2026-11-23</time></span>
-</div></footer>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <nav class="footer-links" aria-label="頁尾導覽">
+      <a href="/how">怎麼選字</a>
+      <a href="/install">安裝</a>
+      <a href="/guide">使用說明</a>
+      <a href="/updates">更新紀錄</a>
+      <a href="/paper">論文</a>
+      <a href="/faq">常見問題</a>
+      <a href="/roadmap">路線圖</a>
+      <a href="/privacy">隱私與資料</a>
+      <a href="/licenses">開源與授權</a>
+      <a href="https://github.com/Nanako0129/shanjie">GitHub</a>
+      <a href="https://www.patreon.com/cw/Nanako0129/membership">贊助</a>
+    </nav>
+    <p class="footer-meta">
+      <span class="footer-colophon">
+        <svg class="mola-mark" viewBox="0 0 64 64" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M51 30 C49 21.5 40 17.5 31 17.5 C29.5 11.5 26.5 6 22 6 C19.5 6 18.5 12 18.5 18.5 C14 20.5 13.5 24 16.5 26 C12.5 28 12.5 32 16.5 34 C13.5 36 14 39.5 18.5 41.5 C18.5 48 19.5 53.5 22 53.5 C26.5 53.5 29.5 48 31 42.5 C40 42.5 49 38.5 51 30 Z" />
+          <path d="M34 28.5 C38 28 38.5 33.5 33.5 34" />
+          <circle cx="43.5" cy="27" r="1.5" fill="currentColor" stroke="none" />
+          <path d="M12 57.5 Q19 55.2 26 57.5 T40 57.5 T52 57.5" />
+          <path d="M18 61.5 Q24.5 59.5 31 61.5 T44 61.5" />
+        </svg>
+        <span>善解輸入法（BopoMola）・台灣東岸曼波魚 <em>Mola mola</em></span>
+      </span>
+      <span aria-hidden="true">・</span>
+      <span>v0.9.1・Apache-2.0・最後更新：<time datetime="2026-11-28">2026-11-28</time></span>
+    </p>
+  </div>
+</footer>
+
+<!-- Swappable decoder hook: window.ShanjieEngine.decode(keys, { context, settings }) & setBackend(fn), ready for future browser WASM cdylib without wasm-bindgen-cli -->
+<script src="/engine-data.js" defer></script>
+<script src="/engine.js" defer></script>
+<script src="/wasm/shanjie-wasm-adapter.js" defer></script>
+<script src="/home.js" defer></script>
 </body>
 </html>
