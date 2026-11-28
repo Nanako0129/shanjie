@@ -19,7 +19,12 @@ column (EntryType 5) and the Traditional ones from the third (6), and a contextu
 only in Traditional mode. With the flag, every word and every contextual entry also gets its Simplified form, converted word by
 word with OpenCC's TSPhrases.txt (longest match) and TSCharacters.txt (Apache-2.0; hash-checked, read from --opencc-dir; the
 tables are not in the repo). Without it the output is byte-for-byte what it was. --vendor TEXT writes one meta unigram
-(key _VENDOR, value TEXT, score 0, typeID 2).
+(key _VENDOR, value TEXT, score 0, typeID 2). --build-meta writes _BUILD_TIMESTAMP (the data commit's committer time, seconds) and
+_COMMIT_HASH (its full SHA) the same way; both need --shanjie-root to be a clean git work tree.
+
+vChewing 5.1.0 takes a third-party dictionary with only the meta (2), Simplified (5) and Traditional (6) tables and falls back to
+its built-in dictionary table by table for the rest. A build without --base-txtmap therefore exits 2 when its output has a line of any other
+typeID or a DEFAULT_PROB_ header (docs/spec/vanguard-textmap.md section 2.3).
 
 --compare-factory PATH (the user's own vChewing factory dictionary; it is only read) counts line categories in that file and in the
 output and exits 2 when a category the factory file has is absent from the output and not in FACTORY_ABSENT_OK; see
@@ -39,7 +44,7 @@ License, version 1.0 (政府資料開放授權條款第 1 版; name layer, IT pa
 notices and credits to keep are the ones in each row of LICENSES/data.md. The companion files that --out-dict
 copies belong to vChewing, not to Shanjie, and are copied only from the directory the user passes.
 
-Reproduce the released file (output sha256 7f5d0a92...0d130, 620,219 entries, 478,784 keys): take this file from
+Reproduce the first version (vchewing-dict-1, withdrawn; output sha256 7f5d0a92...0d130, 620,219 entries, 478,784 keys): take this file from
 a checkout that has it, open a second worktree of data commit 1a9899ac (git worktree add --detach <path> 1a9899ac)
 whose data/lm/ matches that commit's data/*.sha256, and run, with <out> outside every repo work tree:
 
@@ -90,13 +95,18 @@ OPENCC_SHA256 = {
     "TSCharacters.txt": "9ff46a7d30e5765375eb13d33f2b03a34d298913caf2b120380679f33ae1642d",
 }
 VENDOR_KEY = "_VENDOR"
+BUILD_TIMESTAMP_KEY = "_BUILD_TIMESTAMP"
+COMMIT_HASH_KEY = "_COMMIT_HASH"
 META_TYPE_ID = 2
+# vChewing 5.1.0 (3rdPartyBuildToolCompliance.md section 4): a third-party dictionary provides only these tables; every other table
+# must have zero grams so the built-in one answers.
+THIRD_PARTY_TYPE_IDS = frozenset({2, 5, 6})
 # --compare-factory: categories (labels as count_categories writes them) the output may lack although the factory file has them. One line
 # per entry with the reason in docs/spec/vanguard-textmap.md section 8.3; a test keeps the two lists equal.
 FACTORY_ABSENT_OK = frozenset({
     "A typeID 7", "A typeID 9", "A typeID 10", "A typeID 11",
     "C typeID 8",
-    "meta key _BUILD_TIMESTAMP", "meta key _NORM",
+    "meta key _NORM",
     "header key DEFAULT_PROB_7", "header key DEFAULT_PROB_9", "header key DEFAULT_PROB_10", "header key DEFAULT_PROB_11",
 })
 _SECTION_HEADER = "#PRAGMA:VANGUARD_HOMA_LEXICON_HEADER"
@@ -947,6 +957,17 @@ def compare_factory(factory_path: str, ours_path: str) -> tuple[str, list[str]]:
     return "\n".join(rows), missing
 
 
+def check_third_party_tables(path: str) -> None:
+    """Exit 2 when the file has a line of a typeID outside THIRD_PARTY_TYPE_IDS or a DEFAULT_PROB_ header key."""
+    bad = []
+    for lab in count_categories(path, "output"):
+        last = lab.rpartition(" ")[2]
+        if lab.startswith("header key DEFAULT_PROB_") or (lab[0] in "ACD" and int(last) not in THIRD_PARTY_TYPE_IDS):
+            bad.append(lab)
+    if bad:
+        die("output has tables vChewing 5.1.0 takes from its built-in dictionary: " + ", ".join(sorted(bad)))
+
+
 def assemble_companion_files(companion_dir: str, out_dict: str) -> list[str]:
     if not os.path.isdir(companion_dir):
         raise FileNotFoundError(f"companion dir not found: {companion_dir}")
@@ -1317,13 +1338,25 @@ def build_textmap(args: argparse.Namespace) -> dict:
     t_start = time.perf_counter()
     packs = parse_packs(args.packs)
     # Base mode copies an existing file's lines and has no Simplified or meta step: refuse the flags rather than ignore them.
-    if args.base_txtmap and (args.simplified or args.vendor is not None):
-        die("--simplified and --vendor are not supported together with --base-txtmap")
+    if args.base_txtmap and (args.simplified or args.vendor is not None or args.build_meta):
+        die("--simplified, --vendor and --build-meta are not supported together with --base-txtmap")
     if args.vendor is not None:
         try:
             validate_bare_value(args.vendor)
         except ValueError as e:
             die(f"--vendor: {e}")
+    meta_lines: dict[str, str] = {}
+    if args.vendor is not None:
+        meta_lines[VENDOR_KEY] = f"{args.vendor}\t0\t{META_TYPE_ID}"
+    if args.build_meta:
+        # The data commit's own time, not the build time, so the same data rebuilds to the same bytes.
+        head = _git(args.shanjie_root, "rev-parse", "HEAD")
+        if head is None:
+            die("--build-meta needs --shanjie-root to be the top of a git work tree")
+        if _git(args.shanjie_root, "status", "--porcelain", "--untracked-files=no"):
+            die("--build-meta: --shanjie-root has uncommitted changes to tracked files")
+        meta_lines[BUILD_TIMESTAMP_KEY] = f"{BUILD_TIMESTAMP_KEY}\t{int(_git(args.shanjie_root, 'log', '-1', '--format=%ct'))}\t{META_TYPE_ID}"
+        meta_lines[COMMIT_HASH_KEY] = f"{head}\t0\t{META_TYPE_ID}"
     t2s = make_t2s(*load_opencc(args.opencc_dir)) if args.simplified else None
     if args.compare_factory and not os.path.isfile(args.compare_factory):
         die(f"--compare-factory file not found: {os.path.basename(args.compare_factory)}")
@@ -1807,8 +1840,7 @@ def build_textmap(args: argparse.Namespace) -> dict:
         chs_by_reading[reading][value].append((ctx_tuple, prob))
 
     key_set = set(uni_final.keys()) | set(ctx_by_reading.keys())
-    if args.vendor is not None:
-        key_set.add(VENDOR_KEY)
+    key_set |= meta_lines.keys()
     all_keys = sorted(key_set, key=lambda k: k.encode("utf-8"))
 
     value_lines: list[str] = []
@@ -1820,8 +1852,8 @@ def build_textmap(args: argparse.Namespace) -> dict:
 
     for reading in all_keys:
         start_line = len(value_lines)
-        if reading == VENDOR_KEY:
-            value_lines.append(f"{args.vendor}\t0\t{META_TYPE_ID}")
+        if reading in meta_lines:
+            value_lines.append(meta_lines[reading])
 
         # Unigrams: Format B grouped by descending rounded score
         u_entries = uni_final.get(reading)
@@ -1885,6 +1917,8 @@ def build_textmap(args: argparse.Namespace) -> dict:
             f.write("\n")
     t_ser = time.perf_counter() - t0
 
+    check_third_party_tables(txtmap_path)
+
     # 8. Strict self-validation
     t0 = time.perf_counter()
     if args.validate:
@@ -1916,6 +1950,7 @@ def build_textmap(args: argparse.Namespace) -> dict:
         "extra_unigram_added": uni_added,
         "contextual_total_entries": len(contextual_entries),
         "contextual_lines": contextual_line_count,
+        "meta_lines": meta_lines,
         "chs_contextual_entries": len(chs_entries),
         "chs_contextual_lines": chs_contextual_line_count,
         "copied_companions": copied_companions,
@@ -1962,6 +1997,7 @@ def make_parser() -> argparse.ArgumentParser:
     ap.add_argument("--simplified", action="store_true", help="Also write the Simplified column (EntryType 5) and typeID 5 contextual lines, converted with OpenCC TSPhrases/TSCharacters from --opencc-dir")
     ap.add_argument("--opencc-dir", default=default_opencc_dir(), help="Folder with OpenCC TSPhrases.txt and TSCharacters.txt, sha256-checked (default $SHANJIE_CACHE/sources/opencc)")
     ap.add_argument("--vendor", default=None, help="Write one meta unigram: key _VENDOR, value TEXT, score 0, typeID 2")
+    ap.add_argument("--build-meta", action="store_true", help="Write meta unigrams _BUILD_TIMESTAMP (data commit's committer time) and _COMMIT_HASH (its SHA); --shanjie-root must be a clean git work tree")
     ap.add_argument("--compare-factory", default=None, help="The user's own vChewing VanguardFactoryDict4Typing.txtMap: after writing, compare line categories with the output and exit 2 when the output lacks one the factory file has (except FACTORY_ABSENT_OK)")
     ap.add_argument("--base-txtmap", default=None, help="Existing TextMap 2.0 file: skip the Shanjie build, apply only --extra-ngrams overrides (other build flags ignored)")
 

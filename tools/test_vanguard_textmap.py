@@ -46,7 +46,7 @@ EXTRAS = [  # reading, value, context, prob
 
 SYN_PHRASES = "# synthetic OpenCC table\n世界線\t世界线\n"
 SYN_CHARS = "# synthetic OpenCC table\n綫\t线\n線\t线 綫\n牀\t床\n佔\t占\n"
-VENDOR = "BOPOMOLA_善解輸入法"
+VENDOR = "BopoMola_善解輸入法"
 
 
 def make_opencc(base):
@@ -60,6 +60,16 @@ def make_opencc(base):
             f.write(raw)
         shas[name] = hashlib.sha256(raw).hexdigest()
     return d, shas
+
+
+def git_repo(root):
+    """Commit everything under root as a throwaway git repo; returns (git argv prefix, HEAD sha, committer time)."""
+    git = ["git", "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"]
+    subprocess.run([*git, "init", "-q"], check=True, capture_output=True)
+    subprocess.run([*git, "add", "-A"], check=True, capture_output=True)
+    subprocess.run([*git, "commit", "-q", "--no-verify", "-m", "x"], check=True, capture_output=True)
+    out = lambda *a: subprocess.run([*git, *a], check=True, capture_output=True, text=True).stdout.strip()
+    return git, out("rev-parse", "HEAD"), out("log", "-1", "--format=%ct")
 
 
 def build_in_process(root, out_txtmap, opencc_dir, shas, *extra):
@@ -342,9 +352,98 @@ class SimplifiedTests(unittest.TestCase):
             self.assertFalse(os.path.exists(out))
 
 
+class ThirdPartyTablesAndBuildMeta(unittest.TestCase):
+    """vChewing 5.1.0: only tables 2, 5, 6 are provided (the rest fall back to the built-in dictionary); --build-meta writes the build meta lines."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = os.path.realpath(self.tmp.name)
+        self.root = make_root(self.base)
+        self.git, self.sha, self.ct = git_repo(self.root)
+        self.folder, self.shas = make_opencc(self.base)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def build(self, name, *extra):
+        out = os.path.join(self.base, name)
+        stats = build_in_process(self.root, out, self.folder, self.shas, *extra)
+        return out, stats
+
+    def test_build_meta_writes_the_two_lines_and_keys_and_rebuilds_byte_identical(self):
+        out, stats = self.build("a.txtMap", "--simplified", "--vendor", VENDOR, "--build-meta")
+        m = read_map(out)
+        self.assertEqual(list(m)[:3], ["_BUILD_TIMESTAMP", "_COMMIT_HASH", "_VENDOR"])
+        self.assertEqual(m["_BUILD_TIMESTAMP"], [f"_BUILD_TIMESTAMP\t{self.ct}\t2"])
+        self.assertEqual(m["_COMMIT_HASH"], [f"{self.sha}\t0\t2"])
+        self.assertEqual(m["_VENDOR"], [f"{VENDOR}\t0\t2"])
+        self.assertEqual(len(self.sha), 40)
+        self.assertTrue(stats["validated"])
+        self.assertNotIn("_NORM", m)
+        again, _ = self.build("b.txtMap", "--simplified", "--vendor", VENDOR, "--build-meta", "--force")
+        self.assertEqual(open(out, "rb").read(), open(again, "rb").read())
+
+    def test_without_build_meta_there_are_no_build_meta_keys(self):
+        out, _ = self.build("n.txtMap")
+        self.assertFalse(any(k.startswith("_") for k in read_map(out)))
+
+    def test_build_meta_refuses_uncommitted_tracked_changes_but_not_untracked_files(self):
+        with open(os.path.join(self.root, "untracked.txt"), "w") as f:
+            f.write("x")
+        out, _ = self.build("u.txtMap", "--build-meta")
+        self.assertIn("_COMMIT_HASH", read_map(out))
+        with open(os.path.join(self.root, "data", "lexicon", "overlay-add.tsv"), "w") as f:
+            f.write("\n")
+        r = run_tool("--shanjie-root", self.root, "--out-txtmap", os.path.join(self.base, "d.txtMap"), *BUILD_FLAGS, "--build-meta", ok=False)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("uncommitted", r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.base, "d.txtMap")))
+
+    def test_build_meta_needs_a_git_work_tree_root(self):
+        with tempfile.TemporaryDirectory() as d:
+            plain = make_root(os.path.realpath(d))
+            r = run_tool("--shanjie-root", plain, "--out-txtmap", os.path.join(self.base, "p.txtMap"), *BUILD_FLAGS, "--build-meta", ok=False)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("git work tree", r.stderr)
+
+    def test_build_meta_with_base_txtmap_exits_2(self):
+        base_map = write_lines(os.path.join(self.base, "base.txtMap"), FIXTURE.split("\n"))
+        r = run_tool("--shanjie-root", self.root, "--base-txtmap", base_map, "--out-txtmap", os.path.join(self.base, "o.txtMap"), "--build-meta", ok=False)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("--base-txtmap", r.stderr)
+
+    def test_base_mode_keeps_the_factory_tables_and_exits_0(self):
+        # the three-table check is for the Shanjie build only: a factory-shaped file with a type-A 7 line and DEFAULT_PROB_7 passes through
+        base_map = write_lines(os.path.join(self.base, "base.txtMap"), FIXTURE.split("\n"))
+        out = os.path.join(self.base, "o.txtMap")
+        run_tool("--shanjie-root", self.root, "--base-txtmap", base_map, "--out-txtmap", out)
+        text = open(out, encoding="utf-8").read()
+        self.assertIn(">7\tA|C", text)
+        self.assertIn("DEFAULT_PROB_7\t-11", text)
+
+    def test_third_party_check_rejects_other_tables_and_default_prob_headers(self):
+        out, _ = self.build("t.txtMap", "--simplified")
+        vt.check_third_party_tables(out)   # a real build passes
+        lines = open(out, encoding="utf-8").read().split("\n")
+        vi = lines.index("#PRAGMA:VANGUARD_HOMA_LEXICON_VALUES")
+        for name, bad in [("A4", ">4\tA"), ("A7", ">7\tA"), ("C7", "A\t-4\t7\tX"), ("C8", "A\t-4\t8"), ("D9", "!B\t9\t-3\tY\t-3.5\tZ")]:
+            path = write_lines(os.path.join(self.base, f"bad-{name}.txtMap"), lines[:vi + 1] + [bad] + lines[vi + 1:])
+            with self.assertRaises(SystemExit, msg=name) as cm:
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    vt.check_third_party_tables(path)
+            self.assertEqual(cm.exception.code, 2)
+            self.assertIn("typeID", err.getvalue())
+        path = write_lines(os.path.join(self.base, "bad-header.txtMap"), lines[:vi] + ["DEFAULT_PROB_7\t-11"] + lines[vi:])
+        with self.assertRaises(SystemExit) as cm:
+            with contextlib.redirect_stderr(io.StringIO()) as err:
+                vt.check_third_party_tables(path)
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("DEFAULT_PROB_7", err.getvalue())
+
+
 HEADER = ["#PRAGMA:VANGUARD_HOMA_LEXICON_HEADER", "VERSION\t2.0", "TYPE\tTYPING", "READING_SEPARATOR\t-", "ENTRY_COUNT\t7", "KEY_COUNT\t3",
           "DEFAULT_PROB_7\t-11", "#PRAGMA:VANGUARD_HOMA_LEXICON_VALUES"]
-# a small stand-in for a vChewing factory file: every category it has is one the --simplified --vendor output has or FACTORY_ABSENT_OK allows
+# a small stand-in for a vChewing factory file: every category it has is one the --simplified --vendor --build-meta output has or FACTORY_ABSENT_OK allows
 FACTORY_OK = HEADER + ["@-5\tA\tB", ">7\tA|C", "X\t-1\t8\tY", "A\t-4\t5\tX", "A\t-4\t6\tX", "_NORM\t1000\t2", "_BUILD_TIMESTAMP\t1\t2",
                        "#PRAGMA:VANGUARD_HOMA_LEXICON_KEY_LINE_MAP", "ㄅ\t0\t5", "_NORM\t5\t1", "_BUILD_TIMESTAMP\t6\t1", ""]
 # the same shape with a Simplified-free, meta-free body: what a plain (no --simplified, no --vendor) output can satisfy
@@ -367,7 +466,8 @@ class FactoryCompareTests(unittest.TestCase):
         root = make_root(cls.base)
         folder, shas = make_opencc(cls.base)
         cls.ours = os.path.join(cls.base, "ours.txtMap")
-        build_in_process(root, cls.ours, folder, shas, "--simplified", "--vendor", VENDOR)
+        git_repo(root)
+        build_in_process(root, cls.ours, folder, shas, "--simplified", "--vendor", VENDOR, "--build-meta")
         cls.root = root
 
     @classmethod
@@ -438,6 +538,7 @@ class FactoryCompareTests(unittest.TestCase):
         counts = vt.count_categories(self.ours, "output")
         self.assertGreater(counts["B Traditional cell non-empty"], 0)
         self.assertGreater(counts["meta key _VENDOR"], 0)
+        self.assertGreater(counts["meta key _BUILD_TIMESTAMP"], 0)
 
     def test_command_line_prints_the_table_and_sets_the_exit_code(self):
         os.makedirs(os.path.join(self.base, "cli"))
