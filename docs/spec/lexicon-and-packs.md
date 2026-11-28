@@ -24,9 +24,9 @@
 - `rerank-protect.tsv`（重排保護詞，§2.12）不是詞庫的一層，不加詞、不改分數：上表各層合併之後才讀，缺檔或有一列不成立都是載入失敗。
 - `names-english.txt`（名單層的英文寫法，§3.1）屬於名單層，但不是解碼的一層：一行一個英文寫法、沒有讀音與標籤欄，編進核心而不是載入的檔，所以沒有缺檔的情況，評測 CLI 的 `--no-names` 也不影響它；只在英文段結束時換大小寫（`docs/spec/english-mixed.md` §4.4）。
 - `mixed-words.tsv`（中英混合詞，`docs/spec/english-mixed.md` §5.7）也不是詞庫的一層：候選清單多一項，解碼器在英文 token 後面把它的列當成一個可以選的詞（`docs/spec/decoder.md` §4.7），Shift＋字母的英文段照它切分、列預測；選用，缺檔或有一列不合規就整張不載入、不回錯誤。
-- 載入順序（`engine::load_lexicon_split`）：基底；接著疊加層文字 = `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`、詞包列（動漫詞包先讀，其餘詞包依 `PACK_FILES` 的順序：動漫、經典台詞、資訊、迷因、美妝）、評測專用的 `--extra-overlay` 檔；每一段之間補一個換行。同一個讀音下的所有列最後一起穩定排序（見 §1.3）。
+- 載入順序（`engine::load_lexicon_split`）：基底（`mcbpmf-data.txt`）；接著依序 `overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`（評測 CLI 的 `--no-names` 略過名單層）、詞包列（動漫詞包先讀，其餘詞包依 `PACK_FILES` 的順序：動漫、經典台詞、資訊、迷因、美妝）、評測專用的 `--extra-overlay` 檔。每一層依序串流餵給 `Builder`（`feed_base_line`／`feed_overlay_line`，層別 `OverlayLayer`），不再把各層接成一個 21 MB 的大字串；效果等同依這個順序把各層文字串接成一份，每一段之間補一個換行。基底與前三層（`mcbpmf-data.txt`、`overlay-add.tsv`、`sandhi-add.tsv`、`names-add.tsv`）單趟用 64 KiB 的 `BufReader`（`engine::stream_lines`）逐行讀進 `Builder`，沒有任何一個檔案的整份文字留在記憶體裡；詞包列與 `--extra-overlay` 檔在它們之後讀（`feed_overlay`）。讀檔失敗回報的是依這個順序最先壞的檔；壞列與壞基底分數的停止規則照舊：壞基底分數最先回報，壞疊加層列使後面所有層的列都不再餵入（檔案照樣讀完），`OverlayDuplicate` 先於 `BadOverlayRow`。同一個讀音下的所有列最後一起穩定排序（見 §1.3）。
 - 一個要求的詞包，檔案不存在時什麼都不貢獻（引擎和沒有它逐位元組相同）；檔案存在卻讀不了或解析失敗是載入失敗。C ABI 與評測 CLI 的差別在 §4.1。
-- 封頂用的文字（`engine::capping_overlay`）= `overlay-add.tsv`、`names-add.tsv`、詞包列（沒有 `sandhi-add.tsv`）。封頂規則見 §1.4。
+- 封頂用的文字（`engine::capping_overlay`）= `overlay-add.tsv`、`names-add.tsv`、詞包列（沒有 `sandhi-add.tsv`）。封頂規則見 §1.4。封頂用的文字另外讀、另外接（`capping_overlay` 與 `pack_text` 仍留著，串流化歸 ITEM-F4），不是詞庫載入的那一份。
 - 疊加層、名單層、詞包彼此的詞串不可重複：同一個（讀音, 詞）在兩個檔都有，核心載入時回 `OverlayDuplicate`（引擎建立失敗）；封頂又是依字串封頂所有讀音，所以各建置工具另外要求「新層的詞串不在任何既有層的任何讀音下」。`data/packs/meme-add.tsv`（迷因詞包，位元 8）存在時，各工具把它的詞也當作已佔用；它的內容與建置見 §9。
 
 ### 1.2 檔案格式與解析規則
@@ -42,6 +42,7 @@
 
 - 每個讀音下的詞依分數由高到低排；同分時基底在前、疊加層依檔案順序。實作是「先照檔案順序收齊所有列，再對每個讀音各做一次穩定排序」，沒有另外建舊式的對照表。
 - 每個詞字串另有一個「勝出的列」（`by_word`）：同一個詞出現在好幾列時取分數最高的；同分取檔案裡最前面的（嚴格較大才取代）。
+- 建置（`Builder::finish`）照實際數量一次配好完成後的表：`by_word` 的暫存 `winners` 與兩張位元表照不同詞數、`readings` 與 `fkeys` 照讀音數與讀音鍵總長（含常談列的讀音）、`ents` 照主表列數加上常談補位列數、`words` 照常談詞的位元組數，所以建好的 `ents`、`key_pool`、`readings`、`by_word` 容量等於長度（`builder_finish_equals_the_c837ac4f_oracle` 斷言）。原因：macOS 的配置器對超過約 1 MiB 的區塊，釋放之後仍把它算在行程的足跡裡到結束，所以降低尖峰靠的是不留整份文字、不讓表倍增再留下舊區塊，不是提早釋放；以前 `ents` 剛好配滿之後又被 13 筆常談列倍增（8.6 → 17.3 MB）。
 - 結構（`core/src/lib.rs`，`Lexicon`）：
 
 | 欄位 | 內容 |
@@ -52,12 +53,15 @@
 | `ents` | 每個詞一筆（`off`、`len`、`score`），16 位元組，依讀音分組、組內分數由高到低 |
 | `words` | 一整塊 UTF-8，`(off, len)` 切出詞 |
 | `by_word` | 每個不同詞的勝出列的位置，依詞的位元組排序，每個 4 位元組 |
+| `overlay_bits` | 每個 `by_word` 項一個位元（`Vec<u64>`）：該詞有疊加層（`overlay-add.tsv`）或詞包的列、`mcbpmf-data.txt` 在任何讀音下都沒有它；`sandhi-add.tsv`、`names-add.tsv` 與 `--extra-overlay` 的列不設這個位元。標籤 `colloq` 的列照它所在層的規則算（建置時補位）。`Lexicon::is_overlay_only(w)` 讀它（對 `by_word` 二分搜尋，命中就查位元），是常談項 k 的詞集（`docs/spec/semantic-rerank.md` §4.1） |
+| `overlay_extra` | 同一種詞、但詞庫丟掉了它的列（`colloq` 列的字數不等於音節數），所以不在 `by_word` 裡：排序的字串陣列，正式資料是空的、不佔堆；`is_overlay_only` 在 `by_word` 找不到時二分搜尋它 |
 
 - 查詢全用二分搜尋：讀音（`&[String]` 每次解碼先轉成編號，不認得的音節是 `u32::MAX`）、詞（依位元組）；由詞反查讀音用 `readings[].start` 的 `partition_point`。
 - 分數維持 `f64`；只用標準函式庫，沒有 `unsafe`、沒有 mmap；資料在執行時從文字檔解析。
 - 公開的只有 `max_len`、`reading_count()`、`entries(&[String])`、`word_info(&str)` 等讀取函式，欄位都是私有的。
 - 記憶體：這個結構落地時量過，載入 50 萬列疊加後的 `shanjie-eval --set dev --limit 302` 峰值常駐記憶體約 87 MB（只載基底約 37 MB）；詞庫之後變大（疊加層約 36 萬列、名單層約 2 千列、詞包再加），這些數字只當量級。
-- 驗證：`core/src/tests.rs` 的 `learner_word_score_takes_last_duplicate`、`overlay_duplicate_within_overlay_is_error`、`overlay_bad_rows_report_length_only`（結構改寫不能改變這三個行為）；`cli/tests/golden.rs` 的 `matches_s1_references_byte_for_byte` 逐位元組比 `eval/golden/s1-dev302.txt`、`s1-dev302-nooverlay.txt`、`s1-overlay-sets.txt`，`unigram.txt` 在 `--no-overlay` 下比對。
+- ITEM-F2 的量測（Mac、交錯 3 輪、量測時 1 分鐘負載 4.3–5.9，對 F2 之前的 `ae8779ea`）：建詞庫的尖峰（`/usr/bin/time -l shanjie-eval --rows <單列檔>`，不帶 `--lm`，peak memory footprint）84.38／84.13／84.07 MB → 62.83／57.44／57.57 MB（中位數少約 25.3 MiB）；一個引擎常駐（`pack_switch_bench memory data/lexicon data/packs data/lm 31 0 2 shared` 的 `one_engine_mib`）180／180／180 → 151／151／151；載入常談表（`pack_switch_bench phases … 31 5` 的 `load_colloquial` ms_median）152／183／126 → 15.6／13.0／13.1；`new_with_packs` ms_median 216／227／183 → 249／190／224（中位數比 1.04）。同一批對照：只做 c837ac4f 的版本尖峰 78.09／74.94／74.96 MB；另一種做法（建置前多讀一趟只數數量、原地重排、不穩定排序）尖峰 41.2 MB，但 `new_with_packs` 約 310–333 ms（慢約 50%），所以沒有採用。macOS 的配置器不歸還大區塊，這些數字是這個平台的；其他平台沒有量。
+- 驗證：`core/src/tests.rs` 的 `learner_word_score_takes_last_duplicate`、`overlay_duplicate_within_overlay_is_error`、`overlay_bad_rows_report_length_only`（結構改寫不能改變這三個行為）；`core/src/tests.rs` 的 `builder_finish_equals_the_c837ac4f_oracle`（把改前的 `Builder::finish`——`Raw` 版、穩定排序——原樣留成測試用的對照，對正式資料（無詞包與全詞包）與同讀音同分超過 32 列、同詞同分散在不同讀音的合成輸入，逐項比對 `readings`、`key_pool`、`ents`、`words`、`by_word`、`colloq`、`overlay_bits`、`overlay_extra`，錯誤路徑比整個 `Result`，並斷言建好的表沒有多餘容量）、`layered_build_equals_the_joined_text`、`layered_error_order`、`overlay_only_follows_the_layers`；`core/tests/colloquial_overlay_bits.rs` 逐詞比對 `is_overlay_only` 與檔案詞集；`cli/tests/golden.rs` 的 `matches_s1_references_byte_for_byte` 逐位元組比 `eval/golden/s1-dev302.txt`、`s1-dev302-nooverlay.txt`、`s1-overlay-sets.txt`，`unigram.txt` 在 `--no-overlay` 下比對。
 
 ### 1.4 封頂（只寫與詞包有關的部分）
 
@@ -152,7 +156,7 @@
   - 這種詞的字串進了疊加層，所以照 §1.4 在它**所有**讀音下封頂（包括基底原本的讀音）；「為啥」「不足為外人道」兩列加入時，出貨設定在 cdev、cvtune-clean-tw0、wikitune-clean-tw0、dev302、打字測驗、錯字回報上逐列相同；「部署」加入、補讀音列改取基底分數時，同樣的集合只有錯字回報變了：兩種設定各改對 2 列（第 119、199 列，都是照 ㄕㄨˇ 打的「部署」）、改壞 0。
   - 只在不帶語意校正時才看得出差別：重排有時會把基底詞換回第一名，App 的重排在背景跑、來不及時送出的是 n-gram 的第一名。測試 `cli/tests/golden.rs` 的 `manual_reading_refills_are_the_ngram_first_choice` 釘住 n-gram 本身（出貨詞包、不帶 `--tinylm`），兩種讀音下第一名都是那個詞。
 - 分數 = 同字數的 `length_scores` + `MANUAL_BONUS`（0.75）。補讀音的列取這個分數與那個詞在基底、`sandhi-add.tsv` 的最高分中較大的：同一個詞換一個讀音，常用的程度不變。例：「部署」基底 −5.19，長度分數加 0.75 是 −6.42；用後者時聊天的 n-gram 在 ㄅㄨˋ ㄕㄨˇ 下選「部屬」。「為啥」因此從 −6.42 升到基底的 −5.79，「不足為外人道」的基底分數比較低，不變。
-- 取捨：0.75 讓目前所有手動詞在出貨設定（兩種設定、三種強度）下單獨與放在句子裡都排第一；0.5 時開 KN 的模型在書面設定下有一句會輸；測試 `cli/tests/golden.rs` 的 `manual_words_come_first_in_the_shipping_setting` 逐詞檢查（列在 `eval/golden/manual-words-rows.txt`）。
+- 取捨：0.75 讓手動詞在出貨設定（兩種設定、三種強度）下單獨與放在句子裡幾乎都排第一，例外只有這幾列：`樺加沙` 讀 ㄏㄨㄚˋ ㄐㄧㄚ ㄕㄚ（輸給 `畫家殺`；另一個讀音 ㄏㄨㄚˊ 排第一）、`北士科`（輸給基底詞 `北市科`；書面的標準與積極強度由重排選回 `北士科`）、`氛圍開發`（只在書面輸給 `分為開發`，聊天排第一），以及 `米雅歌唱得很好` 在聊天、不帶 `--colloquial-core` 時（n-gram 的第一名含 `米雅歌`，但讀 `唱的`，不是 `唱得`）；0.5 時開 KN 的模型在書面設定下有一句會輸。測試 `cli/tests/golden.rs` 的 `manual_words_come_first_in_the_shipping_setting` 逐列檢查（列在 `eval/golden/manual-words-rows.txt`），把這幾列釘成例外：沒排第一的列和釘住的不同（別的列掉下來，或例外消失）都失敗。
 
 ### 2.10 網路用語（`data/lexicon/slang-add.tsv`）
 
@@ -160,7 +164,7 @@
 - 建置（`tail_rows`）：接在手動詞後面，檢查規則同手動詞（詞也不能是手動詞、名單層或任何詞包（`data/packs/*-add.tsv`）的詞），分數 = `length_scores` + `MANUAL_BONUS` + 加分。沒有這個檔時輸出與沒有網路用語的疊加層逐位元組相同。只改檔尾時可用 `build_overlay.py --tails-only` 重產；若同時帶 `--refilter` 或跑完整建置（及 `build_names.py`、`build_english.py`、`build_digits.py`、`holdout_guard.py` 等其他 `build_counts.load_conv()` 呼叫者），在 `data/lexicon/tw-conv.tsv` 異動後而本機的真實 `tw-clean` 表尚未重建前，須先設 `SHANJIE_TW_CLEAN=off`，否則會因 `tw-conv.tsv` 雜湊不符而中止（§2.3、`docs/spec/models.md` §9.8）。
 - 同一個讀音有好幾個網路用語時，檔案裡排前面的留第一，同讀音第 k 個（k 從 0 起）的列再扣 k × `SLANG_BEHIND`（1.0），只當候選；所以檔案順序有意義，新增詞要插在對的位置（用量多的在前）。
 - 加分：只能放在同讀音的第一列，必須是 0.5 的倍數且 0 < 加分 ≤ `BOOST_MAX`（3.0）；放在被扣分的列上會讓它與第一名打平或超過，建置中止。用途：詞庫分數輸給「沒人這樣講的組合」時抬高。核心把模型看過的疊加層詞封頂在語料頻率，所以加分只對模型沒看過的詞有效。
-- 收錄準則（來源檔的內容準則，建置工具不檢查）：來源是公開維基與維基詞典的條目標題（CC BY-SA 4.0）、網路社群百科的條目標題（Fandom，文字 CC BY-SA 3.0，依後續版本條款以 4.0 散布）、外部語言模型建議的字串（只取字串）、人工補的詞（CC0）；只取詞的字串，不取解釋文字。台灣公開論壇的文章與推文用量只用來確認收錄與排序，只取詞的字串與計數、不含原文：直接從語料挖出的字串要分區 ≥ 3、文章 ≥ 10，人或模型挑過的候選要分區 ≥ 2、文章 ≥ 3（最早一批較嚴：分區 ≥ 5、文章 ≥ 20）。只收台灣在用的說法，不收只在中國大陸用的、人名與網名（歸名單層）、有明確單一出處的台詞（歸經典台詞詞包）。同音時，原本的第一名（X）的文章數 ≥ 候選就不收（文章數多的留第一）；X 是沒人這樣講的組合時才在第四欄加分。挖掘與分類的腳本不隨 repo 散布，`slang-add.tsv` 是人工審過、提交進 repo 的輸入。
+- 收錄準則（來源檔的內容準則，建置工具不檢查）：來源是公開維基與維基詞典的條目標題（CC BY-SA 4.0）、網路社群百科的條目標題（Fandom，文字 CC BY-SA 3.0，依後續版本條款以 4.0 散布）、外部語言模型建議的字串（只取字串）、人工補的詞（CC0）；只取詞的字串，不取解釋文字。台灣公開論壇的文章與推文用量只用來確認收錄與排序，只取詞的字串與計數、不含原文：直接從語料挖出的字串要分區 ≥ 3、文章 ≥ 10，人或模型挑過的候選要分區 ≥ 2、文章 ≥ 3（最早一批較嚴：分區 ≥ 5、文章 ≥ 20）。只收台灣在用的說法，不收只在中國大陸用的、人名與網名（歸名單層）、有明確單一出處的台詞（歸經典台詞詞包）。同音時，原本的第一名（X）的文章數 ≥ 候選就不收（文章數多的留第一）；X 是沒人這樣講的組合時才在第四欄加分。逐詞指定收錄的詞不看論壇用量；X 是人會講的組合時不加分。挖掘與分類的腳本不隨 repo 散布，`slang-add.tsv` 是人工審過、提交進 repo 的輸入。
 - 驗證：`tools/test_build_overlay.py` 的 `ManualRows`（含第四欄只對 `slang` 有效、加分只能在第一個）、`SlangBehind`、`ShippedOverlay`（已提交的檔尾 = `tail_rows()` 對已提交的 `overlay-manual.tsv` 與 `slang-add.tsv` 的結果，所以只改其中一個而沒重產會失敗）。
 
 ### 2.11 重建與驗證
@@ -193,7 +197,7 @@
 | `names-readings.tsv` | 人工核對過的整名讀音：名字、讀音（音節數要等於字數） |
 | `names-collisions.tsv` | 同音衝突的處置（人工維護的輸入，建置只讀不改） |
 | `names-kept-c.tsv` | 讓名單詞排第一的已出貨名字清單（10 個既出貨 `names` 詞，免於類型 `(c)` 自動剔除；建置輸入，不隨 App 內附，CC BY-SA 4.0，見 §3.4） |
-| `names-creators.tsv`、`names-stores.tsv` | 創作者（166 詞）與店家、企業、軟體名字（231 詞）的來源檔（§3.5） |
+| `names-creators.tsv`、`names-stores.tsv` | 創作者（226 詞）與店家、企業、軟體名字（238 詞）的來源檔（§3.5） |
 | `names-english.txt` | 名單層的英文寫法：一行一個寫法（`[A-Za-z]{3,32}`、至少一個大寫字母，`#` 開頭的行與空行略過），和 `data/english-extra.txt` 合成一張正式寫法表，小寫不得重複。編進核心，不由 `tools/build_names.py` 產生、不隨資料夾載入、不受 `--no-names` 影響 |
 
 - 引擎一律載入 `names-add.tsv`（缺檔是載入失敗）；評測 CLI 的 `--no-names` 才把它拿掉。名單層的詞照 §1.4 封頂；名單層的分數已含 `NAMES_BONUS`，載入端不另外加。
@@ -235,12 +239,12 @@
 
 ### 3.5 創作者、店家與軟體名字（`--append-creators`，檔尾追加）
 
-- 來源檔 `names-creators.tsv`（實況主、YouTuber、VTuber、節目與頻道名，含台灣以外中文圈的名人，166 詞；標籤 `creator`）與 `names-stores.tsv`（店家、餐廳、飯店、企業、軟體，231 詞，含前批跨 6 個月熱詞檢出併入之 `凱渥`、`威京集團`；標籤 `store`）：欄位為詞、讀音（音節以空白分隔）、備註，可選的第四欄加分；`#` 開頭與空行略過；CRLF 照 LF 讀。
+- 來源檔 `names-creators.tsv`（實況主、YouTuber、VTuber、節目與頻道名、戲劇與電影作品名與角色、歌曲、新聞與運動人物，含台灣以外中文圈的名人，226 詞；標籤 `creator`）與 `names-stores.tsv`（店家、餐廳、飯店、企業、軟體，238 詞，含前批跨 6 個月熱詞檢出併入之 `凱渥`、`威京集團`；標籤 `store`）：欄位為詞、讀音（音節以空白分隔）、備註，可選的第四欄加分；`#` 開頭與空行略過；CRLF 照 LF 讀。
 - 追加模式不重建既有名單：`names-add.tsv`／`names-sources.tsv` 去掉 `creator`、`store` 列後逐位元組保留，檔尾依序接 creator、store 的列（`names` → `creator` → `store`）；重跑換掉的是這兩種標籤的列；兩個來源檔都不存在或沒有資料列時什麼都不碰；`names.json` 的 `sources` 分別計兩種標籤。完整重建（不帶 `--append-creators`、`--out` 是詞庫資料夾）也會接著追加。追加不連網、不讀快取。
 - 每列要：詞是 2–10 個漢字、字數在分數表裡、不在 `taken`（基底、`overlay-add.tsv`、`sandhi-add.tsv`、名單其他列、全部 5 個詞包詞檔、前面的列）；讀音音節數等於字數，每個音節都是基底裡那個字的讀音（輕聲音節允許該字同音節的任何聲調）；同一個（詞, 讀音）重複中止。同一個詞可以有不同讀音的好幾列（只限同標籤）；店家不能用 creator 已有的詞（換讀音也不行）。不符就中止並指出路徑與行號。
-- 被擋掉（印到 stderr、不中止）：詞已在迷因詞包；讀音等於 `names` 既有列的讀音；店家的讀音等於 creator 列的讀音。經 §3.2 主流程對 `creator`/`store` 字串與讀音鍵預先讓位保護後，既有 166 筆 `creator` 與 231 筆 `store` 列在完整重建與追加時零筆被擋。
+- 被擋掉（印到 stderr、不中止）：詞已在迷因詞包；讀音等於 `names` 既有列的讀音；店家的讀音等於 creator 列的讀音。經 §3.2 主流程對 `creator`/`store` 字串與讀音鍵預先讓位保護後，目前的 226 筆 `creator` 與 238 筆 `store` 列追加時零筆被擋（完整重建時的零筆被擋是在 166／231 筆那一批量的）。
 - 分數 = 同字數的 `length_scores` + `NAMES_BONUS` + 加分 − 同標籤同讀音的名次 × `SLANG_BEHIND`（1.0）。檔案順序就是名次，工具不依備註的數字重排。加分必須是有限值、≥ 0，且只能放在同讀音的第一列。模型看過的詞被封頂，加分無效。含「一」「不」的詞照 `overlay_rows` 附變調列。
-- 收錄準則（來源檔的內容準則，工具不檢查）：名字取網友常打的中文寫法，純英文帳號與混字母的不收；台灣公開論壇的文章與推文用量（分區 ≥ 3、文章 ≥ 10，只取詞與計數）；同讀音的詞庫詞用量 ≥ 名字的不收；店家另外要出貨解碼器現在打錯、用量多於原本的第一名（例外：軟體名稱「善解」「善解輸入法」「唯音」「唯音輸入法」是本專案與合作輸入法的名稱，人工補、不看論壇用量，善解兩列原本就打得對，收進來是為了固定下來）；用量是子字串計數，被更長字串（全名、地名）灌水的短稱不收；名字字串來自外部語言模型的建議與人工補，只取名稱。
+- 收錄準則（來源檔的內容準則，工具不檢查）：名字取網友常打的中文寫法，純英文帳號與混字母的不收；台灣公開論壇的文章與推文用量（分區 ≥ 3、文章 ≥ 10，只取詞與計數）；同讀音的詞庫詞用量 ≥ 名字的不收；店家另外要出貨解碼器現在打錯、用量多於原本的第一名（例外：軟體名稱「善解」「善解輸入法」「唯音」「唯音輸入法」是本專案與合作輸入法的名稱，人工補、不看論壇用量，善解兩列原本就打得對，收進來是為了固定下來）；用量是子字串計數，被更長字串（全名、地名）灌水的短稱不收；名字字串來自外部語言模型的建議與人工補，只取名稱。逐詞指定收錄的名字不看論壇用量，也不加分。
 - 驗證：`tools/test_build_names.py` 的 `AppendCreators`（既有列逐位元組不變且雜湊固定、同讀音的名次扣分、各種無效列、被擋列不中止、店家與 creator 的互斥、CRLF、第四欄加分、來源檔缺或空時完全不動）、`MainRebuild`。
 
 ### 3.6 評測專用的 `--extra-overlay FILE`
@@ -535,10 +539,10 @@
 - 詞包收**迷因、口頭禪與實況用語的整個詞條**，分兩類（`meme-sources.tsv` 的 `class` 欄、`meme.json` 的 `allow.shipped`）：
   - `meme`：迷因、口頭禪、有梗的固定說法與固定的玩笑詞組；
   - `offensive`：政治綽號與政治梗、成人與毒品梗、粗口與貶義詞。
-- 收哪些詞由**審定清單** `data/packs/meme-allow.tsv`（建置輸入，不隨 App 出貨）決定：`詞<TAB>類別`，類別是 `meme` 或 `offensive`，照位元組順序排，`#` 開頭與空行略過。不在清單裡的候選一律不收。
+- 收哪些詞由**審定清單** `data/packs/meme-allow.tsv`（建置輸入，不隨 App 出貨）決定：`詞<TAB>類別[<TAB>pin]`，類別是 `meme` 或 `offensive`，可省的第三欄只能是 `pin`（指定詞，§9.2），照位元組順序排，`#` 開頭與空行略過。不在清單裡的候選一律不收。
 - 不在清單裡的詞與去處：不帶梗的論壇用語與口語進主詞庫（`slang-add.tsv`，§2.10）；人名屬於名單層（§3）；動漫與遊戲的作品名、角色與術語屬於動漫詞包的範圍（§5）；一般詞組與專有名詞不收。已在主詞庫的迷因不搬進詞包。
 - **現在就打得對的詞也收**：聊天與書面的第一名都已經是這個詞的，照樣收成詞條。詞包只加詞條，不壓制任何字串：關掉詞包時，逐字拼得出來的詞照樣由較短的詞條組出來。
-- 候選來自六類來源，`meme-sources.tsv` 的來源欄記代號：`mined`（從語料挖出）、`fandom`（Fandom 的迷因 Wiki 頁面標題）、`pttpedia`（Fandom 上 PTT 鄉民百科的分類標題）、`muse`（模型建議）、`discord`（社群的公開用語）、`siteA`（迷因網站 A：沒有開放授權的迷因詞條網站，只當候選字串，不取定義）。
+- 候選來自六類來源，`meme-sources.tsv` 的來源欄記代號：`mined`（從語料挖出）、`fandom`（Fandom 的迷因 Wiki 頁面標題）、`pttpedia`（Fandom 上 PTT 鄉民百科的分類標題）、`muse`（模型建議）、`discord`（社群的公開用語）、`siteA`（迷因網站 A：沒有開放授權的迷因詞條網站，只當候選字串，不取定義）；審定清單的指定詞另記來源代號 `pin`（§9.2）。
 - 詞包檔以 CC BY-SA 4.0 散布：標題來自 Fandom 上的迷因 Wiki 與 PTT 鄉民百科（CC BY-SA 3.0，依「或更新版本」改用 4.0）與中文維基（CC BY-SA 4.0），App 的署名檔 `LICENSES/CC-BY-SA-4.0-attribution.txt` 有 `packs/meme-add.tsv` 一段，`LICENSES/data.md` 有一列（審定清單是建置輸入，列在同一列）。沒有開放授權的來源（迷因網站 A、模型建議）只當候選字串，公開處只寫代號與類型；論壇只寫「論壇 A」。
 - 挖詞、計數、分類的腳本與候選檔不隨 repo 散布（§10）；`meme.json` 的 `candidate_files` 只記候選檔的檔名與雜湊，`allow` 記清單的檔名、SHA-256、筆數與各類別收進的詞數。
 
@@ -548,6 +552,11 @@
 
 - **另外的讀音**（`data/packs/meme-extra-readings.tsv`，建置輸入，不隨 App 出貨）：`詞<TAB>讀音（空白分隔）`，一列一個另外的讀音，`#` 開頭與空行略過。給句尾語助詞有兩種打法的詞（啦 `ㄌㄚ`／`ㄌㄚ˙`、嗎 `ㄇㄚ`／`ㄇㄚ˙`、耶 `ㄧㄝˊ`／`ㄧㄝ`）與疊字有兩種打法的詞用：主要讀音照舊，這裡的每個讀音在 `meme-add.tsv` 多一列（含它的變調列），分數和主要讀音的列相同，兩種都打得到。只在最後一段用（`--extra-readings FILE`，預設這個檔，不存在就沒有；`--pack beauty` 給這個旗標就停）；解碼表只看主要讀音。同音衝突 (a)(b)(c) 在另外的讀音上照樣偵測。列裡的詞沒有收進詞包（含因為另外的讀音被 (c) 丟掉，訊息寫出那個讀音與被擠下的詞）、音節數不等於字數、和主要讀音相同、它或它的「一」「不」變調列和主要讀音或同一個詞的另一個另外讀音寫出的列重複、同一個詞重複同一個讀音，都以非 0 結束、不寫 `data/packs`；檔頭的 BOM 略過。`words-all.txt` 在原本的列之後接上這些讀音各一列（確認過的讀音，所以主要讀音標 `CHECK` 的詞也列）；`meme.json` 多記 `extra_readings`（列數）。
 - **審定清單只在最後一段套用**：`--emit-x` 照舊對所有過用量門檻的候選解碼（輸出不看清單，只檢查清單檔存在、能解析），所以解碼表與清單無關；最後一段在核對解碼表之後、判規則之前拿掉不在清單裡的候選（`meme.json` 的 `stages.not_allowed`）。這些候選不擋同讀音的清單詞，也不在 (b) 的參考名單裡。`--allow FILE` 預設 `data/packs/meme-allow.tsv`；`--pack beauty` 不收這個旗標；別的類別、缺類別欄、重複的詞（NFKC 之後比）都點名行號後停止。
+- **指定詞**（審定清單第三欄寫 `pin`）：論壇用量很少、但要收進詞包的詞（例如剛出現的政治梗）。只在最後一段生效，只動指定詞，沒有 `pin` 的詞的判斷與輸出逐位元組不變：
+  - 不必在候選檔裡：最後一段把指定詞加進候選（來源欄記 `pin`）；計數檔的檔頭核對看的是候選檔本身，不含指定詞，所以計數檔與解碼表（`meme-x.tsv`、`--emit-x` 的輸出）照舊，不為指定詞重算。
+  - 跳過用量門檻（計數檔沒有或不夠都不擋，`meme-sources.tsv` 的文章數、討論區數記計數檔的值，沒有就記 0），跳過「讓不讓第一名」（`x_not_fewer`、`x_other_pack` 都不丟，它沒有 X）；詞庫或其他詞包已有這個詞時照舊不收（`in_lexicon_or_pack`）。
+  - 照舊適用：同讀音（只留文章數多的，或處置檔 `+` 列兩個都留；指定詞的文章數通常是 0，同讀音有別的清單詞時要用 `+` 列保它）、(c)（擠下既有詞就丟）、另外的讀音、同音衝突偵測。讀音用 `meme-readings.tsv`（`--readings`，`詞<TAB>讀音`，建置輸入，不隨 App 出貨）的確認讀音，沒有就用讀音工具的；指定詞的讀音應該寫在這個檔裡，讀音標 `CHECK` 的詞不進 `words.txt`、`words-all.txt`。
+  - 報告：`meme.json` 的 `allow.pinned`（指定詞，只有清單有指定詞時才有）、`stages.pinned`（收進讀音步驟的指定詞數）、`sources.pin`；`allow-missing.tsv` 照舊列沒收進來的指定詞與原因。
 - **現在就打得對的清單詞照收**（§6.2 的「已經打得對」只對 `--pack beauty` 生效）；「讓不讓第一名」（X 是更常見的寫法就不收）與 (c) 不變。
 - **同讀音**：處置檔 `meme-collisions.tsv` 有 `+` 列點名的兩個詞都留（詞包詞在前）；沒有 `+` 列只留文章數多的。處置檔只放同讀音的處置，要不收的詞不放進審定清單即可。
 - 解碼用的詞包是 `acg,it,beauty`（迷因以外預設開的詞包；經典台詞詞包預設關，`quotes-add.tsv` 在資料夾裡也不帶），所以建置時要有 `beauty-add.tsv`；美妝詞包建置仍用 `acg,it`。
@@ -560,7 +569,7 @@
 
 - 位元 8（`SHANJIE_PACK_MEME`／`PACK_MEME`），檔案 `meme-add.tsv`，在 `PACK_FILES` 裡排在資訊詞包之後、美妝詞包之前；CLI `--packs meme`。照 §1.4 封頂（不在 `PACK_OOV` 裡）。
 - App：偏好鍵 `memePack`，沒設過當作開（§4.2）；設定視窗「詞包」區塊在「美妝與保養詞」之後加「迷因與實況用語」（SwiftUI `Toggle`，和其他詞包開關同一種原生元件）；選單「已開啟的詞包」那一段照設定順序列出（動漫、資訊、美妝、迷因，經典台詞開著時在動漫之後）；選單沒有開關。
-- 打包：`meme-add.tsv`、`meme-sources.tsv`、`meme.json` 進 `Resources/packs/`，建置輸入 `meme-collisions.tsv`、`meme-allow.tsv`、`meme-extra-readings.tsv` 不進；`check-app.sh` 核對 `meme.json` 與署名檔的 `packs/meme-add.tsv` 一段（§4.4）。
+- 打包：`meme-add.tsv`、`meme-sources.tsv`、`meme.json` 進 `Resources/packs/`，建置輸入 `meme-collisions.tsv`、`meme-allow.tsv`、`meme-readings.tsv`、`meme-extra-readings.tsv` 不進；`check-app.sh` 核對 `meme.json` 與署名檔的 `packs/meme-add.tsv` 一段（§4.4）。
 - 自測：帶動漫、資訊、迷因與美妝詞包的引擎要求 `ㄎㄜˇ ㄧˇ ㄙㄜˋ ㄙㄜˋ` 得到 `可以色色`（`meme-add.tsv` 的第一列；不帶迷因詞包時聊天的第一名是 `可以瑟瑟`），所以迷因詞包缺檔、壞檔或沒生效都失敗。
 - 評測重播 `shanjie-replay` 不給 `--packs` 時用 App 的預設 `acg,it,meme,beauty`，遮罩 29（`docs/spec/evaluation.md` §4）。Windows 輸入法的常駐程序不載入迷因詞包（遮罩仍是 `1 | 4`）。
 - 關掉詞包：不載入這些詞條，選字、候選窗、預測列和沒有這個詞包檔的引擎逐位元組相同。詞包不壓制字串：逐字或用較短的詞條拼得出來的詞，關掉後照樣打得出來；核心沒有壓制機制。
@@ -579,8 +588,8 @@
   5. 嵌入句（會意關與標準檔，聊天與書面）：會意關時逐字比對，開了變錯的列是 0；標準檔用 rowstats 的對錯（寬鬆對照），開了變錯的列是 0，修好的列數在聊天、書面都大於 0。這個集合是工具造的句子，只確認方向，不當出貨標準的證據。
   6. 預測列：`core/tests/engine_pack.rs` 的 `the_meme_pack_offers_whole_words_in_the_prediction_row`（讀真的 `data/packs` 與 `words-all.txt`，不是夾具）：取三個音節以上的詞照檔案順序的前 30 個，各打到剩最後一個音節為止，聊天設定、沒有前文、預測開著，開著詞包時被動預測列含整個詞的詞數嚴格多於不開時，而且大於 0；測試印出兩個數字與沒出現的詞。
   7. 記憶體與延遲（Mac 閒置窗）：尖峰 RSS 對 `acg,it,beauty` 增加不超過 40 MiB；`PACKS=acg,it,meme,beauty` 的 `timing_typing76_keys` p95 不超過 16 ms。
-- 測試（`make test-python`）：`tools/test_build_meme_pack.py`（`MIN_WORDS`、`candidate_files` 只記檔名、同名就停、列的先後、解碼的詞包組合、`--native-pack`、審定清單的各項規則與 `allow-missing.tsv`、`words-all.txt`、另外的讀音（含另外讀音上的 (a)(b)(c)、和變調列重複、BOM））、`tools/gen_meme_embedded.py` 的重建核對。引擎與 App 的測試見 §4.1–§4.4。
-- 這一版：139 個詞、155 列（9 列變調列、7 列另外的讀音），`meme` 類 112 個、`offensive` 類 27 個；審定清單 139 筆全部收進；未處置衝突 0。檢查集：`words.txt` 60 列、`words-all.txt` 138 列（131 個詞的主要讀音加 7 列另外的讀音）、`embedded.txt` 828 列。
+- 測試（`make test-python`）：`tools/test_build_meme_pack.py`（`MIN_WORDS`、`candidate_files` 只記檔名、同名就停、列的先後、解碼的詞包組合、`--native-pack`、審定清單的各項規則與 `allow-missing.tsv`、指定詞（用量 0 照收、沒有 `pin` 的 0 用量詞照舊不收、不套讓不讓第一名、不進解碼表、`--pack beauty` 不受影響、第三欄的格式）、`words-all.txt`、另外的讀音（含另外讀音上的 (a)(b)(c)、和變調列重複、BOM））、`tools/gen_meme_embedded.py` 的重建核對。引擎與 App 的測試見 §4.1–§4.4。
+- 這一版：140 個詞、156 列（9 列變調列、7 列另外的讀音），`meme` 類 112 個、`offensive` 類 28 個，其中 1 個指定詞（`近平坐下`，讀音 `ㄐㄧㄣˋ ㄆㄧㄥˊ ㄗㄨㄛˋ ㄒㄧㄚˋ`）；審定清單 140 筆全部收進；未處置衝突 0。檢查集：`words.txt` 60 列、`words-all.txt` 139 列（132 個詞的主要讀音加 7 列另外的讀音）、`embedded.txt` 834 列。
 
 ## 10. 已知限制
 

@@ -6,6 +6,8 @@ Standalone and small: test_fuzzy_ref.py compares every constant and table here w
   adjacent key: replace one symbol key of a syllable by its left/right neighbour in the same keyboard row, re-compose the keys through the
                composer's columns (a key fills its own column, a second key of the same column replaces the first); the shown reading maps to
                the syllables it may have been typed from.
+  one symbol (bit 5): replace one symbol of a syllable by any other symbol of the same column (initial, medial or final; the tone kept, no column
+               added or dropped); a result that is no syllable of the lexicon maps to the syllables it may have come from.
 """
 # Copied from core/src/engine.rs (SYMBOLS, KEYS_STANDARD) and core/src/fuzzy.rs (FUZZY_PAIRS, ROWS); the test reads those sources.
 SYMBOLS = "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ"
@@ -13,6 +15,10 @@ KEYS_STANDARD = "1qaz2wsxedcrfv5tgbyhnujm8ik,9ol.0p;/-"
 ROWS = ["1234567890-=", "qwertyuiop[]", "asdfghjkl;'", "zxcvbnm,./"]
 FUZZY_PAIRS = [("ㄣ", "ㄥ"), ("ㄓ", "ㄗ"), ("ㄔ", "ㄘ"), ("ㄕ", "ㄙ")]
 FUZZY_SOUND = 0b1111
+FUZZY_ADJACENT = 1 << 4
+FUZZY_ONE_SYM = 1 << 5
+FUZZY_ALL = FUZZY_SOUND | FUZZY_ADJACENT | FUZZY_ONE_SYM
+DELTA_ONE_SYM = 2.5
 
 
 def _neighbours():
@@ -73,6 +79,16 @@ class Tolerance:
                     if r != s:
                         shown.setdefault(r, set()).add(s)
         self.adjacent_table = {r: sorted(v) for r, v in shown.items()}
+        one = {}
+        for s in sorted(set(single) & set(self.syllables)):
+            keys, tone = _split(s)
+            for i, c in enumerate(keys):
+                for alt in SYMBOLS:
+                    if alt != c and _column(alt) == _column(c):
+                        r = compose(keys[:i] + alt + keys[i + 1:]) + tone
+                        if r not in self.syllables:
+                            one.setdefault(r, set()).add(s)
+        self.one_sym_table = {r: sorted(v) for r, v in one.items()}
 
     def sound(self, syl, flags):
         """Alternatives of `syl` with the pairs in bits 0-3 of `flags` enabled."""
@@ -81,3 +97,7 @@ class Tolerance:
     def adjacent(self, shown):
         """Syllables a shown reading may have been typed from."""
         return self.adjacent_table.get(shown, [])
+
+    def one_sym(self, shown):
+        """Syllables an unknown reading may have come from by one symbol replaced within its column."""
+        return self.one_sym_table.get(shown, [])

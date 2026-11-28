@@ -31,7 +31,7 @@
 - **新增函式**：加在標頭與 `ffi.rs`，不改既有函式的簽名與意義。
 - **輸出結構新增欄位**：只加在 `ShanjieOutput` 的尾端（`candidate_vertical`、`english_run_utf16_start`、`english_run_utf16_len` 就是這樣加的）；既有欄位的位置、型別、意義不改。輸出由核心配置、殼只讀，尾端新欄位不會破壞只讀前面欄位的程式，但殼仍要用新標頭重編，不混用。
 - **新設定**：預設值要讓引擎和沒有這個功能時逐位元相同（例如 `set_fuzzy` 的 0 什麼都不改）；例外是 `set_tone3`（三聲變調與口語變調共用），預設開（`docs/spec/decoder.md` §6.6），0 才和沒有這兩個功能時相同。殼在每次建引擎後把所有設定重送一遍，因為重建的引擎一律從核心預設值開始（§6）。
-- **位元遮罩**：未定義的位元回 2 且狀態不變（`new_packs` 的 `packs`、`set_fuzzy` 的 `flags`）；新增位元就是延伸可接受的遮罩。
+- **位元遮罩**：未定義的位元回 2 且狀態不變（`new_packs` 的 `packs`、`set_fuzzy` 的 `flags`）；新增位元就是延伸可接受的遮罩（`set_fuzzy` 可接受 0–63，位元 0–3 四對模糊音、位元 4 鄰鍵打錯、位元 5 單一注音打錯；64 起回 2）。
 - **移除或改簽名**：核心與殼在同一個改動裡改（舊的 `set_english_inline` 就是被 `set_english_overwrite` 取代後刪除，單字表的載入函式也是）。
 - **改按鍵行為**：`docs/spec/keys-and-composition.md` 的規則表與 `shanjie.h` 在同一個改動裡一起改。
 - 標頭是 C11，CI 用 `-std=c11 -Wall -Wextra -Werror` 編譯（§9），所以宣告不能有警告。
@@ -121,7 +121,7 @@
 ### 5.4 共用部分的 handle
 
 - 用途：切換詞包時建新引擎不再重讀模型檔。`shanjie_engine_share` 在引擎自己的執行緒取出可共用的部分（只複製參照，不讀檔，微秒級）；`shanjie_engine_new_shared` 在任何執行緒用它建新引擎；`shanjie_shared_free` 釋放。做法和重排工作相同：取出在引擎的執行緒、使用在任何執行緒、handle 不借用引擎。
-- 內容（`engine::Shared`）：n-gram 模型（內含的通語 `.sjlm`、辨類 `classes.sjc`、承接 `kn.sjkn` 與兩張連文表 `trigram*.sjt3` 皆為唯讀 mmap）、會意的小模型、常談的表（其 `.sjlm` 為唯讀 mmap）、數字表、英文後接詞表（後四樣來源引擎有載入才有），讀音表，以及資料目錄的路徑。全部是建好後不變的資料，所以來源引擎釋放之後仍可使用；`Send + Sync` 來自欄位的型別，沒有新增 `unsafe impl`（上述唯讀映射檔皆經 `trigram::Mapped` 進到模型與常談表裡）。
+- 內容（`engine::Shared`）：n-gram 模型（內含的通語 `.sjlm`、辨類 `classes.sjc`、承接 `kn.sjkn` 與兩張連文表 `trigram*.sjt3` 皆為唯讀 mmap）、會意的小模型（其 `tinylm.sjtl` 為唯讀 mmap）、常談的表（其 `.sjlm` 為唯讀 mmap）、數字表、英文後接詞表（後四樣來源引擎有載入才有），讀音表，以及資料目錄的路徑。全部是建好後不變的資料，所以來源引擎釋放之後仍可使用；`Send + Sync` 來自欄位的型別，沒有新增 `unsafe impl`：上述唯讀映射檔皆經同一個 `mmap::Mapped`（它的 `unsafe impl Send + Sync` 只讀不寫）進到模型、常談表與小模型裡；會意在 Apple 平台的可清除記憶體狀態全在 `Mutex` 裡（只有整數），`Send + Sync` 來自欄位型別。會意模型檔在小模型活著的期間一直映射著（handle 與用它建的引擎都算），所以那段時間檔案不可原地改寫或截斷（`docs/spec/models.md` §2.2）。
 - 讀音表只在來源引擎與新引擎的詞包列都沒有單音節讀音的列時沿用（讀音表只讀單音節讀音下的單字詞，鍵是音節編號，詞包的音節編號接在基底之後）；否則照 `load_lm` 從詞庫與檔案重建。出貨的五個詞包都沒有單音節的列（`core/tests/engine_share.rs` 斷言）。
 - `new_shared` 等同 `new_packs`（資料目錄是來源引擎的）之後接 `load_lm`、`load_tinylm`、`load_colloquial`：詞庫（含詞包列）、封頂詞庫、預測索引、數字的合法表與詞、常談的詞集、中英混合詞表、降權表與重排保護詞照從檔案建的做法重建；`demote.tsv`、`variant-order.tsv`、`rerank-protect.tsv`、`mixed-words.tsv` 與 `std-exempt.tsv`（讀音表沿用時也讀一次並解析）照讀。不重讀的只有上面列的模型與表。
 - 全有或全無：每一步都成功才回 0；任何一步失敗回非 0、`*out` 是 NULL，已建好的部分全部丟掉，不會交出「有詞庫、沒有模型」的引擎。這一點和從檔案建不同（那條路的 `load_lm`、`load_tinylm`、`load_colloquial` 各自失敗時引擎仍留著）。所以回 0 時，handle 裡有的每一樣在新引擎上都算載入成功。

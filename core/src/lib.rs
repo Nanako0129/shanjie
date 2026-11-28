@@ -13,6 +13,7 @@ pub mod learn;
 pub mod learn_store;
 pub mod lm;
 pub mod mixed;
+mod mmap;
 pub mod predict;
 pub mod reading;
 pub mod tinylm;
@@ -97,6 +98,12 @@ pub struct Lexicon {
     colloq: Vec<Reading>,
     colloq_syls: HashMap<String, u32>,
     main_ents: usize,
+    /// Bit `wi` is set when the `wi`-th word of `by_word` came in through overlay-add.tsv or an enabled pack and mcbpmf-data.txt lacks it
+    /// (`is_overlay_only`; the colloquial term's k, docs/spec/semantic-rerank.md §4). Sandhi, names and `--extra-overlay` rows do not set it.
+    overlay_bits: Vec<u64>,
+    /// The words of that kind that sit in no `by_word` entry: colloquial-tagged rows the lexicon dropped (their word does not have one
+    /// character per syllable). Sorted; empty for the shipped data.
+    overlay_extra: Box<[Box<str>]>,
 }
 
 /// The words added by hand (`manual` rows of overlay-add.tsv) and the rerank-protect words (`Lexicon::with_protected`) as (word, reading):
@@ -202,17 +209,42 @@ struct Raw {
     key_len: u32,
 }
 
+/// Where an overlay row comes from (`Builder::feed_overlay`): only `Overlay` and `Pack` rows count for `Lexicon::is_overlay_only`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum OverlayLayer {
+    Overlay,
+    Sandhi,
+    Names,
+    Pack,
+    Extra,
+}
+
+const SRC_BASE: u8 = 1;
+const SRC_OVL_PACK: u8 = 2;
+
+/// Streaming lexicon builder: `feed_base` once, `feed_overlay` per layer in file order (each text can be dropped right after), then `finish`.
+/// Feeding the layers one by one is the same as feeding their concatenation.
 #[derive(Default)]
-struct Builder {
+pub(crate) struct Builder {
     syl_ids: HashMap<String, u32>,
     syl_names: Vec<String>,
     key_pool: Vec<u32>,
     raw: Vec<Raw>,
     words: String,
+    /// `SRC_*` flags of each row of `raw`.
+    src: Vec<u8>,
+    base_n: usize,
+    /// The base score error, reported first (`parse` returned it before reading any overlay row).
+    bad_base: Option<Error>,
+    /// A bad overlay row stops reading the overlay (later layers too) but is reported only if no earlier row is a duplicate.
+    bad_row: Option<Error>,
+    manual: ManualSet,
+    /// The colloquial rows (reading, word, score, counts for `is_overlay_only`) in file order, put in after everything else (`finish`).
+    colloq: Vec<(String, String, f64, bool)>,
 }
 
 impl Builder {
-    fn push(&mut self, reading: &str, word: &str, score: f64) {
+    fn push(&mut self, reading: &str, word: &str, score: f64, src: u8) {
         let key_off = self.key_pool.len() as u32;
         for s in reading.split('-') {
             let id = match self.syl_ids.get(s) {
@@ -229,6 +261,68 @@ impl Builder {
         let ent = Ent { off: self.words.len() as u32, len: word.len() as u32, score };
         self.words.push_str(word);
         self.raw.push(Raw { ent, key_off, key_len: self.key_pool.len() as u32 - key_off });
+        self.src.push(src);
+    }
+
+    pub(crate) fn feed_base_line(&mut self, line: &str) {
+        if self.bad_base.is_some() || matches!(line.chars().next(), Some('#') | Some('_')) {
+            return;
+        }
+        let mut it = line.split_whitespace();
+        let (Some(reading), Some(word), Some(score), None) = (it.next(), it.next(), it.next(), it.next()) else {
+            return;
+        };
+        if word.chars().count() != reading.split('-').count() {
+            return;
+        }
+        let Ok(score) = score.parse::<f64>() else {
+            self.bad_base = Some(Error::BadScore { token_len: score.chars().count() });
+            return;
+        };
+        self.push(reading, word, score, SRC_BASE);
+    }
+
+    pub(crate) fn finish_base(&mut self) {
+        self.base_n = self.raw.len();
+    }
+
+    /// The rows of mcbpmf-data.txt (`reading word score`, whitespace separated; `#` / `_` lines, other field counts and rows without one
+    /// syllable per character are skipped).
+    pub(crate) fn feed_base(&mut self, text: &str) {
+        for line in text.lines() {
+            self.feed_base_line(line);
+            if self.bad_base.is_some() {
+                break;
+            }
+        }
+        self.finish_base();
+    }
+
+    /// One row `reading\tword\tscore\ttag` of a layer; nothing once a bad base score or a bad overlay row has been seen.
+    pub(crate) fn feed_overlay_line(&mut self, line: &str, layer: OverlayLayer) {
+        if self.bad_base.is_some() || self.bad_row.is_some() {
+            return;
+        }
+        let counts = matches!(layer, OverlayLayer::Overlay | OverlayLayer::Pack);
+        // The rows carry `tone3::DELTA_NEUTRAL`; the evaluation CLI's `--neutral-delta` moves them with the constant (0.0 otherwise).
+        let shift = tone3::DELTA_NEUTRAL - tone3::neutral_delta();
+        match overlay_row(line) {
+            Some((r, w, s, tag)) if tag == tone3::COLLOQ_TAG => self.colloq.push((r.to_string(), w.to_string(), s + shift, counts)),
+            Some((r, w, s, tag)) => {
+                self.push(r, w, s, if counts { SRC_OVL_PACK } else { 0 });
+                if tag == MANUAL_TAG {
+                    self.manual.push(w, r);
+                }
+            }
+            None => self.bad_row = Some(Error::BadOverlayRow { line_len: line.chars().count() }),
+        }
+    }
+
+    /// Overlay rows of one layer, appended in file order.
+    pub(crate) fn feed_overlay(&mut self, text: &str, layer: OverlayLayer) {
+        for line in text.lines() {
+            self.feed_overlay_line(line, layer);
+        }
     }
 }
 
@@ -263,44 +357,9 @@ impl Lexicon {
     /// `parse_with_variants` with the variant-order step given, so a test can build the lexicon with the step as it was written before.
     fn parse_applying(text: &str, overlay: Option<&str>, variants: Option<&VariantOrder>, apply: ApplyVariants) -> Result<Lexicon, Error> {
         let mut b = Builder::default();
-        for line in text.lines() {
-            if matches!(line.chars().next(), Some('#') | Some('_')) {
-                continue;
-            }
-            let mut it = line.split_whitespace();
-            let (Some(reading), Some(word), Some(score), None) = (it.next(), it.next(), it.next(), it.next()) else {
-                continue;
-            };
-            if word.chars().count() != reading.split('-').count() {
-                continue;
-            }
-            let score: f64 = score.parse().map_err(|_| Error::BadScore { token_len: score.chars().count() })?;
-            b.push(reading, word, score);
-        }
-        let base_n = b.raw.len();
-        // A bad overlay row stops parsing but is reported only if no earlier row is a duplicate.
-        let mut bad_row = None;
-        let mut manual = ManualSet::default();
-        // The colloquial rows (reading, word, score) in file order, put in after everything else (`Builder::finish`).
-        let mut colloq: Vec<(&str, &str, f64)> = Vec::new();
-        // The rows carry `tone3::DELTA_NEUTRAL`; the evaluation CLI's `--neutral-delta` moves them with the constant (0.0 otherwise).
-        let shift = tone3::DELTA_NEUTRAL - tone3::neutral_delta();
-        for line in overlay.unwrap_or("").lines() {
-            match overlay_row(line) {
-                Some((r, w, s, tag)) if tag == tone3::COLLOQ_TAG => colloq.push((r, w, s + shift)),
-                Some((r, w, s, tag)) => {
-                    b.push(r, w, s);
-                    if tag == MANUAL_TAG {
-                        manual.push(w, r);
-                    }
-                }
-                None => {
-                    bad_row = Some(Error::BadOverlayRow { line_len: line.chars().count() });
-                    break;
-                }
-            }
-        }
-        b.finish(base_n, bad_row, manual, variants, apply, &colloq)
+        b.feed_base(text);
+        b.feed_overlay(overlay.unwrap_or(""), OverlayLayer::Overlay);
+        b.finish(variants, apply)
     }
 }
 
@@ -379,9 +438,30 @@ fn apply_variant_order_scanning(raw: &mut [Raw], words: &str, key_pool: &[u32], 
 }
 
 impl Builder {
-    fn finish(self, base_n: usize, bad_row: Option<Error>, manual: ManualSet, variants: Option<&VariantOrder>, apply: ApplyVariants, colloq_rows: &[(&str, &str, f64)]) -> Result<Lexicon, Error> {
-        let Builder { syl_ids, syl_names, key_pool, mut raw, words } = self;
+    pub(crate) fn finish(self, variants: Option<&VariantOrder>, apply: ApplyVariants) -> Result<Lexicon, Error> {
+        let Builder { syl_ids, syl_names, key_pool, mut raw, words, src, base_n, bad_base, bad_row, manual, colloq: colloq_rows } = self;
+        if let Some(e) = bad_base {
+            return Err(e);
+        }
         let n = raw.len();
+        // What the colloquial rows will add (the rows whose word has one character per syllable, the readings they sit under), so `ents`,
+        // `words`, `fkeys` and `colloq` are allocated once at their final size instead of growing past it.
+        let (colloq_ents, colloq_word_bytes, colloq_fkeys, colloq_readings) = {
+            let (mut cnt, mut wbytes, mut fklen, mut rc) = (0usize, 0usize, 0usize, 0usize);
+            let mut seen: HashSet<&str> = HashSet::new();
+            for (r, w, _, _) in &colloq_rows {
+                let klen = r.split('-').count();
+                if w.chars().count() == klen {
+                    cnt += 1;
+                    wbytes += w.len();
+                    if seen.insert(r.as_str()) {
+                        rc += 1;
+                        fklen += klen;
+                    }
+                }
+            }
+            (cnt, wbytes, fklen, rc)
+        };
         // Variant order, on the file-order rows, before by_word and the per-reading sort read the scores.
         apply(&mut raw, &words, &key_pool, &syl_ids, variants.map_or(&[][..], |v| &v.rows[..]))?;
         let key = |f: u32| {
@@ -395,28 +475,51 @@ impl Builder {
         // by_word: per distinct word, the first row in file order holding the maximum (strict `>` replaces).
         let mut widx: Vec<u32> = (0..n as u32).collect();
         widx.sort_by(|&a, &b| word(a).cmp(word(b)));
-        let mut winners: Vec<u32> = Vec::new();
+        let nw = (0..n).filter(|&i| i == 0 || word(widx[i]) != word(widx[i - 1])).count();
+        let mut winners: Vec<u32> = Vec::with_capacity(nw);
+        // Per distinct word (`by_word` index `wi`): the bit of `overlay_only` (some overlay or pack row, no base row) and of "has a base row".
+        let mut overlay_bits = vec![0u64; nw / 64 + 1];
+        let mut base_bits = vec![0u64; nw / 64 + 1];
         let mut i = 0;
         while i < n {
             let mut cur = widx[i];
+            let mut flags = src[cur as usize];
             let mut j = i + 1;
             while j < n && word(widx[j]) == word(cur) {
+                flags |= src[widx[j] as usize];
                 if raw[widx[j] as usize].ent.score > raw[cur as usize].ent.score {
                     cur = widx[j];
                 }
                 j += 1;
             }
+            let wi = winners.len();
+            if flags & SRC_BASE != 0 {
+                base_bits[wi >> 6] |= 1 << (wi & 63);
+            } else if flags & SRC_OVL_PACK != 0 {
+                overlay_bits[wi >> 6] |= 1 << (wi & 63);
+            }
             winners.push(cur);
             i = j;
         }
         drop(widx);
+        drop(src);
 
         // Group rows by reading (stable: file order kept inside a group).
         let mut order: Vec<u32> = (0..n as u32).collect();
         order.sort_by(|&a, &b| key(a).cmp(key(b)));
         let mut dup: Option<u32> = None;
-        let mut readings: Vec<Reading> = Vec::new();
-        let mut fkeys: Vec<u32> = Vec::new();
+        let (reading_count, main_fkeys) = {
+            let (mut rc, mut fk) = (0usize, 0usize);
+            for p in 0..n {
+                if p == 0 || key(order[p]) != key(order[p - 1]) {
+                    rc += 1;
+                    fk += key(order[p]).len();
+                }
+            }
+            (rc, fk)
+        };
+        let mut readings: Vec<Reading> = Vec::with_capacity(reading_count);
+        let mut fkeys: Vec<u32> = Vec::with_capacity(main_fkeys + colloq_fkeys);
         let mut max_len = 0;
         let mut s = 0;
         while s < n {
@@ -441,6 +544,7 @@ impl Builder {
             max_len = max_len.max(k.len());
             s = e;
         }
+        drop(key_pool);
         if let Some(f) = dup {
             return Err(Error::OverlayDuplicate { word_len: word(f).chars().count() });
         }
@@ -454,14 +558,39 @@ impl Builder {
         for (p, &f) in order.iter().enumerate() {
             pos[f as usize] = p as u32;
         }
-        let by_word = winners.iter().map(|&f| pos[f as usize]).collect();
-        let mut ents: Vec<Ent> = order.iter().map(|&f| raw[f as usize].ent).collect();
+        let by_word: Vec<u32> = winners.iter().map(|&f| pos[f as usize]).collect();
+        drop(winners);
+        drop(pos);
+        let mut ents: Vec<Ent> = Vec::with_capacity(n + colloq_ents);
+        ents.extend(order.iter().map(|&f| raw[f as usize].ent));
+        drop(order);
+        drop(raw);
         let main_ents = ents.len();
+        overlay_bits.truncate(by_word.len() / 64 + 1);
+        // The colloquial-tagged rows of overlay-add.tsv and the packs count for `overlay_only` too, unless the base has the word.
+        let mut overlay_extra: Vec<Box<str>> = Vec::new();
+        {
+            let at = |p: u32| {
+                let e = &ents[p as usize];
+                &words[e.off as usize..(e.off + e.len) as usize]
+            };
+            for (_, w, _, _) in colloq_rows.iter().filter(|r| r.3) {
+                match by_word.binary_search_by(|&p| at(p).cmp(w.as_str())) {
+                    Ok(wi) if base_bits[wi >> 6] >> (wi & 63) & 1 == 0 => overlay_bits[wi >> 6] |= 1 << (wi & 63),
+                    Ok(_) => {}
+                    Err(_) => overlay_extra.push(w.as_str().into()),
+                }
+            }
+        }
+        drop(base_bits);
+        overlay_extra.sort();
+        overlay_extra.dedup();
         let (mut fkeys, mut words) = (fkeys, words);
+        words.reserve_exact(colloq_word_bytes);
         // The colloquial rows: their own syllable numbers after the lexicon's, their readings sorted by key (file order kept under one), best score first.
         let mut colloq_syls: HashMap<String, u32> = HashMap::new();
-        let mut rows: Vec<(Vec<u32>, Ent)> = Vec::with_capacity(colloq_rows.len());
-        for &(reading, word, score) in colloq_rows {
+        let mut rows: Vec<(Vec<u32>, Ent)> = Vec::with_capacity(colloq_ents);
+        for (reading, word, score, _) in colloq_rows.iter().map(|(r, w, s, c)| (r.as_str(), w.as_str(), *s, *c)) {
             let mut key = Vec::new();
             for s in reading.split('-') {
                 let next = (syl_names.len() + colloq_syls.len()) as u32;
@@ -473,8 +602,9 @@ impl Builder {
             rows.push((key, Ent { off: words.len() as u32, len: word.len() as u32, score }));
             words.push_str(word);
         }
+        drop(colloq_rows);
         rows.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.score.partial_cmp(&a.1.score).unwrap_or(std::cmp::Ordering::Equal)));
-        let mut colloq: Vec<Reading> = Vec::new();
+        let mut colloq: Vec<Reading> = Vec::with_capacity(colloq_readings);
         for (i, (key, ent)) in rows.iter().enumerate() {
             if i == 0 || rows[i - 1].0 != *key {
                 colloq.push(Reading { key_off: fkeys.len() as u32, key_len: key.len() as u32, start: ents.len() as u32 });
@@ -482,7 +612,8 @@ impl Builder {
             }
             ents.push(*ent);
         }
-        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word, manual: Arc::new(manual), variants: Vec::new(), tol: OnceLock::new(), colloq, colloq_syls, main_ents };
+        drop(rows);
+        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word, manual: Arc::new(manual), variants: Vec::new(), tol: OnceLock::new(), colloq, colloq_syls, main_ents, overlay_bits, overlay_extra: overlay_extra.into_boxed_slice() };
         let found: Vec<(usize, VariantRow)> = variants.map_or(&[][..], |v| &v.rows[..]).iter().filter_map(|(_, v)| Some((lex.find(&lex.ids(&v.reading))?, v.clone()))).collect();
         lex.variants = found;
         lex.words.shrink_to_fit();
@@ -561,6 +692,14 @@ impl Lexicon {
         let i = self.colloq.binary_search_by(|r| self.key_of(r).cmp(&ids)).ok()?;
         Some(self.colloq[i].start as usize..self.colloq.get(i + 1).map_or(self.ents.len(), |n| n.start as usize))
     }
+    /// Whether `w` came in through overlay-add.tsv or an enabled pack and mcbpmf-data.txt lacks it: the words the colloquial term's k counts
+    /// (`colloquial::Colloquial::k`). Sandhi, names and `--extra-overlay` rows do not count.
+    pub fn is_overlay_only(&self, w: &str) -> bool {
+        match self.by_word.binary_search_by(|&p| self.word(p as usize).cmp(w)) {
+            Ok(wi) => self.overlay_bits[wi >> 6] >> (wi & 63) & 1 == 1,
+            Err(_) => self.overlay_extra.binary_search_by(|x| (**x).cmp(w)).is_ok(),
+        }
+    }
     /// The entry ranges of all colloquial readings (for `CappedLexicon`, which caps their words like any other).
     pub(crate) fn colloq_ranges(&self) -> impl Iterator<Item = std::ops::Range<usize>> + '_ {
         (0..self.colloq.len()).map(|i| self.colloq[i].start as usize..self.colloq.get(i + 1).map_or(self.ents.len(), |n| n.start as usize))
@@ -633,6 +772,25 @@ impl Lexicon {
         self.tol().adjacent(shown).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
     }
 
+    /// One symbol (bit 5): the lexicon syllables that show as the unknown `shown` when one symbol of them is replaced by another of its column
+    /// (docs/spec/decoder.md §6.2), sorted by name. Empty for a syllable the lexicon has.
+    pub fn one_sym_alts(&self, shown: &str) -> Vec<&str> {
+        self.tol().one_sym(shown).iter().map(|&i| self.syl_names[i as usize].as_str()).collect()
+    }
+
+    /// The lexicon syllables an unknown syllable `syl` is read through under `flags` (docs/spec/decoder.md §6.3): without bit 5 only
+    /// the adjacent-key table (the table of every flags value before bit 5 existed: never `one_sym`); bit 5 alone only the one-symbol table; both bits the
+    /// adjacent table first and, with `extra`, the one-symbol syllables the adjacent table does not hold (the second source, a larger penalty).
+    fn unknown_alts(&self, syl: &str, flags: u32, extra: bool) -> Vec<u32> {
+        let one = flags & fuzzy::FUZZY_ONE_SYM != 0;
+        let both = one && flags & fuzzy::FUZZY_ADJACENT != 0;
+        if extra {
+            let adj = self.tol().adjacent(syl);
+            return if both { self.tol().one_sym(syl).iter().copied().filter(|a| !adj.contains(a)).collect() } else { Vec::new() };
+        }
+        if one && !both { self.tol().one_sym(syl).to_vec() } else { self.tol().adjacent(syl).to_vec() }
+    }
+
     /// The readings (syllable ids) of the words a span may be tolerantly read as: exactly one syllable replaced. A span with an
     /// unknown syllable (id `u32::MAX`) replaces that syllable by its adjacent alternatives (none when it has two or more
     /// unknown ones); a span of known syllables replaces each syllable by its fuzzy-sound alternatives (`flags` bits 0-3).
@@ -640,7 +798,9 @@ impl Lexicon {
     ///
     /// `t3` is the span's slice of the sandhi position table (docs/spec/decoder.md §6.6; empty for none): an unknown syllable the table marks unaccepted (or an
     /// unaccepted tail) was accepted by the sandhi rule, not as a slip, so it has no adjacent reading here, whatever the adjacent bit says: it is read as Xˇ only.
-    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32, t3: &[tone3::Pos]) -> Vec<Vec<u32>> {
+    ///
+    /// Bit 5 (docs/spec/decoder.md §6.4): see `unknown_alts`; `extra` asks for the second source of a span read through both bits.
+    pub(crate) fn tolerant_readings(&self, ids: &[u32], syls: &[String], flags: u32, t3: &[tone3::Pos], extra: bool) -> Vec<Vec<u32>> {
         let mut out = Vec::new();
         let mut put = |j: usize, alts: &[u32]| {
             for &a in alts {
@@ -652,8 +812,8 @@ impl Lexicon {
         let unknown: Vec<usize> = (0..ids.len()).filter(|&j| ids[j] == u32::MAX).collect();
         match unknown[..] {
             [j] if t3.get(j).is_some_and(|p| p.unaccepted) => {}
-            [j] => put(j, self.tol().adjacent(&syls[j])),
-            [] if flags & fuzzy::FUZZY_SOUND != 0 => (0..ids.len()).for_each(|j| put(j, self.tol().sound(ids[j], flags))),
+            [j] => put(j, &self.unknown_alts(&syls[j], flags, extra)),
+            [] if flags & fuzzy::FUZZY_SOUND != 0 && !extra => (0..ids.len()).for_each(|j| put(j, self.tol().sound(ids[j], flags))),
             _ => {}
         }
         out
@@ -678,7 +838,27 @@ impl Lexicon {
         if flags & fuzzy::FUZZY_SOUND == 0 && !ids.contains(&u32::MAX) {
             return (Vec::new(), Vec::new());
         }
-        self.pick(self.tolerant_readings(ids, syls, flags, t3), ids, per_reading, total, entry, &HashSet::new())
+        self.pick(self.tolerant_readings(ids, syls, flags, t3, false), ids, per_reading, total, entry, &HashSet::new())
+    }
+
+    /// The second source of a span with an unknown syllable under both bit 4 and bit 5: the words of the one-symbol readings that the adjacent-key
+    /// readings do not hold, without the words `taken` (those `tolerant_pick` found). Nothing under any other flags.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn tolerant_pick_extra<'a>(
+        &self,
+        ids: &[u32],
+        syls: &[String],
+        flags: u32,
+        t3: &[tone3::Pos],
+        per_reading: usize,
+        total: usize,
+        entry: impl Fn(usize) -> (&'a str, f64),
+        taken: &HashSet<&str>,
+    ) -> (Vec<(usize, Vec<u32>)>, Vec<(&'a str, f64, usize, usize)>) {
+        if !ids.contains(&u32::MAX) || flags & fuzzy::FUZZY_ONE_SYM == 0 || flags & fuzzy::FUZZY_ADJACENT == 0 {
+            return (Vec::new(), Vec::new());
+        }
+        self.pick(self.tolerant_readings(ids, syls, flags, t3, true), ids, per_reading, total, entry, taken)
     }
 
     /// The sandhi source of a span (docs/spec/decoder.md §6.6): `tolerant_pick` over the readings `tone3::readings` gives for the span's slice `t3` of the
@@ -777,7 +957,11 @@ impl Lexicon {
         let entry = |p: usize| (self.word(p), self.ents[p].score);
         let name = |r: &[u32]| r.iter().map(|&i| self.syl_names[i as usize].clone()).collect::<Vec<String>>();
         let (readings, words) = self.tolerant_pick(&ids, key, flags, t3, usize::MAX, usize::MAX, entry);
+        // Both bit 4 and bit 5: the adjacent-key words are listed first, then the one-symbol words they do not hold (docs/spec/decoder.md §6.4).
+        let taken: HashSet<&str> = words.iter().map(|w| w.0).collect();
+        let (extra_readings, extra_words) = self.tolerant_pick_extra(&ids, key, flags, t3, usize::MAX, usize::MAX, entry, &taken);
         let mut out: Vec<(&str, Vec<String>)> = words.into_iter().map(|(w, _, _, a)| (w, name(&readings[a].1))).collect();
+        out.extend(extra_words.into_iter().map(|(w, _, _, a)| (w, name(&extra_readings[a].1))));
         let (readings, words) = self.tone3_pick(&ids, t3, usize::MAX, usize::MAX, entry);
         let taken: HashSet<&str> = words.iter().map(|w| w.0).collect();
         // Then K's one-syllable words and the neutral source's, the order the decoder reads them in.
@@ -799,12 +983,19 @@ impl Lexicon {
     /// `t3` is the position table of `syls` (`tone3::positions`, docs/spec/decoder.md §6.6): a word read through the sandhi source is given under the lexicon
     /// reading it was found under too. An empty `t3` (or all empty positions) is the table of the switch off.
     pub fn path_readings<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>, t3: &[tone3::Pos]) -> Vec<String> {
+        self.path_readings_with_fuzzy(syls, words, t3, 0)
+    }
+
+    /// `path_readings` with the flags the path was decoded under (docs/spec/decoder.md §7): bit 5 reads an unknown syllable through the
+    /// one-symbol table, bits 4 and 5 through both. The sound bits (0-3) are masked out, so they never reach the readings (and the manual-word mask).
+    pub fn path_readings_with_fuzzy<'a>(&self, syls: &[String], words: impl IntoIterator<Item = (&'a str, usize)>, t3: &[tone3::Pos], flags: u32) -> Vec<String> {
+        let flags = flags & (fuzzy::FUZZY_ADJACENT | fuzzy::FUZZY_ONE_SYM);
         let mut out: Vec<String> = Vec::with_capacity(syls.len());
         for (w, l) in words {
             let at = out.len();
             let Some(span) = syls.get(at..at + l) else { return syls.to_vec() };
             // `tolerant_words` with the table: the adjacent readings of an unknown syllable that is no unaccepted one, then the sandhi readings.
-            let tolerated = self.tolerant_words(span, 0, t3.get(at..at + l).unwrap_or(&[])).into_iter().find(|(tw, _)| *tw == w);
+            let tolerated = self.tolerant_words(span, flags, t3.get(at..at + l).unwrap_or(&[])).into_iter().find(|(tw, _)| *tw == w);
             match tolerated {
                 Some((_, reading)) => out.extend(reading),
                 None => out.extend_from_slice(span),

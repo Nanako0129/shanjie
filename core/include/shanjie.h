@@ -254,7 +254,7 @@ int32_t shanjie_engine_set_candidate_length_cap(ShanjieEngine *engine, uint32_t 
 //   column (`o k` is `ok`; the switch set_english_overwrite), (b) a Zhuyin key in a column before one that is filled (`l s` is
 //   `ls`; only with set_english_key_order 1 and set_english_reversal_guard 0, so not by default), (c) Space or a tone key that completes a syllable the lexicon lacks (`c u p` Space is
 //   `cup`, `s 7` is `s7`; Space under set_english alone, a tone key under set_english_key_order), except when the adjacent-key rule
-//   of set_fuzzy (bit 4) or sandhi (set_tone3: Xˊ without a one-syllable entry whose Xˇ has one, ㄨㄛˊ; X˙ without one whose Xˇ has one, right after a
+//   of set_fuzzy (bit 4), its one-symbol rule (bit 5: a tone key always, Space only when no column of the syllable was overwritten, so `line` stays English) or sandhi (set_tone3: Xˊ without a one-syllable entry whose Xˇ has one, ㄨㄛˊ; X˙ without one whose Xˇ has one, right after a
 //   second-tone syllable; or X˙ without one, after any syllable of the composition, when one of X, Xˊ, Xˇ, Xˋ has one: ㄌㄧˋ ㄏㄞ˙) accepts the syllable.
 //   The digit row never reads such a syllable from digit keys: `5 0 6` stays 506 and `1 0 7` 107 whatever set_tone3 says. A word typed in column order whose one-tone syllable exists (`ai`, `ui`, `up`, `mp3` ...)
 //   never reverts: the candidate list opened right after it adds its lower and upper case as its last two items, and choosing one
@@ -327,16 +327,22 @@ int32_t shanjie_engine_set_english(ShanjieEngine *engine, uint32_t enabled, Shan
 //   (an English run is text), so the snapshot is the output before the call. Call it after every engine creation, like set_english.
 int32_t shanjie_engine_set_english_overwrite(ShanjieEngine *engine, uint32_t enabled, ShanjieOutput **out); // 0 or 1; returns a snapshot
 // fuzzy input (docs/spec/decoder.md §6): set_fuzzy flags are bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ, in that order)
-//   and bit 4 the adjacent-key slips; any other bit returns 2 with the state unchanged. Default 0 at engine creation, and 0 changes
+//   bit 4 the adjacent-key slips and bit 5 the one-symbol slips (docs/spec/decoder.md §6); any other bit returns 2 with the state unchanged. Default 0 at engine creation, and 0 changes
 //   nothing. The codes and the snapshot (handled 1, commit "") are those of set_english; the composition is recomputed, so the
 //   snapshot shows it. A sound pair also reads a word through one syllable replaced by the other of the pair (a lower score); the
 //   rerank never chooses such a word: a stretch whose n-gram first has one is not reranked, the others offer the model only paths without one.
 //   Bit 4, with a loaded model and the standard layout (it does nothing with the ETen layout), makes a tone key accept a syllable the
 //   lexicon lacks when a key typed as a left or right neighbour in its keyboard row would give a syllable it has; the composition
 //   then shows the word read through that syllable. A syllable already accepted keeps decoding when bit 4 is turned off. The
-//   candidate window lists such words after the exact ones; choosing one makes the span the word's lexicon reading. Call it after
+//   candidate window lists such words after the exact ones; choosing one makes the span the word's lexicon reading. Bit 5, with a
+//   loaded model and either layout, makes a tone key (and Space, unless it closes a syllable some column of which was overwritten
+//   while typing, which stays English) accept a syllable the lexicon lacks when replacing one symbol of a lexicon syllable by another
+//   of its column (initial, medial or final; the tone kept) would show it: ㄒㄧㄟˇ is read as ㄒㄧㄤˇ, ㄒㄧㄚˇ ... With both bit 4 and bit 5
+//   the adjacent-key readings come first and rank above the one-symbol ones; the ETen layout reads bit 5 only, whatever bit 4 says.
+//   A syllable bit 5 is on for and the lexicon lacks is never written to the learning file, with 48 also one that bit 4 accepted. Turning bit 5 off, or on without bit 4, first stores every
+//   accepted syllable of the composition as the lexicon reading it shows as now, so the text stays. Call it after
 //   every engine creation, like set_english.
-int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out); // bits 0-4; returns a snapshot
+int32_t shanjie_engine_set_fuzzy(ShanjieEngine *engine, uint32_t flags, ShanjieOutput **out); // bits 0-5; returns a snapshot
 // third-tone and colloquial sandhi, one switch (docs/spec/decoder.md §6.6, §8.7, docs/spec/keys-and-composition.md §3.2): set_tone3 0 or 1 (2 otherwise, state unchanged),
 //   default 1 at engine creation; the codes and the snapshot (handled 1, commit "") are those of set_fuzzy, and the composition is recomputed.
 //   With 1 and a loaded model, a second-tone syllable typed as said (ㄓㄚˊ ㄧㄢˇ) also reads the words whose lexicon reading has the third tone there
@@ -539,18 +545,22 @@ typedef struct ShanjieRerankJob ShanjieRerankJob;
 //   zero for none; versions 1 to 3 count as none; the loaded kn.sjkn, or none, must match all 32 bytes; docs/spec/models.md §6.2
 //   docs/spec/semantic-rerank.md §2.3) (a pairing check only, not an integrity check of the .sjtl); the engine keeps its previous model (or none) and
 //   the n-gram keeps working. 1 for a NULL engine or path, 2 for a path that is not UTF-8. Does not change the rerank setting
-//   (set_rerank) or the current display.
+//   (set_rerank) or the current display. The file is memory-mapped read-only for as long as the small model lives (this engine, and
+//   any ShanjieShared or engine built from it): it must not be truncated or rewritten in place meanwhile (replace it by rename, or after
+//   freeing them; docs/spec/models.md §2.2). Nothing is written to disk; on Apple platforms the restored weights live in purgeable
+//   memory of the process (docs/spec/semantic-rerank.md §2.4).
 int32_t shanjie_engine_load_tinylm(ShanjieEngine *engine, const char *path);
 // load_colloquial: the colloquial table (colloquial.sjlm, docs/spec/semantic-rerank.md §4), loaded as a read-only memory map
 //   (docs/spec/decoder.md §3.5): while an engine has it loaded it must not be truncated or rewritten in place (replace by rename).
-//   The engine reads the word sets of its k term
-//   from the lexicon folder it was created with (mcbpmf-data.txt, overlay-add.tsv) and from the pack rows it was created with. May be
+//   The engine takes the word sets of its k term
+//   from the lexicon it was created with (built from mcbpmf-data.txt, overlay-add.tsv and the pack rows it was created with; those files are not read
+//   again). May be
 //   called before or after load_lm and load_tinylm (the table does not depend on them). The term applies per job, only with the chat
 //   profile, at any of the three rerank strengths (each with its own alpha, tau and delta: docs/spec/semantic-rerank.md §4.4) and a small
 //   model whose SHA-256 is the one the term was measured with; in every other case the jobs are those of an engine without the table. Loading also turns the
 //   first-word estimate on (docs/spec/semantic-rerank.md §4): a first word the table has no sentence-start bigram for is scored by the table's unigram
-//   estimate, not by the sentence-start back-off. 3 when a file cannot be read or is malformed (the engine keeps its previous table,
-//   or none); 1 for a NULL engine or path; 2 for a path that is not UTF-8. Drops the pending rerank job. Never log the path.
+//   estimate, not by the sentence-start back-off. 3 when colloquial.sjlm cannot be read or is malformed, or the engine has no lexicon folder
+//   (the engine keeps its previous table, or none); 1 for a NULL engine or path; 2 for a path that is not UTF-8. Drops the pending rerank job. Never log the path.
 int32_t shanjie_engine_load_colloquial(ShanjieEngine *engine, const char *path);
 // set_rerank 0 or 1 (2 otherwise, state unchanged), default 0 at engine creation (S7c-2c), like set_demote in its codes and its
 //   snapshot (handled 1, commit ""): it recomputes the composition, so turning it off shows the n-gram result at once; 1 when engine or
@@ -593,7 +603,8 @@ void    shanjie_rerank_free(ShanjieRerankJob *job);
 
 // Parts shared between engines (docs/spec/c-abi.md §5.4): a pack switch builds a new engine without reading the model files again.
 //   A ShanjieShared owns only data: the loaded n-gram model (the .sjlm file, classes.sjc, kn.sjkn and the two trigram tables inside
-//   it are read-only memory maps), the small model, the colloquial table (its .sjlm file is a read-only memory map), the digit table,
+//   it are read-only memory maps), the small model (its .sjtl is a read-only memory map too: the same no-rewrite-in-place rule as
+//   load_tinylm), the colloquial table (its .sjlm file is a read-only memory map), the digit table,
 //   the English follower table and the reading table when it can be reused (no enabled pack of
 //   either engine holds a one-syllable reading), plus the data folder's path. No user input is in it (no left context, composition,
 //   candidates or choice memory). It borrows nothing from the engine, so it stays valid after the engine is freed, and it never changes.

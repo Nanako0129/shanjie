@@ -23,7 +23,7 @@
   - `com.apple.security.temporary-exception.mach-register.global-name = [<bundle ID>_Connection]`，必須逐字等於 Info.plist 的 `InputMethodConnectionName`，由 `BUNDLE_ID` 產生，不寫死。
 - Sparkle 的程式碼位置與 `善解更新.app` 沒有 entitlements；安裝程式（`com.nyanako.shanjie.installer`）沒有 entitlements。
 - 輸入法程序寫入的檔案只有學習資料夾 `~/Library/Application Support/shanjie`（沙盒版實際在 container 裡）與 `UserDefaults.standard` 的偏好設定。沒有其他快取、暫存檔或日誌檔。
-- 讀取：模型、詞庫與詞包都來自 bundle 的 `Resources`；通語（`bigram.sjlm`）、常談（`colloquial.sjlm`）、辨類（`classes.sjc`）、承接（`kn.sjkn`）與三元表（`trigram*.sjt3`）皆用唯讀 mmap；系統標點表來自 `/System/Library/PrivateFrameworks/CoreChineseEngine.framework`。
+- 讀取：模型、詞庫與詞包都來自 bundle 的 `Resources`；通語（`bigram.sjlm`）、常談（`colloquial.sjlm`）、辨類（`classes.sjc`）、承接（`kn.sjkn`）、三元表（`trigram*.sjt3`）與會意模型（`tinylm.sjtl`）皆用唯讀 mmap；系統標點表來自 `/System/Library/PrivateFrameworks/CoreChineseEngine.framework`。會意在 Apple 平台把 int8 矩陣還原到程序自己的 Mach 可清除記憶體（匿名、不落盤，`docs/spec/semantic-rerank.md` §2.4），不寫任何檔。
 - 沙盒版第一次啟動時，系統把舊版（沒有沙盒）的學習資料夾與偏好設定搬進 container；移轉清單 `container-migration.plist`（`Move = [${ApplicationSupport}/shanjie]`）只放在正式 bundle ID 的組建，開發版與拋棄式組建不帶，所以不會搬走真正的學習資料。偏好設定不在清單裡，系統自己搬。
 - 本機組建預設用開發版 bundle ID（`com.nyanako.inputmethod.shanjie.dev`），不碰正式 ID 的資料；`scripts/check-app.sh` 在 `CI` 未設定時拒絕執行正式 ID 的組建。
 
@@ -42,7 +42,7 @@
 - C ABI 的每個匯出函式都包 `catch_unwind`，並安裝靜音的 panic hook（`core/src/ffi.rs` 的 `guard`、`quiet_panics`）；panic 變成回傳碼 4（`SHANJIE_ERR_INTERNAL`），不印 payload。
 - `panic = "abort"` 時建置失敗（`compile_error!`）：靜音機制依賴 unwind。
 - 核心的所有 `Err` 與 panic 訊息只帶錯誤種類與長度，不含輸入的讀音、文字或路徑。
-- `unsafe` 只在這幾處：C ABI（`ffi.rs`）；n-gram 模型與伴生表的唯讀映射（`trigram.rs` 的 `Mapped`：Unix 的 `mmap`／`munmap`，Windows 的 `CreateFileMappingW`／`MapViewOfFile`，供通語／常談 `.sjlm`、辨類 `classes.sjc`、承接 `kn.sjkn` 與三元表 `trigram*.sjt3` 共用）以及 `lm.rs` 呼叫 `Mapped::open` 映射模型與各伴生表的呼叫點；學習檔的 `fcntl`（`F_BARRIERFSYNC`／`F_FULLFSYNC`）與 `geteuid`（`learn_store.rs`）；取本地日期的 `time`／`localtime_r`、Windows 的 `GetLocalTime`（`learn.rs`）；會意在 Apple 平台（macOS；iOS 在 CI 只檢查編譯，測試只在本機模擬器跑）走 Accelerate 的 `cblas_sgemm`、`vvtanhf`／`vvexpf`（`tinylm.rs`）；會意在 x86-64 的向量化矩陣乘法（`tinylm.rs`）：`#[target_feature(enable = "avx2")]`／`"avx512f"` 的核心函式只在 `is_x86_feature_detected!` 成立後呼叫，`unsafe` 只用在那個呼叫點和切片區塊上的未對齊載入與儲存（`_mm256_loadu_ps`／`_mm256_storeu_ps`、`_mm512_loadu_ps`／`_mm512_storeu_ps`），長度前提和 Accelerate 一樣在進入前用 `assert!`（release 也檢查）；`lm.rs` 延長預測索引生命期的一處 `transmute`。
+- `unsafe` 只在這幾處：C ABI（`ffi.rs`）；n-gram 模型、伴生表與會意模型檔的唯讀映射（`mmap.rs` 的 `Mapped`，`trigram.rs` 轉匯出：Unix 的 `mmap`／`munmap`，Windows 的 `CreateFileMappingW`／`MapViewOfFile`，供通語／常談 `.sjlm`、辨類 `classes.sjc`、承接 `kn.sjkn`、三元表 `trigram*.sjt3` 與會意 `tinylm.sjtl` 共用；它的 `unsafe impl Send + Sync` 只讀不寫）以及 `lm.rs` 呼叫 `Mapped::open` 映射模型與各伴生表、`tinylm.rs` 呼叫 `Mapped::open_bounded` 開模型的呼叫點；會意在 Apple 平台的可清除記憶體（`tinylm.rs` 的 `purgeable`：`vm_allocate`／`vm_deallocate`／`vm_purgable_control`，以及在鎖內、沒有釘住者時才寫入的還原切片；狀態全在 `Mutex` 裡，`Send + Sync` 來自欄位型別，沒有 `unsafe impl`）；學習檔的 `fcntl`（`F_BARRIERFSYNC`／`F_FULLFSYNC`）與 `geteuid`（`learn_store.rs`）；取本地日期的 `time`／`localtime_r`、Windows 的 `GetLocalTime`（`learn.rs`）；會意在 Apple 平台（macOS；iOS 在 CI 只檢查編譯，測試只在本機模擬器跑）走 Accelerate 的 `cblas_sgemm`、`vvtanhf`／`vvexpf`（`tinylm.rs`）；會意在 x86-64 的向量化矩陣乘法（`tinylm.rs`）：`#[target_feature(enable = "avx2")]`／`"avx512f"` 的核心函式只在 `is_x86_feature_detected!` 成立後呼叫，`unsafe` 只用在那個呼叫點和切片區塊上的未對齊載入與儲存（`_mm256_loadu_ps`／`_mm256_storeu_ps`、`_mm512_loadu_ps`／`_mm512_storeu_ps`），長度前提和 Accelerate 一樣在進入前用 `assert!`（release 也檢查）；`lm.rs` 延長預測索引生命期的一處 `transmute`。
 - 學習紀錄在送出之後的處理（`engine.rs` 中送出後學習的區塊）自己有 `catch_unwind`：學習失敗不影響已經送出的文字。
 
 ## 5. 隱私閘門（privacyGate）與前文

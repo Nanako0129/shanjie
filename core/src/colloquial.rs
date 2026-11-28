@@ -10,6 +10,7 @@
 //! registers for the 會意 SJ-SR-10-31M re-ranker; none of them comes from the `.sjtl` header.
 use crate::lm::{Lm, LmError, Profile};
 use crate::tinylm::{pick_masked, RerankLevel, TinyLm};
+use crate::Lexicon;
 use std::collections::HashSet;
 use std::fmt;
 use std::io::BufRead;
@@ -89,12 +90,19 @@ impl ColloquialTable {
     }
 }
 
+/// The words k counts: read off the lexicon the engine was built with (`Lexicon::is_overlay_only`), or a set built from the files
+/// (`Colloquial::with_table`, tests and tools that have no lexicon).
+enum OverlayMask {
+    Bits(Arc<Lexicon>),
+    Set(HashSet<String>),
+}
+
 pub struct Colloquial {
     table: Arc<ColloquialTable>,
     /// The words of overlay-add.tsv and of the packs the engine was built with (not names-add.tsv, not sandhi-add.tsv) that mcbpmf-data.txt
     /// lacks: the only words k counts, so the two full sets are never kept (keeping them cost about 10 MiB more peak RSS on a Mac, measured
     /// with 3 runs of `/usr/bin/time -l`).
-    overlay_only: HashSet<String>,
+    overlay_only: OverlayMask,
     /// SR-TW-C (research): the first word of a split scored by the table's unigram estimate instead of
     /// P(w | `<s>`). Off after `load` and in the engine; only the evaluation CLI's `--colloquial-first-unigram` turns it on.
     first_unigram: bool,
@@ -141,7 +149,18 @@ impl Colloquial {
             take(&l.map_err(|_| ColloquialError::Read)?);
         }
         pack_text.unwrap_or("").lines().for_each(&mut take);
-        Ok(Colloquial { table, overlay_only, first_unigram: false, unseen_start_unigram: false })
+        Ok(Colloquial { table, overlay_only: OverlayMask::Set(overlay_only), first_unigram: false, unseen_start_unigram: false })
+    }
+
+    /// `load` on a table already loaded, with the word sets of k read off `lex` (`Lexicon::is_overlay_only`): no file is read, so the lexicon
+    /// must be the one the engine (or the evaluation CLI) runs on, built with the same packs.
+    pub fn with_table_lexicon(table: Arc<ColloquialTable>, lex: Arc<Lexicon>) -> Colloquial {
+        Colloquial { table, overlay_only: OverlayMask::Bits(lex), first_unigram: false, unseen_start_unigram: false }
+    }
+
+    /// `with_table_lexicon` on the table at `table`.
+    pub fn load_with_lexicon(table: &Path, lex: Arc<Lexicon>) -> Result<Colloquial, ColloquialError> {
+        Ok(Colloquial::with_table_lexicon(Arc::new(ColloquialTable::load(table)?), lex))
     }
 
     /// `load` with the base lexicon and the overlay read from `lexicon_dir` (`mcbpmf-data.txt`, `overlay-add.tsv`): the one place the engine
@@ -201,7 +220,11 @@ impl Colloquial {
 
     /// k: words of the split in the overlay set and not in the base lexicon, repeats counted.
     pub fn k<S: AsRef<str>>(&self, words: &[S]) -> usize {
-        words.iter().filter(|w| self.overlay_only.contains(w.as_ref())).count()
+        let only = |w: &str| match &self.overlay_only {
+            OverlayMask::Bits(lex) => lex.is_overlay_only(w),
+            OverlayMask::Set(set) => set.contains(w),
+        };
+        words.iter().filter(|w| only(w.as_ref())).count()
     }
 
     /// col = lc - GAMMA_PER_MU * k (the P4d colloquial score of one candidate's word split).

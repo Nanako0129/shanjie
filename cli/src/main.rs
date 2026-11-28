@@ -520,7 +520,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
                 delta_sound = val()?.parse::<f64>().ok().filter(|d| d.is_finite() && *d > 0.0).ok_or("--fuzzy-delta-sound takes a number above 0")?;
                 delta_given = true;
             }
-            "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-31")?),
+            "--fuzzy" => fuzzy = Some(val()?.parse::<u32>().ok().filter(|f| f & !FUZZY_ALL == 0).ok_or("--fuzzy takes flags 0-63")?),
             "--no-recur" => recur = false,
             "--no-pool-recur" => pool_recur = false,
             "--pool-mask-diff" => pool_mask_diff = Some(val()?),
@@ -649,11 +649,12 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
     }
     let rss_after = tinylm.is_some().then(rss_kb).flatten();
     let dir = root().join("data/lexicon");
-    // The colloquial table and the word sets of its k term, from the engine's own loader (the engine's pack rows are the `--packs` rows).
+    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
+    // The colloquial table and the word sets of its k term, read off the lexicon just built (the engine's own way: its pack rows are the `--packs` rows,
+    // `--extra-overlay` rows do not count).
     let colloq = match &colloquial_core {
         Some(f) => {
-            let pack_text = read_packs_detailed(&pdir, packs).map_err(|e| e.to_string())?;
-            let mut co = Colloquial::load_from_dir(f, &dir, Some(&pack_text)).map_err(|e| format!("--colloquial-core: {e}"))?;
+            let mut co = Colloquial::load_with_lexicon(f, lex.clone()).map_err(|e| format!("--colloquial-core: {e}"))?;
             co.set_first_unigram(first_unigram);
             co.set_unseen_start_unigram(!no_unseen_start);
             Some(co)
@@ -672,7 +673,6 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
         let why = if tl.is_none() { "no --tinylm is loaded" } else { "the --tinylm model is not the one the term is paired with" };
         eprintln!("warning: --colloquial-core is loaded but the colloquial term is off ({why}); the tag says -colloq:. To measure the term as it ships on this model, add --tinylm-paired.");
     }
-    let (lex, overlay) = load_with_packs(&dir, packs, &pdir, extra_overlay.as_deref(), names)?;
     let demote_rows = fs::read_to_string(dir.join("demote.tsv")).map_err(|e| format!("cannot read demote.tsv ({:?})", e.kind()))?;
     let table = Demote::parse(&demote_rows).filter(|d| d.check(&lex)).ok_or("bad demote.tsv")?;
     // The table is always loaded, so a malformed one stops the run even with --no-demote.
@@ -832,7 +832,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let key = key.as_str();
             // The manual mask, once, in the decoder's order with its first path as the base (the engine's `Stretch::masked`; docs/spec/decoder.md §7):
             // `manual_mask` matches the manual words against the readings that path used.
-            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3)), &t3) };
+            let used = if lex.manual().is_empty() { Vec::new() } else { lex.path_readings_with_fuzzy(syls, scored[pool[0]].1.iter().map(|w| (w.0, w.3)), &t3, fuzzy.unwrap_or(0)) };
             let masked0 = manual_mask(&used, &top0, lex.manual());
             // docs/spec/semantic-rerank.md §3.1.1: the pool weight and the order it gives (`lm::pool_order`, the engine's function); `view` holds the
             // pool positions in the order the rerank sees them (the pool's own when the weight does not apply).
@@ -840,7 +840,7 @@ fn run_lm(args: &[String], len: &Lenient) -> Result<(), String> {
             let reordered = pool_order(&ng0, &bonus, &masked0);
             if want_mask_diff && pool_on {
                 out.mask_diff = mask_differs(&reordered, pool_order(&ng0, &bonus, &[]).is_some(), &masked0, &top0, || {
-                    lex.path_readings(syls, scored[pool[reordered.as_ref().map_or(0, |r| r.0[0])]].1.iter().map(|w| (w.0, w.3)), &t3)
+                    lex.path_readings_with_fuzzy(syls, scored[pool[reordered.as_ref().map_or(0, |r| r.0[0])]].1.iter().map(|w| (w.0, w.3)), &t3, fuzzy.unwrap_or(0))
                 }, lex.manual());
             }
             let (view, ng): (Vec<usize>, Vec<f64>) = match &reordered {

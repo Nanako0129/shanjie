@@ -31,7 +31,7 @@ brew install --cask nanako0129/tap/shanjie
 
 ## 給唯音輸入法使用者
 
-唯音輸入法（vChewing）可以用一份從善解的詞庫與模型轉出來的辭典：在 [Releases 的 `vchewing-dict-1`](https://github.com/Nanako0129/shanjie/releases/tag/vchewing-dict-1) 下載 `VanguardFactoryDict4Typing.txtMap`（CC BY-SA 4.0，署名在同一頁的 `NOTICE.txt`）。兩個專案合作的經過與唯音那邊的載入方式見 [issue #143](https://github.com/Nanako0129/shanjie/issues/143)。
+唯音輸入法（vChewing）可以用一份從善解的詞庫與模型轉出來的辭典。第一版 `vchewing-dict-1` 已撤下；新版照唯音 5.1.0 的 TextMap 格式重建（補上簡體欄，需要唯音 5.1.0 以上），發佈後會放在 Releases。兩個專案合作的經過與唯音那邊的載入方式見 [issue #143](https://github.com/Nanako0129/shanjie/issues/143)。
 
 ## 贊助
 

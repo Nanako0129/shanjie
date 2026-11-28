@@ -217,9 +217,14 @@ final class CoreEngine {
         return Self.take(shanjie_engine_set_english(handle, on ? 1 : 0, &out), out)
     }
 
+    /// The defined bits of `shanjie_engine_set_fuzzy` (`FUZZY_ALL` in shanjie.h): bits 0-5. The core refuses a flag outside this mask.
+    static let fuzzyAllMask: UInt32 = 0b11_1111
+    /// The one-symbol typo bit (`FUZZY_ONE_SYM`): works in both layouts.
+    static let fuzzyOneSymBit = 5
+
     /// fuzzy-input (docs/spec/decoder.md §6.2): bits 0-3 the four sound pairs (ㄣ/ㄥ, ㄓ/ㄗ, ㄔ/ㄘ, ㄕ/ㄙ), bit 4 the
-    /// adjacent-key slips (the core's default is 0, which changes nothing; bit 4 does nothing in the Eten layout); returns the
-    /// snapshot. Sent to every engine `Shell.build()` makes.
+    /// adjacent-key slips, bit 5 the one-symbol typos (the core's default is 0, which changes nothing; bit 4 does nothing in the
+    /// Eten layout, bit 5 works in both); returns the snapshot. Sent to every engine `Shell.build()` makes.
     func setFuzzy(_ flags: UInt32) -> CoreResult {
         var out: UnsafeMutablePointer<ShanjieOutput>?
         return Self.take(shanjie_engine_set_fuzzy(handle, flags, &out), out)
