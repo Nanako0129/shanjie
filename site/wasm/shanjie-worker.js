@@ -58,41 +58,42 @@ self.onmessage = async function (ev) {
         throw new Error('worker engine not initialized before loadStage2');
       }
       var t2Start = performance.now();
-      var tasks = [
-        fetchBytes(msg.colloquialUrl),
-        fetchBytes(msg.tinylmUrl)
-      ];
-      if (!cachedBase && msg.baseUrl) tasks.push(fetchBytes(msg.baseUrl));
-      if (!cachedOverlay && msg.overlayUrl) tasks.push(fetchBytes(msg.overlayUrl));
-
-      var resolved = await Promise.all(tasks);
-      var colloqBytes = resolved[0];
-      var tinylmBytes = resolved[1];
-      var idx = 2;
-      var baseBytes = cachedBase || (msg.baseUrl ? resolved[idx++] : null);
-      var overlayBytes = cachedOverlay || (msg.overlayUrl ? resolved[idx++] : null);
-
-      if (!baseBytes || !overlayBytes) {
-        throw new Error('Stage 1 base/overlay cache missing for loadStage2');
-      }
-
-      var lc0 = performance.now();
+      var colloquialLoadMs = 0;
+      var tinylmLoadMs = 0;
       try {
+        var tasks = [
+          fetchBytes(msg.colloquialUrl),
+          fetchBytes(msg.tinylmUrl)
+        ];
+        if (!cachedBase && msg.baseUrl) tasks.push(fetchBytes(msg.baseUrl));
+        if (!cachedOverlay && msg.overlayUrl) tasks.push(fetchBytes(msg.overlayUrl));
+
+        var resolved = await Promise.all(tasks);
+        var colloqBytes = resolved[0];
+        var tinylmBytes = resolved[1];
+        var idx = 2;
+        var baseBytes = cachedBase || (msg.baseUrl ? resolved[idx++] : null);
+        var overlayBytes = cachedOverlay || (msg.overlayUrl ? resolved[idx++] : null);
+
+        if (!baseBytes || !overlayBytes) {
+          throw new Error('Stage 1 base/overlay cache missing for loadStage2');
+        }
+
+        var lc0 = performance.now();
         core.loadColloquialFromBytes(colloqBytes, baseBytes, overlayBytes);
+        colloquialLoadMs = performance.now() - lc0;
+
+        var tl0 = performance.now();
+        core.loadTinylm(tinylmBytes);
+        tinylmLoadMs = performance.now() - tl0;
+
+        // Do not call core.setRerank(true) here: Engine::set_rerank clears active
+        // predictions and candidate windows. Each decode applies opts.rerank explicitly.
+        core.setColloquialPaired(true);
       } finally {
         cachedBase = null;
         cachedOverlay = null;
-        baseBytes = null;
-        overlayBytes = null;
       }
-      var colloquialLoadMs = performance.now() - lc0;
-
-      var tl0 = performance.now();
-      core.loadTinylm(tinylmBytes);
-      var tinylmLoadMs = performance.now() - tl0;
-
-      core.setColloquialPaired(true);
-      core.setRerank(true);
 
       var stage2Ms = performance.now() - t2Start;
       self.postMessage({
@@ -171,6 +172,11 @@ self.onmessage = async function (ev) {
       var tp0 = performance.now();
       var pout = core.pick(msg.index);
       self.postMessage({ id: id, ok: true, output: pout, picked: Boolean(pout), pickMs: performance.now() - tp0 });
+    } else if (msg.type === 'pickPrediction') {
+      if (!core) throw new Error('worker engine not initialized');
+      var tpp0 = performance.now();
+      var ppout = core.pickPrediction(msg.index);
+      self.postMessage({ id: id, ok: true, output: ppout, picked: Boolean(ppout), pickMs: performance.now() - tpp0 });
     } else if (msg.type === 'rerank') {
       if (!core) throw new Error('worker engine not initialized');
       var tr0 = performance.now();

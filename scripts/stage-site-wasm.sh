@@ -6,30 +6,84 @@ set -euo pipefail
 #
 # Usage:
 #   scripts/stage-site-wasm.sh <wasm_bundle_dir> [out_dir]
-#   SHANJIE_WASM_BUNDLE_DIR=<dir> scripts/stage-site-wasm.sh [out_dir]
+#   scripts/stage-site-wasm.sh --out <out_dir> <wasm_bundle_dir>
+#   SHANJIE_WASM_BUNDLE_DIR=<dir> scripts/stage-site-wasm.sh [--out <out_dir>]
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 ASSET_SUBDIR="wasm-assets/v1-p35-2ff55dcc"
 
-if [ "$#" -eq 0 ]; then
+WASM_BUNDLE_DIR=""
+OUT_DIR=""
+POSITIONAL=()
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --out)
+      if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        echo "error: --out requires a non-empty directory argument" >&2
+        exit 1
+      fi
+      OUT_DIR="$2"
+      shift 2
+      ;;
+    --out=*)
+      OUT_DIR="${1#--out=}"
+      if [ -z "$OUT_DIR" ]; then
+        echo "error: --out requires a non-empty directory argument" >&2
+        exit 1
+      fi
+      shift
+      ;;
+    -h|--help)
+      echo "usage: scripts/stage-site-wasm.sh <wasm_bundle_dir> [out_dir]"
+      echo "       scripts/stage-site-wasm.sh --out <out_dir> <wasm_bundle_dir>"
+      echo "       SHANJIE_WASM_BUNDLE_DIR=<dir> scripts/stage-site-wasm.sh [--out <out_dir>]"
+      exit 0
+      ;;
+    --)
+      shift
+      while [ "$#" -gt 0 ]; do
+        POSITIONAL+=("$1")
+        shift
+      done
+      ;;
+    -*)
+      echo "error: unknown option: $1" >&2
+      exit 1
+      ;;
+    *)
+      POSITIONAL+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [ "${#POSITIONAL[@]}" -eq 0 ]; then
   WASM_BUNDLE_DIR="${SHANJIE_WASM_BUNDLE_DIR:-}"
-  OUT_DIR="/tmp/shanjie-site-dist"
-elif [ "$#" -eq 1 ]; then
-  if [ -n "${SHANJIE_WASM_BUNDLE_DIR:-}" ]; then
-    WASM_BUNDLE_DIR="$SHANJIE_WASM_BUNDLE_DIR"
-    OUT_DIR="$1"
+  OUT_DIR="${OUT_DIR:-/tmp/shanjie-site-dist}"
+elif [ "${#POSITIONAL[@]}" -eq 1 ]; then
+  if [ -n "$OUT_DIR" ]; then
+    WASM_BUNDLE_DIR="${POSITIONAL[0]}"
+  elif [ -n "${SHANJIE_WASM_BUNDLE_DIR:-}" ]; then
+    echo "error: ambiguous 1-argument invocation while SHANJIE_WASM_BUNDLE_DIR is set" >&2
+    echo "hint: pass both <wasm_bundle_dir> <out_dir>, use --out <out_dir>, or unset SHANJIE_WASM_BUNDLE_DIR" >&2
+    exit 1
   else
-    WASM_BUNDLE_DIR="$1"
+    WASM_BUNDLE_DIR="${POSITIONAL[0]}"
     OUT_DIR="/tmp/shanjie-site-dist"
   fi
-elif [ "$#" -eq 2 ]; then
-  WASM_BUNDLE_DIR="$1"
-  OUT_DIR="$2"
+elif [ "${#POSITIONAL[@]}" -eq 2 ]; then
+  if [ -n "$OUT_DIR" ]; then
+    echo "error: cannot combine --out with 2 positional arguments" >&2
+    exit 1
+  fi
+  WASM_BUNDLE_DIR="${POSITIONAL[0]}"
+  OUT_DIR="${POSITIONAL[1]}"
 else
-  echo "error: expected at most 2 arguments" >&2
+  echo "error: expected at most 2 positional arguments" >&2
   echo "usage: scripts/stage-site-wasm.sh <wasm_bundle_dir> [out_dir]" >&2
-  echo "       SHANJIE_WASM_BUNDLE_DIR=<dir> scripts/stage-site-wasm.sh [out_dir]" >&2
+  echo "       SHANJIE_WASM_BUNDLE_DIR=<dir> scripts/stage-site-wasm.sh [--out <out_dir>]" >&2
   exit 1
 fi
 
@@ -214,9 +268,13 @@ EOF
 OUT_PARENT="$(dirname "$OUT_ABS")"
 mkdir -p "$OUT_PARENT"
 TMP_STAGE="$(mktemp -d "${OUT_PARENT%/}/.stage-site-wasm.XXXXXX")"
+TMP_OLD_PARENT=""
 cleanup() {
   if [ -n "${TMP_STAGE:-}" ] && [ -d "$TMP_STAGE" ]; then
     rm -rf "$TMP_STAGE"
+  fi
+  if [ -n "${TMP_OLD_PARENT:-}" ] && [ -d "$TMP_OLD_PARENT" ]; then
+    rm -rf "$TMP_OLD_PARENT"
   fi
 }
 trap cleanup EXIT
@@ -304,8 +362,22 @@ for rel in expected_files:
         sys.exit(1)
 EOF
 
-rm -rf "$OUT_ABS"
-mv "$TMP_STAGE" "$OUT_ABS"
+OLD_OUT=""
+if [ -e "$OUT_ABS" ]; then
+  TMP_OLD_PARENT="$(mktemp -d "${OUT_PARENT%/}/.stage-site-old.XXXXXX")"
+  OLD_OUT="$TMP_OLD_PARENT/prev"
+  mv "$OUT_ABS" "$OLD_OUT"
+fi
+if ! mv "$TMP_STAGE" "$OUT_ABS"; then
+  if [ -n "$OLD_OUT" ] && [ -e "$OLD_OUT" ]; then
+    mv "$OLD_OUT" "$OUT_ABS" || true
+  fi
+  exit 1
+fi
 TMP_STAGE=""
+if [ -n "$TMP_OLD_PARENT" ] && [ -d "$TMP_OLD_PARENT" ]; then
+  rm -rf "$TMP_OLD_PARENT"
+  TMP_OLD_PARENT=""
+fi
 
 echo "staged and verified 22 runtime files in $OUT_ABS/$ASSET_SUBDIR"

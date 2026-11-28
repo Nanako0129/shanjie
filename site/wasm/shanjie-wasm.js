@@ -284,6 +284,21 @@
     return rc === 1 ? this._readOutput() : null;
   };
 
+  ShanjieWasmCore.prototype.pickPrediction = function (index) {
+    if (
+      !this._lastOutput ||
+      !Array.isArray(this._lastOutput.candidates) ||
+      this._lastOutput.candidates.length === 0 ||
+      this._lastOutput.vertical === 2
+    ) {
+      return null;
+    }
+    if (!this.isCandidateWindowOpen()) {
+      this.key(KEY_TAB, '', 0);
+    }
+    return this.pick(index);
+  };
+
   ShanjieWasmCore.prototype.rerank = function () {
     var rc = this.ex.shanjie_wasm_rerank();
     if (rc < 0) {
@@ -407,6 +422,7 @@
 
     var events = [];
     var i = 0;
+    var pendingNeutralDot = false;
     while (i < str.length) {
       var matchedOpt = false;
       for (var m = 0; m < OPTION_TOKEN_MAP.length; m++) {
@@ -433,6 +449,14 @@
         events.push([KEY_CHAR, PUNCT_KEYS[ch][0], PUNCT_KEYS[ch][1], false]);
       } else if (SYM_TO_KEY[ch]) {
         events.push([KEY_CHAR, SYM_TO_KEY[ch], 0, false]);
+        if (pendingNeutralDot && (i >= str.length || !SYM_TO_KEY[str[i]])) {
+          events.push([KEY_CHAR, '7', 0, false]);
+          pendingNeutralDot = false;
+        }
+      } else if (ch === '˙' && i < str.length && SYM_TO_KEY[str[i]]) {
+        // MOE/Taiwan notation places neutral-tone `˙` before the syllable (e.g. `ㄋㄟˋ ˙ㄍㄜ`);
+        // defer key `'7'` until after that syllable's Bopomofo symbols so core applies the tone.
+        pendingNeutralDot = true;
       } else if (TONE_MARK_TO_KEY[ch]) {
         events.push([KEY_CHAR, TONE_MARK_TO_KEY[ch], 0, false]);
       }

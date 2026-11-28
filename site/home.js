@@ -343,6 +343,7 @@
   var freeBarItems = [];
   var freeCandSelected = 0;
   var freeBarOffset = 0;
+  var wasmHasManualPick = false;
   var engineMode = "table";
   var wasmSession = null;
   var wasmStartPromise = null;
@@ -634,6 +635,7 @@
       if (!hasActiveFreeInput()) return;
       var seq = decodeSeq;
       if (mode === "candidates" && typeof wasmSession.pickCandidate === "function") {
+        wasmHasManualPick = true;
         clearTimeout(wasmRerankTimer);
         wasmRerankTimer = null;
         wasmSession.pickCandidate(freeBarOffset + idx, { context: ctx, settings: settings }).then(function (picked) {
@@ -642,6 +644,7 @@
         return;
       }
       if (mode === "prediction" && typeof wasmSession.pickPrediction === "function") {
+        wasmHasManualPick = true;
         clearTimeout(wasmRerankTimer);
         wasmRerankTimer = null;
         wasmSession.pickPrediction(idx, { context: ctx, settings: settings }).then(function (picked) {
@@ -750,6 +753,7 @@
     var seq = ++decodeSeq;
     freeCandOpen = false;
     freeBarOffset = 0;
+    wasmHasManualPick = false;
     clearTimeout(wasmRerankTimer);
     wasmRerankTimer = null;
 
@@ -1258,11 +1262,28 @@
         if (!info || !info.stage) return;
         wasmStage = info.stage;
         wasmStage2Error = Boolean(info.stage2Error);
-        syncWasmUI();
-        if (info.stage === "stage2-ready" && engineMode === "wasm") {
-          if (freeMainInput && freeMainInput.value && freeMainInput.value.trim()) {
-            evaluateFreeInput({ immediateRerank: true });
+        if (info.stage === "error" && !wasmStartPromise) {
+          wasmSession = null;
+          engineMode = "table";
+          syncWasmUI();
+          if (freeHonestNotice) {
+            freeHonestNotice.textContent = WASM_FETCH_FAIL_NOTICE;
           }
+          return;
+        }
+        syncWasmUI();
+        if (
+          info.stage === "stage2-ready" &&
+          engineMode === "wasm" &&
+          !freeCandOpen &&
+          !isImeComposing &&
+          !wasmHasManualPick &&
+          freeMainInput &&
+          freeMainInput.value &&
+          freeMainInput.value.trim() &&
+          !hasSystemImeHan(freeMainInput.value)
+        ) {
+          evaluateFreeInput({ immediateRerank: true });
         }
       }
     });

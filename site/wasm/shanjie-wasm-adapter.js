@@ -34,15 +34,17 @@
     decodeRawKeys: true,
     rerank: true,
     key: true,
-    pick: true
+    pick: true,
+    pickPrediction: true
   };
 
-  function ShanjieWorkerClient(workerUrl) {
+  function ShanjieWorkerClient(workerUrl, onError) {
     this.worker = new Worker(workerUrl);
     this._seq = 1;
     this._pending = new Map();
     this._cmdQueue = [];
     this._cmdActiveId = null;
+    this._onError = typeof onError === 'function' ? onError : null;
     var self = this;
     this.worker.onmessage = function (ev) {
       var msg = ev.data || {};
@@ -70,6 +72,13 @@
         entry.reject(e);
       }
       self._pending.clear();
+      if (self._onError) {
+        try {
+          self._onError(e);
+        } catch (_cbErr) {
+          // ignore error observer failure
+        }
+      }
     };
   }
 
@@ -79,17 +88,30 @@
     return new Promise(function (resolve, reject) {
       self._pending.set(id, { resolve: resolve, reject: reject });
       payload.id = id;
-      self.worker.postMessage(payload);
+      try {
+        self.worker.postMessage(payload);
+      } catch (err) {
+        self._pending.delete(id);
+        reject(err);
+      }
     });
   };
 
   ShanjieWorkerClient.prototype._pumpCmdQueue = function () {
-    if (this._cmdActiveId !== null || this._cmdQueue.length === 0) return;
-    var next = this._cmdQueue.shift();
-    this._cmdActiveId = next.id;
-    this._pending.set(next.id, { resolve: next.resolve, reject: next.reject });
-    next.payload.id = next.id;
-    this.worker.postMessage(next.payload);
+    while (this._cmdActiveId === null && this._cmdQueue.length > 0) {
+      var next = this._cmdQueue.shift();
+      this._cmdActiveId = next.id;
+      this._pending.set(next.id, { resolve: next.resolve, reject: next.reject });
+      next.payload.id = next.id;
+      try {
+        this.worker.postMessage(next.payload);
+        return;
+      } catch (err) {
+        this._pending.delete(next.id);
+        this._cmdActiveId = null;
+        next.reject(err);
+      }
+    }
   };
 
   ShanjieWorkerClient.prototype._callCmd = function (payload) {
@@ -168,6 +190,10 @@
 
   ShanjieWorkerClient.prototype.pick = function (index) {
     return this._callCmd({ type: 'pick', index: index });
+  };
+
+  ShanjieWorkerClient.prototype.pickPrediction = function (index) {
+    return this._callCmd({ type: 'pickPrediction', index: index });
   };
 
   ShanjieWorkerClient.prototype.rerank = function () {
@@ -371,8 +397,27 @@
           rerankReady: false
         });
 
-        client = new ShanjieWorkerClient(workerUrl);
+        function handleFatalWorkerError(err) {
+          if (terminated || stage === 'error') return;
+          stage = 'error';
+          var dead = client;
+          client = null;
+          if (dead) {
+            try {
+              dead.terminate();
+            } catch (_tErr) {}
+          }
+          emitProgress({
+            stage: 'error',
+            label: 'WASM 引擎發生錯誤',
+            ready: false,
+            rerankReady: false,
+            error: String(err && err.message ? err.message : err)
+          });
+        }
+
         try {
+          client = new ShanjieWorkerClient(workerUrl, handleFatalWorkerError);
           var initRes = await client.init(urls.wasmUrl, urls.stage1Files, {
             layoutCode: 0,
             packsMask: 29
@@ -658,9 +703,7 @@
           return null;
         }
         var mySeq = sessionSeq;
-        var tabRes = await client.key(13, '', 0); // KEY_TAB enters prediction bar
-        if (!tabRes || tabRes.superseded || mySeq !== sessionSeq) return null;
-        var workerRes = await client.pick(index);
+        var workerRes = await client.pickPrediction(index);
         if (!workerRes || workerRes.superseded || mySeq !== sessionSeq) return null;
         var out = workerRes.output || null;
         return formatCoreOutput(out, context, settings);
