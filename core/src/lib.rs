@@ -264,51 +264,64 @@ impl Builder {
         self.src.push(src);
     }
 
+    pub(crate) fn feed_base_line(&mut self, line: &str) {
+        if self.bad_base.is_some() || matches!(line.chars().next(), Some('#') | Some('_')) {
+            return;
+        }
+        let mut it = line.split_whitespace();
+        let (Some(reading), Some(word), Some(score), None) = (it.next(), it.next(), it.next(), it.next()) else {
+            return;
+        };
+        if word.chars().count() != reading.split('-').count() {
+            return;
+        }
+        let Ok(score) = score.parse::<f64>() else {
+            self.bad_base = Some(Error::BadScore { token_len: score.chars().count() });
+            return;
+        };
+        self.push(reading, word, score, SRC_BASE);
+    }
+
+    pub(crate) fn finish_base(&mut self) {
+        self.base_n = self.raw.len();
+    }
+
     /// The rows of mcbpmf-data.txt (`reading word score`, whitespace separated; `#` / `_` lines, other field counts and rows without one
     /// syllable per character are skipped).
     pub(crate) fn feed_base(&mut self, text: &str) {
         for line in text.lines() {
-            if matches!(line.chars().next(), Some('#') | Some('_')) {
-                continue;
-            }
-            let mut it = line.split_whitespace();
-            let (Some(reading), Some(word), Some(score), None) = (it.next(), it.next(), it.next(), it.next()) else {
-                continue;
-            };
-            if word.chars().count() != reading.split('-').count() {
-                continue;
-            }
-            let Ok(score) = score.parse::<f64>() else {
-                self.bad_base = Some(Error::BadScore { token_len: score.chars().count() });
+            self.feed_base_line(line);
+            if self.bad_base.is_some() {
                 break;
-            };
-            self.push(reading, word, score, SRC_BASE);
+            }
         }
-        self.base_n = self.raw.len();
+        self.finish_base();
     }
 
-    /// Overlay rows `reading\tword\tscore\ttag` of one layer, appended in file order.
-    pub(crate) fn feed_overlay(&mut self, text: &str, layer: OverlayLayer) {
+    /// One row `reading\tword\tscore\ttag` of a layer; nothing once a bad base score or a bad overlay row has been seen.
+    pub(crate) fn feed_overlay_line(&mut self, line: &str, layer: OverlayLayer) {
         if self.bad_base.is_some() || self.bad_row.is_some() {
             return;
         }
         let counts = matches!(layer, OverlayLayer::Overlay | OverlayLayer::Pack);
         // The rows carry `tone3::DELTA_NEUTRAL`; the evaluation CLI's `--neutral-delta` moves them with the constant (0.0 otherwise).
         let shift = tone3::DELTA_NEUTRAL - tone3::neutral_delta();
-        for line in text.lines() {
-            match overlay_row(line) {
-                Some((r, w, s, tag)) if tag == tone3::COLLOQ_TAG => self.colloq.push((r.to_string(), w.to_string(), s + shift, counts)),
-                Some((r, w, s, tag)) => {
-                    self.push(r, w, s, if counts { SRC_OVL_PACK } else { 0 });
-                    if tag == MANUAL_TAG {
-                        self.manual.push(w, r);
-                    }
-                }
-                None => {
-                    self.bad_row = Some(Error::BadOverlayRow { line_len: line.chars().count() });
-                    break;
+        match overlay_row(line) {
+            Some((r, w, s, tag)) if tag == tone3::COLLOQ_TAG => self.colloq.push((r.to_string(), w.to_string(), s + shift, counts)),
+            Some((r, w, s, tag)) => {
+                self.push(r, w, s, if counts { SRC_OVL_PACK } else { 0 });
+                if tag == MANUAL_TAG {
+                    self.manual.push(w, r);
                 }
             }
+            None => self.bad_row = Some(Error::BadOverlayRow { line_len: line.chars().count() }),
+        }
+    }
+
+    /// Overlay rows of one layer, appended in file order.
+    pub(crate) fn feed_overlay(&mut self, text: &str, layer: OverlayLayer) {
+        for line in text.lines() {
+            self.feed_overlay_line(line, layer);
         }
     }
 }
@@ -431,6 +444,24 @@ impl Builder {
             return Err(e);
         }
         let n = raw.len();
+        // What the colloquial rows will add (the rows whose word has one character per syllable, the readings they sit under), so `ents`,
+        // `words`, `fkeys` and `colloq` are allocated once at their final size instead of growing past it.
+        let (colloq_ents, colloq_word_bytes, colloq_fkeys, colloq_readings) = {
+            let (mut cnt, mut wbytes, mut fklen, mut rc) = (0usize, 0usize, 0usize, 0usize);
+            let mut seen: HashSet<&str> = HashSet::new();
+            for (r, w, _, _) in &colloq_rows {
+                let klen = r.split('-').count();
+                if w.chars().count() == klen {
+                    cnt += 1;
+                    wbytes += w.len();
+                    if seen.insert(r.as_str()) {
+                        rc += 1;
+                        fklen += klen;
+                    }
+                }
+            }
+            (cnt, wbytes, fklen, rc)
+        };
         // Variant order, on the file-order rows, before by_word and the per-reading sort read the scores.
         apply(&mut raw, &words, &key_pool, &syl_ids, variants.map_or(&[][..], |v| &v.rows[..]))?;
         let key = |f: u32| {
@@ -444,10 +475,11 @@ impl Builder {
         // by_word: per distinct word, the first row in file order holding the maximum (strict `>` replaces).
         let mut widx: Vec<u32> = (0..n as u32).collect();
         widx.sort_by(|&a, &b| word(a).cmp(word(b)));
-        let mut winners: Vec<u32> = Vec::new();
+        let nw = (0..n).filter(|&i| i == 0 || word(widx[i]) != word(widx[i - 1])).count();
+        let mut winners: Vec<u32> = Vec::with_capacity(nw);
         // Per distinct word (`by_word` index `wi`): the bit of `overlay_only` (some overlay or pack row, no base row) and of "has a base row".
-        let mut overlay_bits = vec![0u64; n / 64 + 1];
-        let mut base_bits = vec![0u64; n / 64 + 1];
+        let mut overlay_bits = vec![0u64; nw / 64 + 1];
+        let mut base_bits = vec![0u64; nw / 64 + 1];
         let mut i = 0;
         while i < n {
             let mut cur = widx[i];
@@ -476,8 +508,18 @@ impl Builder {
         let mut order: Vec<u32> = (0..n as u32).collect();
         order.sort_by(|&a, &b| key(a).cmp(key(b)));
         let mut dup: Option<u32> = None;
-        let mut readings: Vec<Reading> = Vec::new();
-        let mut fkeys: Vec<u32> = Vec::new();
+        let (reading_count, main_fkeys) = {
+            let (mut rc, mut fk) = (0usize, 0usize);
+            for p in 0..n {
+                if p == 0 || key(order[p]) != key(order[p - 1]) {
+                    rc += 1;
+                    fk += key(order[p]).len();
+                }
+            }
+            (rc, fk)
+        };
+        let mut readings: Vec<Reading> = Vec::with_capacity(reading_count);
+        let mut fkeys: Vec<u32> = Vec::with_capacity(main_fkeys + colloq_fkeys);
         let mut max_len = 0;
         let mut s = 0;
         while s < n {
@@ -519,7 +561,8 @@ impl Builder {
         let by_word: Vec<u32> = winners.iter().map(|&f| pos[f as usize]).collect();
         drop(winners);
         drop(pos);
-        let mut ents: Vec<Ent> = order.iter().map(|&f| raw[f as usize].ent).collect();
+        let mut ents: Vec<Ent> = Vec::with_capacity(n + colloq_ents);
+        ents.extend(order.iter().map(|&f| raw[f as usize].ent));
         drop(order);
         drop(raw);
         let main_ents = ents.len();
@@ -543,9 +586,10 @@ impl Builder {
         overlay_extra.sort();
         overlay_extra.dedup();
         let (mut fkeys, mut words) = (fkeys, words);
+        words.reserve_exact(colloq_word_bytes);
         // The colloquial rows: their own syllable numbers after the lexicon's, their readings sorted by key (file order kept under one), best score first.
         let mut colloq_syls: HashMap<String, u32> = HashMap::new();
-        let mut rows: Vec<(Vec<u32>, Ent)> = Vec::with_capacity(colloq_rows.len());
+        let mut rows: Vec<(Vec<u32>, Ent)> = Vec::with_capacity(colloq_ents);
         for (reading, word, score, _) in colloq_rows.iter().map(|(r, w, s, c)| (r.as_str(), w.as_str(), *s, *c)) {
             let mut key = Vec::new();
             for s in reading.split('-') {
@@ -560,7 +604,7 @@ impl Builder {
         }
         drop(colloq_rows);
         rows.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.score.partial_cmp(&a.1.score).unwrap_or(std::cmp::Ordering::Equal)));
-        let mut colloq: Vec<Reading> = Vec::new();
+        let mut colloq: Vec<Reading> = Vec::with_capacity(colloq_readings);
         for (i, (key, ent)) in rows.iter().enumerate() {
             if i == 0 || rows[i - 1].0 != *key {
                 colloq.push(Reading { key_off: fkeys.len() as u32, key_len: key.len() as u32, start: ents.len() as u32 });

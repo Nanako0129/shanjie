@@ -331,6 +331,14 @@ fn assert_same_lexicon(a: &Lexicon, b: &Lexicon, what: &str) {
     }
     assert_eq!(a.words, b.words, "{what}: words");
     assert_eq!(a.by_word, b.by_word, "{what}: by_word");
+    assert_eq!(a.colloq.len(), b.colloq.len(), "{what}: colloquial reading count");
+    for (i, (x, y)) in a.colloq.iter().zip(&b.colloq).enumerate() {
+        assert_eq!((x.key_off, x.key_len, x.start), (y.key_off, y.key_len, y.start), "{what}: colloquial reading {i}");
+    }
+    assert_eq!(a.colloq_syls, b.colloq_syls, "{what}: colloquial syllables");
+    assert_eq!(a.main_ents, b.main_ents, "{what}: main_ents");
+    assert_eq!(a.overlay_bits, b.overlay_bits, "{what}: overlay_bits");
+    assert_eq!(a.overlay_extra, b.overlay_extra, "{what}: overlay_extra");
     assert_eq!(*a.manual, *b.manual, "{what}: manual set");
     assert_eq!(a.variants, b.variants, "{what}: variant rows");
 }
@@ -671,4 +679,433 @@ fn layered_error_order() {
     assert_eq!(r.err(), Some(Error::BadScore { token_len: 1 }));
     // `parse_with` (one overlay text) gives the same answers
     assert_eq!(Lexicon::parse_with("a 基 -1.0\n", Some(&format!("{dup}{bad}"))).err(), Some(Error::OverlayDuplicate { word_len: 1 }));
+}
+
+// ---- ITEM-F2 differential oracle: `Builder::finish` as it was at c837ac4f (the `Raw` version, stable sorts, `winners`/`pos`) ----
+// Kept verbatim (renamed `OracleRaw`/`OracleBuilder`) so the test below proves the counted, in-place `Builder::finish` builds the same lexicon, or the same error.
+
+/// File-order row while parsing: an `Ent` plus where its reading ids sit in the key pool.
+struct OracleRaw {
+    ent: Ent,
+    key_off: u32,
+    key_len: u32,
+}
+
+#[derive(Default)]
+struct OracleBuilder {
+    syl_ids: HashMap<String, u32>,
+    syl_names: Vec<String>,
+    key_pool: Vec<u32>,
+    raw: Vec<OracleRaw>,
+    words: String,
+    src: Vec<u8>,
+    base_n: usize,
+    bad_base: Option<Error>,
+    bad_row: Option<Error>,
+    manual: ManualSet,
+    colloq: Vec<(String, String, f64, bool)>,
+}
+
+impl OracleBuilder {
+    fn push(&mut self, reading: &str, word: &str, score: f64, src: u8) {
+        let key_off = self.key_pool.len() as u32;
+        for s in reading.split('-') {
+            let id = match self.syl_ids.get(s) {
+                Some(&i) => i,
+                None => {
+                    let i = self.syl_names.len() as u32;
+                    self.syl_names.push(s.to_string());
+                    self.syl_ids.insert(s.to_string(), i);
+                    i
+                }
+            };
+            self.key_pool.push(id);
+        }
+        let ent = Ent { off: self.words.len() as u32, len: word.len() as u32, score };
+        self.words.push_str(word);
+        self.raw.push(OracleRaw { ent, key_off, key_len: self.key_pool.len() as u32 - key_off });
+        self.src.push(src);
+    }
+
+    /// The rows of mcbpmf-data.txt (`reading word score`, whitespace separated; `#` / `_` lines, other field counts and rows without one
+    /// syllable per character are skipped).
+    fn feed_base(&mut self, text: &str) {
+        for line in text.lines() {
+            if matches!(line.chars().next(), Some('#') | Some('_')) {
+                continue;
+            }
+            let mut it = line.split_whitespace();
+            let (Some(reading), Some(word), Some(score), None) = (it.next(), it.next(), it.next(), it.next()) else {
+                continue;
+            };
+            if word.chars().count() != reading.split('-').count() {
+                continue;
+            }
+            let Ok(score) = score.parse::<f64>() else {
+                self.bad_base = Some(Error::BadScore { token_len: score.chars().count() });
+                break;
+            };
+            self.push(reading, word, score, SRC_BASE);
+        }
+        self.base_n = self.raw.len();
+    }
+
+    /// Overlay rows `reading\tword\tscore\ttag` of one layer, appended in file order.
+    fn feed_overlay(&mut self, text: &str, layer: OverlayLayer) {
+        if self.bad_base.is_some() || self.bad_row.is_some() {
+            return;
+        }
+        let counts = matches!(layer, OverlayLayer::Overlay | OverlayLayer::Pack);
+        // The rows carry `tone3::DELTA_NEUTRAL`; the evaluation CLI's `--neutral-delta` moves them with the constant (0.0 otherwise).
+        let shift = tone3::DELTA_NEUTRAL - tone3::neutral_delta();
+        for line in text.lines() {
+            match overlay_row(line) {
+                Some((r, w, s, tag)) if tag == tone3::COLLOQ_TAG => self.colloq.push((r.to_string(), w.to_string(), s + shift, counts)),
+                Some((r, w, s, tag)) => {
+                    self.push(r, w, s, if counts { SRC_OVL_PACK } else { 0 });
+                    if tag == MANUAL_TAG {
+                        self.manual.push(w, r);
+                    }
+                }
+                None => {
+                    self.bad_row = Some(Error::BadOverlayRow { line_len: line.chars().count() });
+                    break;
+                }
+            }
+        }
+    }
+
+    fn finish(self, variants: Option<&VariantOrder>) -> Result<Lexicon, Error> {
+        let OracleBuilder { syl_ids, syl_names, key_pool, mut raw, words, src, base_n, bad_base, bad_row, manual, colloq: colloq_rows } = self;
+        if let Some(e) = bad_base {
+            return Err(e);
+        }
+        let n = raw.len();
+        // Variant order, on the file-order rows, before by_word and the per-reading sort read the scores.
+        oracle_apply_variant_order(&mut raw, &words, &key_pool, &syl_ids, variants.map_or(&[][..], |v| &v.rows[..]))?;
+        let key = |f: u32| {
+            let r = &raw[f as usize];
+            &key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize]
+        };
+        let word = |f: u32| {
+            let e = &raw[f as usize].ent;
+            &words[e.off as usize..(e.off + e.len) as usize]
+        };
+        // by_word: per distinct word, the first row in file order holding the maximum (strict `>` replaces).
+        let mut widx: Vec<u32> = (0..n as u32).collect();
+        widx.sort_by(|&a, &b| word(a).cmp(word(b)));
+        let mut winners: Vec<u32> = Vec::new();
+        // Per distinct word (`by_word` index `wi`): the bit of `overlay_only` (some overlay or pack row, no base row) and of "has a base row".
+        let mut overlay_bits = vec![0u64; n / 64 + 1];
+        let mut base_bits = vec![0u64; n / 64 + 1];
+        let mut i = 0;
+        while i < n {
+            let mut cur = widx[i];
+            let mut flags = src[cur as usize];
+            let mut j = i + 1;
+            while j < n && word(widx[j]) == word(cur) {
+                flags |= src[widx[j] as usize];
+                if raw[widx[j] as usize].ent.score > raw[cur as usize].ent.score {
+                    cur = widx[j];
+                }
+                j += 1;
+            }
+            let wi = winners.len();
+            if flags & SRC_BASE != 0 {
+                base_bits[wi >> 6] |= 1 << (wi & 63);
+            } else if flags & SRC_OVL_PACK != 0 {
+                overlay_bits[wi >> 6] |= 1 << (wi & 63);
+            }
+            winners.push(cur);
+            i = j;
+        }
+        drop(widx);
+        drop(src);
+
+        // Group rows by reading (stable: file order kept inside a group).
+        let mut order: Vec<u32> = (0..n as u32).collect();
+        order.sort_by(|&a, &b| key(a).cmp(key(b)));
+        let mut dup: Option<u32> = None;
+        let mut readings: Vec<Reading> = Vec::new();
+        let mut fkeys: Vec<u32> = Vec::new();
+        let mut max_len = 0;
+        let mut s = 0;
+        while s < n {
+            let mut e = s + 1;
+            while e < n && key(order[e]) == key(order[s]) {
+                e += 1;
+            }
+            // An overlay row repeating any earlier row of the same reading (base or overlay) is a duplicate.
+            for p in s..e {
+                let f = order[p];
+                if f as usize >= base_n && (s..p).any(|q| word(order[q]) == word(f)) {
+                    dup = Some(dup.map_or(f, |d| d.min(f)));
+                    break;
+                }
+            }
+            order[s..e].sort_by(|&a, &b| {
+                raw[b as usize].ent.score.partial_cmp(&raw[a as usize].ent.score).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let k = key(order[s]);
+            readings.push(Reading { key_off: fkeys.len() as u32, key_len: k.len() as u32, start: s as u32 });
+            fkeys.extend_from_slice(k);
+            max_len = max_len.max(k.len());
+            s = e;
+        }
+        drop(key_pool);
+        if let Some(f) = dup {
+            return Err(Error::OverlayDuplicate { word_len: word(f).chars().count() });
+        }
+        if let Some(e) = bad_row {
+            return Err(e);
+        }
+        if n == 0 {
+            return Err(Error::EmptyLexicon);
+        }
+        let mut pos = vec![0u32; n];
+        for (p, &f) in order.iter().enumerate() {
+            pos[f as usize] = p as u32;
+        }
+        let by_word: Vec<u32> = winners.iter().map(|&f| pos[f as usize]).collect();
+        drop(winners);
+        drop(pos);
+        let mut ents: Vec<Ent> = order.iter().map(|&f| raw[f as usize].ent).collect();
+        drop(order);
+        drop(raw);
+        let main_ents = ents.len();
+        overlay_bits.truncate(by_word.len() / 64 + 1);
+        // The colloquial-tagged rows of overlay-add.tsv and the packs count for `overlay_only` too, unless the base has the word.
+        let mut overlay_extra: Vec<Box<str>> = Vec::new();
+        {
+            let at = |p: u32| {
+                let e = &ents[p as usize];
+                &words[e.off as usize..(e.off + e.len) as usize]
+            };
+            for (_, w, _, _) in colloq_rows.iter().filter(|r| r.3) {
+                match by_word.binary_search_by(|&p| at(p).cmp(w.as_str())) {
+                    Ok(wi) if base_bits[wi >> 6] >> (wi & 63) & 1 == 0 => overlay_bits[wi >> 6] |= 1 << (wi & 63),
+                    Ok(_) => {}
+                    Err(_) => overlay_extra.push(w.as_str().into()),
+                }
+            }
+        }
+        drop(base_bits);
+        overlay_extra.sort();
+        overlay_extra.dedup();
+        let (mut fkeys, mut words) = (fkeys, words);
+        // The colloquial rows: their own syllable numbers after the lexicon's, their readings sorted by key (file order kept under one), best score first.
+        let mut colloq_syls: HashMap<String, u32> = HashMap::new();
+        let mut rows: Vec<(Vec<u32>, Ent)> = Vec::with_capacity(colloq_rows.len());
+        for (reading, word, score, _) in colloq_rows.iter().map(|(r, w, s, c)| (r.as_str(), w.as_str(), *s, *c)) {
+            let mut key = Vec::new();
+            for s in reading.split('-') {
+                let next = (syl_names.len() + colloq_syls.len()) as u32;
+                key.push(syl_ids.get(s).copied().unwrap_or_else(|| *colloq_syls.entry(s.to_string()).or_insert(next)));
+            }
+            if word.chars().count() != key.len() {
+                continue;
+            }
+            rows.push((key, Ent { off: words.len() as u32, len: word.len() as u32, score }));
+            words.push_str(word);
+        }
+        drop(colloq_rows);
+        rows.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.score.partial_cmp(&a.1.score).unwrap_or(std::cmp::Ordering::Equal)));
+        let mut colloq: Vec<Reading> = Vec::new();
+        for (i, (key, ent)) in rows.iter().enumerate() {
+            if i == 0 || rows[i - 1].0 != *key {
+                colloq.push(Reading { key_off: fkeys.len() as u32, key_len: key.len() as u32, start: ents.len() as u32 });
+                fkeys.extend_from_slice(key);
+            }
+            ents.push(*ent);
+        }
+        drop(rows);
+        let mut lex = Lexicon { max_len, syl_ids, syl_names, key_pool: fkeys, readings, ents, words, by_word, manual: Arc::new(manual), variants: Vec::new(), tol: OnceLock::new(), colloq, colloq_syls, main_ents, overlay_bits, overlay_extra: overlay_extra.into_boxed_slice() };
+        let found: Vec<(usize, VariantRow)> = variants.map_or(&[][..], |v| &v.rows[..]).iter().filter_map(|(_, v)| Some((lex.find(&lex.ids(&v.reading))?, v.clone()))).collect();
+        lex.variants = found;
+        lex.words.shrink_to_fit();
+        Ok(lex)
+    }
+}
+
+/// `apply_variant_order` of c837ac4f (one pass), on `OracleRaw` rows.
+fn oracle_apply_variant_order(raw: &mut [OracleRaw], words: &str, key_pool: &[u32], syl_ids: &HashMap<String, u32>, var_rows: &[(usize, VariantRow)]) -> Result<(), Error> {
+    // One pass over the rows collects, per distinct reading a variant row names, the rows under it (file order); the rows are then
+    // applied in table order, reading the scores as the earlier rows left them. (An unknown syllable is reported when its row's turn comes.)
+    let var_ids: Vec<Option<Vec<u32>>> = var_rows.iter().map(|(_, v)| v.reading.iter().map(|s| syl_ids.get(s).copied()).collect()).collect();
+    let mut bucket_of: HashMap<&[u32], usize> = HashMap::new();
+    for ids in var_ids.iter().flatten() {
+        let next = bucket_of.len();
+        bucket_of.entry(ids.as_slice()).or_insert(next);
+    }
+    let mut buckets: Vec<Vec<usize>> = vec![Vec::new(); bucket_of.len()];
+    if !bucket_of.is_empty() {
+        for (f, r) in raw.iter().enumerate() {
+            if let Some(&bi) = bucket_of.get(&key_pool[r.key_off as usize..(r.key_off + r.key_len) as usize]) {
+                buckets[bi].push(f);
+            }
+        }
+    }
+    for ((line, v), ids) in var_rows.iter().zip(&var_ids) {
+        let bad = Error::BadVariantOrder { line: *line };
+        let Some(ids) = ids else { return Err(bad) };
+        let rows = &buckets[bucket_of[ids.as_slice()]];
+        let at = |w: &str| -> Vec<usize> {
+            rows.iter()
+                .copied()
+                .filter(|&f| {
+                    let r = &raw[f];
+                    r.ent.len as usize == w.len() && &words[r.ent.off as usize..(r.ent.off + r.ent.len) as usize] == w
+                })
+                .collect()
+        };
+        let (less, more) = (at(&v.less), at(&v.more));
+        let top = more.iter().map(|&f| raw[f].ent.score).fold(f64::NEG_INFINITY, f64::max);
+        if less.is_empty() || more.is_empty() {
+            return Err(bad);
+        }
+        for f in less {
+            raw[f].ent.score = raw[f].ent.score.min(top - VARIANT_GAP);
+        }
+    }
+    Ok(())
+}
+
+/// Both builders on the same layers: the oracle as it was, and the real `Builder`.
+fn oracle_and_new(base: &str, layers: &[(&str, OverlayLayer)], variants: Option<&VariantOrder>) -> (Result<Lexicon, Error>, Result<Lexicon, Error>) {
+    let mut o = OracleBuilder::default();
+    o.feed_base(base);
+    for (t, l) in layers {
+        o.feed_overlay(t, *l);
+    }
+    let mut b = Builder::default();
+    b.feed_base(base);
+    for (t, l) in layers {
+        b.feed_overlay(t, *l);
+    }
+    (o.finish(variants), b.finish(variants, apply_variant_order))
+}
+
+/// The built tables hold no spare room: `ents` (the colloquial rows counted in before it is filled), the key pool and the readings.
+fn assert_allocated_exactly(l: &Lexicon, what: &str) {
+    assert_eq!(l.ents.capacity(), l.ents.len(), "{what}: ents capacity");
+    assert_eq!(l.key_pool.capacity(), l.key_pool.len(), "{what}: key_pool capacity");
+    assert_eq!(l.readings.capacity(), l.readings.len(), "{what}: readings capacity");
+    assert_eq!(l.by_word.capacity(), l.by_word.len(), "{what}: by_word capacity");
+}
+
+fn assert_oracle_agrees(base: &str, layers: &[(&str, OverlayLayer)], variants: Option<&VariantOrder>, what: &str) -> Result<Lexicon, Error> {
+    let (old, new) = oracle_and_new(base, layers, variants);
+    match (&old, &new) {
+        (Ok(o), Ok(n)) => assert_same_lexicon(n, o, what),
+        (Err(o), Err(n)) => assert_eq!(n, o, "{what}: error"),
+        _ => panic!("{what}: oracle {:?}, new {:?}", old.as_ref().err(), new.as_ref().err()),
+    }
+    new
+}
+
+/// A distinct one-character word.
+fn han(i: u32) -> char {
+    char::from_u32(0x4E00 + i).unwrap()
+}
+
+/// The (a)(b)(c) inputs of the contract, each in file order that is not reading order. Returns (base, overlay) texts.
+/// (a) reading `a`: 40 rows with distinct words, 40 rows of reading `b` between them in the file; an overlay row repeats a base row of `a`
+/// when `dup` (it comes after that base row in the file).
+fn synthetic_a(dup: bool) -> (String, String) {
+    let mut base = String::new();
+    for i in 0..40u32 {
+        base.push_str(&format!("b {} -{}.0\n", han(0x100 + i), i % 5));
+        base.push_str(&format!("a {} -{}.5\n", han(i), i % 3));
+    }
+    let overlay = if dup { format!("a\t{}\t-9.0\t0\n", han(7)) } else { "a\t新\t-9.0\t0\n".to_string() };
+    (base, overlay)
+}
+
+/// (b) reading `a`: 48 rows of one score `-2.0` interleaved with rows of a higher and a lower score (the score sequence is not monotone).
+fn synthetic_b() -> String {
+    let mut base = String::new();
+    for i in 0..48u32 {
+        base.push_str(&format!("a {} -2.0\n", han(i)));
+        base.push_str(&format!("a {} -{}.0\n", han(0x100 + i), 1 + (i % 2)));
+        if i % 3 == 0 {
+            base.push_str(&format!("a {} -{}.0\n", han(0x200 + i), 3 + (i % 4)));
+        }
+        base.push_str("a 零 -2.0\n");
+    }
+    base
+}
+
+/// (c) the word 共 under 40 readings `r00`..`r39` with one score (more under other words), the file order the reverse of the readings' order.
+fn synthetic_c() -> (String, String) {
+    let mut base = String::new();
+    for i in (0..40u32).rev() {
+        base.push_str(&format!("r{:02} 共 -1.0\n", i));
+        base.push_str(&format!("r{:02} {} -1.0\n", i, han(i)));
+    }
+    // the overlay gives the same word again at the same score under more readings (not at the base's)
+    let mut overlay = String::new();
+    for i in (40..60).rev() {
+        overlay.push_str(&format!("r{:02}\t共\t-1.0\t0\n", i));
+    }
+    (base, overlay)
+}
+
+#[test]
+fn builder_finish_equals_the_c837ac4f_oracle() {
+    // The shipped data, no pack and every pack: the layers as `load_lexicon_split` reads them, through the real loader.
+    let (dir, packs) = (data_root().join("data/lexicon"), data_root().join("data/packs"));
+    let read = |f: &str| std::fs::read_to_string(dir.join(f)).unwrap();
+    let table = VariantOrder::parse(&read("variant-order.tsv")).unwrap();
+    for mask in [0, engine::PACK_ALL] {
+        let pack_text = engine::read_packs_detailed(&packs, mask).unwrap();
+        let (base, overlay, sandhi, names) = (read("mcbpmf-data.txt"), read("overlay-add.tsv"), read("sandhi-add.tsv"), read("names-add.tsv"));
+        let layers = [(&overlay[..], OverlayLayer::Overlay), (&sandhi[..], OverlayLayer::Sandhi), (&names[..], OverlayLayer::Names), (&pack_text[..], OverlayLayer::Pack)];
+        let mut o = OracleBuilder::default();
+        o.feed_base(&base);
+        for (t, l) in layers {
+            o.feed_overlay(t, l);
+        }
+        let old = o.finish(Some(&table)).unwrap().with_protected(&read("rerank-protect.tsv")).unwrap();
+        let (new, _) = engine::load_lexicon_packs_detailed(&dir, Some((&packs, mask))).unwrap();
+        assert!(new.variants.len() > 10 && new.ents.len() > 500_000, "the shipped data");
+        assert_same_lexicon(&new, &old, &format!("shipped data, mask {mask}"));
+        assert_allocated_exactly(&new, &format!("shipped data, mask {mask}"));
+        // and the in-memory way (`feed_base`, `feed_overlay`)
+        let (old2, new2) = oracle_and_new(&base, &layers, Some(&table));
+        assert_same_lexicon(&new2.unwrap(), &old2.unwrap(), &format!("shipped data fed as text, mask {mask}"));
+    }
+
+    // (a) one reading group of 40 rows, interleaved with 40 rows of another reading; the duplicate is an overlay row after its base row
+    let (base, overlay) = synthetic_a(true);
+    let r = assert_oracle_agrees(&base, &[(&overlay, OverlayLayer::Overlay)], None, "a, duplicate");
+    assert_eq!(r.err(), Some(Error::OverlayDuplicate { word_len: 1 }));
+    let (base, overlay) = synthetic_a(false);
+    assert_oracle_agrees(&base, &[(&overlay, OverlayLayer::Overlay)], None, "a, no duplicate").unwrap();
+    // (b) 48+ rows of one reading and one score among higher and lower scores
+    let b = synthetic_b();
+    assert_oracle_agrees(&b, &[], None, "b").unwrap();
+    // (c) one word, one score, 60 readings, file order the reverse of the readings' order
+    let (base, overlay) = synthetic_c();
+    let l = assert_oracle_agrees(&base, &[(&overlay, OverlayLayer::Overlay)], None, "c").unwrap();
+    // the winner is the first of them in the file: reading r39 (the base text starts with it)
+    let word_of = |p: u32| &l.words[l.ents[p as usize].off as usize..(l.ents[p as usize].off + l.ents[p as usize].len) as usize];
+    let pos = l.by_word[l.by_word.binary_search_by(|&p| word_of(p).cmp("共")).unwrap()];
+    let ri = l.readings.partition_point(|r| r.start <= pos) - 1;
+    let key = &l.key_pool[l.readings[ri].key_off as usize..(l.readings[ri].key_off + l.readings[ri].key_len) as usize];
+    assert_eq!(key.iter().map(|&s| l.syl_names[s as usize].as_str()).collect::<Vec<_>>(), ["r39"]);
+
+    // the layers' flags and the colloquial rows go through the same code: a mixed input with both
+    let ovl = format!("a\t疊\t-1.0\tmanual\nd\t共\t-1.5\t0\nc\t異\t-1.0\t{c}\nz\t只在補位\t-1.0\t{c}\n", c = tone3::COLLOQ_TAG);
+    let l = assert_oracle_agrees("a 基 -1.0\nb 共 -1.0\na-b 共同 -2.0\n", &[(&ovl, OverlayLayer::Overlay), ("a\t三\t-1.0\t0", OverlayLayer::Sandhi), ("a\t名\t-1.0\t0\n", OverlayLayer::Names), ("c\t包\t-3.0\tacg\n", OverlayLayer::Pack), ("a\t外\t-1.0\t0\n", OverlayLayer::Extra)], None, "mixed").unwrap();
+    assert_allocated_exactly(&l, "mixed");
+
+    // the error paths (`Result`s equal)
+    let bad = "no tabs here\n";
+    let dup = "a\t基\t-1.0\t0\n";
+    assert_eq!(assert_oracle_agrees("a 基 -1.0\n", &[(dup, OverlayLayer::Overlay), (bad, OverlayLayer::Names)], None, "dup then bad").err(), Some(Error::OverlayDuplicate { word_len: 1 }));
+    assert_eq!(assert_oracle_agrees("a 基 -1.0\n", &[(bad, OverlayLayer::Overlay), (dup, OverlayLayer::Pack)], None, "bad then dup").err(), Some(Error::BadOverlayRow { line_len: 12 }));
+    assert_eq!(assert_oracle_agrees("a 基 x\n", &[(bad, OverlayLayer::Overlay)], None, "bad base").err(), Some(Error::BadScore { token_len: 1 }));
+    assert_eq!(assert_oracle_agrees("# nothing\n", &[], None, "empty").err(), Some(Error::EmptyLexicon));
+    let vt = VariantOrder::parse("a\t乙\t不在\tt\n").unwrap();
+    assert_eq!(assert_oracle_agrees("a 甲 -1\na 乙 -2\n", &[], Some(&vt), "variant").err(), Some(Error::BadVariantOrder { line: 1 }));
 }

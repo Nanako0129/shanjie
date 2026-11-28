@@ -1238,6 +1238,27 @@ fn read_file(p: PathBuf) -> Result<String, LoadError> {
     std::fs::read_to_string(&p).map_err(|e| LoadError::Read { kind: e.kind(), path: p })
 }
 
+/// The lines of a file (line ends `\n` or `\r\n` removed, like `str::lines`), read through a 64 KiB buffer.
+fn stream_lines(path: PathBuf, mut on_line: impl FnMut(&str)) -> Result<(), LoadError> {
+    let f = std::fs::File::open(&path).map_err(|e| LoadError::Read { kind: e.kind(), path: path.clone() })?;
+    let mut r = std::io::BufReader::with_capacity(64 * 1024, f);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let n = std::io::BufRead::read_line(&mut r, &mut line).map_err(|e| LoadError::Read { kind: e.kind(), path: path.clone() })?;
+        if n == 0 {
+            return Ok(());
+        }
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
+        on_line(&line);
+    }
+}
+
 /// The enabled packs' overlay rows in `dir`, concatenated; a pack whose file is missing contributes
 /// nothing (the engine is then identical to one without packs). An unreadable file is a load failure.
 pub fn read_packs_detailed(dir: &Path, mask: u32) -> Result<String, LoadError> {
@@ -1300,14 +1321,15 @@ pub const VARIANT_ORDER_FILE: &str = "variant-order.tsv";
 
 /// `load_lexicon_extra_detailed` and the length of the `PACK_OOV` prefix of the returned text (`read_packs_split`).
 fn load_lexicon_split(data_dir: &Path, packs: Option<(&Path, u32)>, extra_file: Option<&Path>, names: bool) -> Result<(Arc<Lexicon>, String, usize), LoadError> {
-    // Layer by layer: each file's text is fed to the builder and dropped before the next is read, so the 21 MB overlay text is never joined.
+    // Layer by layer, one pass: each file is streamed through a 64 KiB buffer line by line into the builder, so no file's whole text (the 21 MB
+    // overlay) is ever held. The files are read in the order of the layers (base, overlay, sandhi, names, then the packs and the extra file),
+    // so a read error names the first unreadable one; a bad base score or overlay row stops the feeding (the builder's own flags) while the reading goes on.
     let mut b = Builder::default();
-    let base = read_file(data_dir.join("mcbpmf-data.txt"))?;
-    b.feed_base(&base);
-    drop(base);
+    stream_lines(data_dir.join("mcbpmf-data.txt"), |line| b.feed_base_line(line))?;
+    b.finish_base();
     let layers = [("overlay-add.tsv", OverlayLayer::Overlay), ("sandhi-add.tsv", OverlayLayer::Sandhi), (NAMES_FILE, OverlayLayer::Names)];
     for (file, layer) in layers.into_iter().filter(|&(_, l)| names || l != OverlayLayer::Names) {
-        b.feed_overlay(&read_file(data_dir.join(file))?, layer);
+        stream_lines(data_dir.join(file), |line| b.feed_overlay_line(line, layer))?;
     }
     let (mut extra, oov_len) = match packs {
         Some((dir, mask)) => read_packs_split(dir, mask)?,
