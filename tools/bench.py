@@ -976,6 +976,13 @@ VERSIONS2 = {
     "v0.9.1": {"release": "v0.9.1", "flags": ["--context", "--packs", "acg,it,meme,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
                "reading": True, "reading_norm": True, "recur": True, "pool_recur": True, "tone3": True, "colloq_sandhi": True,
                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+sep:4+acg+it+meme+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+sep:4+acg+it+meme+beauty+tri:{tri8}"},
+    # v0.10.0: v0.9.1's models and packs (same seven model files); the App's defaults are unchanged for the CLI (packs acg/it/meme/beauty on, 經典台詞 off, 模糊輸入
+    # including the one-symbol typos off, abbreviation switch off). Row = the v0.9.1 row; the mark checked on the 12-row prefix of eval/dev/user-typing.txt: chat
+    # `lm-chat+ctx+recur+pr+kn:880ee87c:θ1:β1+tl:ee109fb2+sep:4+acg+it+meme+beauty+tri:24ee8645+colloq:81c2470d+rd+rx:d96f1e8f+rm+rn+t3c`, formal the same with
+    # `θ1:β0.75` and `tri:34305a2d` and no colloq (copied from the CLI summary lines at release/v0.10.0).
+    "v0.10.0": {"release": "v0.10.0", "flags": ["--context", "--packs", "acg,it,meme,beauty"], "tinylm": True, "kn": True, "tri": True, "tri_chat": True, "colloquial": True,
+                "reading": True, "reading_norm": True, "recur": True, "pool_recur": True, "tone3": True, "colloq_sandhi": True,
+                "tag": "+ctx+kn:{kn8}:θ1:β1+tl:{tl8}+sep:4+acg+it+meme+beauty+tri:{trichat8}", "formal_tag": "+ctx+kn:{kn8}:θ1:β0.75+tl:{tl8}+sep:4+acg+it+meme+beauty+tri:{tri8}"},
 }
 # Anchor (docs/spec/evaluation.md §7.7): S7h's measurement, `--override-packs off`, chat, the CLI's own variants table.
 ANCHOR = {
