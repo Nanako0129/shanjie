@@ -356,7 +356,7 @@ pub struct Decision {
 pub struct Scorer<'a> {
     pub table: &'a DigitTable,
     pub lm: &'a Lm,
-    pub idx: &'a Index<'a>,
+    pub idx: &'a Index,
     pub legal: &'a Legal,
     /// The profile's scoring: its Kneser-Ney beta is the one `lp_z` blends with (`Lm::unigram_back`).
     pub cfg: Scoring,

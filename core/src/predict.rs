@@ -5,6 +5,8 @@
 use crate::digits::DigitTable;
 use crate::english_next::Followers;
 use crate::lm::{CappedLexicon, Lm, Scoring};
+use crate::Lexicon;
+use std::sync::Arc;
 use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
 
@@ -112,114 +114,97 @@ pub fn reading_matches_in(units: &[Unit], reading: &[String], mode: Mode) -> boo
     (abbr || init.iter().all(|u| u.done)) && units.iter().zip(reading).all(|(u, y)| parse_syl(y).is_some_and(|s| unit_ok(u, &s)))
 }
 
-fn compat_prefix(units: &[Unit], syls: &[u32], table: &[Syl]) -> bool {
+/// `table` is `Index::syls`; an index only lists readings without a zhuyin-less syllable, so every slot a reading names is `Some`.
+fn compat_prefix(units: &[Unit], syls: &[u32], table: &[Option<Syl>]) -> bool {
     let Some((_, init)) = units.split_last() else { return false };
-    syls.len() >= units.len() && init.iter().all(|u| u.done) && units.iter().zip(syls).all(|(u, &s)| unit_ok(u, &table[s as usize]))
+    syls.len() >= units.len() && init.iter().all(|u| u.done) && units.iter().zip(syls).all(|(u, &s)| table[s as usize].as_ref().is_some_and(|y| unit_ok(u, y)))
 }
 
-fn compat_abbr(units: &[Unit], syls: &[u32], table: &[Syl]) -> bool {
-    !units.is_empty() && syls.len() == units.len() && units.iter().all(|u| !u.done) && units.iter().zip(syls).all(|(u, &s)| unit_ok(u, &table[s as usize]))
+fn compat_abbr(units: &[Unit], syls: &[u32], table: &[Option<Syl>]) -> bool {
+    !units.is_empty() && syls.len() == units.len() && units.iter().all(|u| !u.done) && units.iter().zip(syls).all(|(u, &s)| table[s as usize].as_ref().is_some_and(|y| unit_ok(u, y)))
 }
 
-struct Ent<'a> {
-    word: &'a str,
+/// One lexicon entry of the index, 24 bytes with no padding on 32-bit and 64-bit targets (all fields are full `f64`/`u32`, nothing is packed).
+struct Ent {
     lp: f64,
-    /// Reading number; readings are numbered in the order of their `-`-joined text, so it is also the reading's sort rank.
+    /// Id in the language model (u32::MAX: not in it).
+    wid: u32,
+    /// Index in `Lexicon::by_word`: the word's dense id (equal for equal words) and, `by_word` being sorted by the word's bytes, its sort rank.
+    wix: u32,
+    /// Reading number; readings are numbered in the order of their `-`-joined text, so it is also the reading's sort rank (`rd_to_lex` maps it back).
     rd: u32,
     wlen: u32,
-    /// Id in the language model (u32::MAX: not in it) and a dense id per distinct word, for dedupe.
-    wid: u32,
-    wix: u32,
 }
+const _: () = assert!(std::mem::size_of::<Ent>() == 24 && std::mem::align_of::<Ent>() == 8);
 
 /// Lexicon entries sorted by (-lp, word length, reading, word) and bucketed by every prefix of the first syllable's
-/// characters (predict.py `Index`). Entries with a syllable that has no zhuyin character are left out.
-pub struct Index<'a> {
-    ents: Vec<Ent<'a>>,
-    /// Distinct syllables, numbered in text order. Reading `r` is `pool[off[r]..off[r + 1]]`.
-    syls: Vec<Syl>,
-    /// Text of each syllable in `syls`, same numbering.
-    names: Vec<&'a str>,
-    pool: Vec<u32>,
-    off: Vec<u32>,
+/// characters (predict.py `Index`). Entries with a syllable that has no zhuyin character are left out. Words and readings are read from
+/// the shared `Lexicon` (`base`), not copied.
+pub struct Index {
+    base: Arc<Lexicon>,
+    ents: Vec<Ent>,
+    /// Indexed by the lexicon's syllable id; `None` for a syllable with no zhuyin character (the four bare tones).
+    syls: Vec<Option<Syl>>,
+    /// Reading number `rd` (text order, readings with a `None` syllable left out) -> the lexicon's reading index.
+    rd_to_lex: Vec<u32>,
     by_prefix: HashMap<Vec<char>, Vec<u32>>,
     toneless: HashSet<Vec<char>>,
 }
 
-impl<'a> Index<'a> {
-    pub fn new(lex: &'a CappedLexicon, lm: &Lm) -> Index<'a> {
-        // Syllables get first-seen ids while scanning, then are renumbered in text order. Joined text compares like the
-        // syllable sequence because `-` sorts below every syllable character.
-        let (mut names, mut seen, mut parsed): (Vec<&str>, HashMap<&str, u32>, Vec<Option<Syl>>) = Default::default();
-        let (mut pool, mut off, mut ents) = (Vec::new(), vec![0u32], Vec::new());
-        for (key, words) in lex.readings(lm) {
-            let ids: Vec<u32> = key
-                .iter()
-                .map(|&s| {
-                    *seen.entry(s).or_insert_with(|| {
-                        names.push(s);
-                        parsed.push(parse_syl(s));
-                        names.len() as u32 - 1
-                    })
-                })
-                .collect();
-            if ids.iter().any(|&i| parsed[i as usize].is_none()) {
+impl Index {
+    pub fn new(lex: &CappedLexicon, lm: &Lm) -> Index {
+        let base = lex.base().clone();
+        let syls: Vec<Option<Syl>> = base.syllables().iter().map(|s| parse_syl(s)).collect();
+        // Joined text compares like the syllable sequence because `-` sorts below every syllable character, so readings are
+        // numbered by the lexicographic order of their syllables' text ranks.
+        let names = base.syllables();
+        let mut by_name: Vec<u32> = (0..names.len() as u32).collect();
+        by_name.sort_unstable_by_key(|&i| names[i as usize].as_str());
+        let mut syl_rank = vec![0u32; names.len()];
+        for (k, &i) in by_name.iter().enumerate() {
+            syl_rank[i as usize] = k as u32;
+        }
+        let ranks = |r: u32| base.reading_syl_ids(r as usize).iter().map(|&s| syl_rank[s as usize]);
+        let mut rd_to_lex: Vec<u32> = (0..base.reading_count() as u32).filter(|&r| base.reading_syl_ids(r as usize).iter().all(|&s| syls[s as usize].is_some())).collect();
+        rd_to_lex.sort_unstable_by(|&a, &b| ranks(a).cmp(ranks(b)));
+        let mut lex_to_rd = vec![u32::MAX; base.reading_count()];
+        for (k, &r) in rd_to_lex.iter().enumerate() {
+            lex_to_rd[r as usize] = k as u32;
+        }
+        let mut ents: Vec<Ent> = Vec::with_capacity(base.main_ents());
+        for (r, words) in lex.readings_by_index(lm) {
+            let rd = lex_to_rd[r];
+            if rd == u32::MAX {
                 continue;
             }
-            pool.extend(ids);
-            off.push(pool.len() as u32);
-            let rd = off.len() as u32 - 2;
             for (word, lp) in words {
-                let (wlen, wid) = (word.chars().count() as u32, lm.word_id(word).unwrap_or(u32::MAX));
-                ents.push(Ent { word, lp, rd, wlen, wid, wix: 0 });
+                let wix = base.find_wix(word).expect("every word of a main reading is in by_word");
+                ents.push(Ent { lp, wid: lm.word_id(word).unwrap_or(u32::MAX), wix, rd, wlen: word.chars().count() as u32 });
             }
         }
-        let mut by_name: Vec<u32> = (0..names.len() as u32).collect();
-        by_name.sort_unstable_by_key(|&i| names[i as usize]);
-        let mut new_id = vec![0u32; names.len()];
-        for (k, &i) in by_name.iter().enumerate() {
-            new_id[i as usize] = k as u32;
-        }
-        let syls: Vec<Syl> = by_name.iter().map(|&i| parsed[i as usize].take().unwrap_or(Syl { chars: Vec::new(), tone: None })).collect();
-        let names: Vec<&str> = by_name.iter().map(|&i| names[i as usize]).collect();
-        for p in &mut pool {
-            *p = new_id[*p as usize];
-        }
-        // Renumber readings in text order.
-        let slice = |r: u32| &pool[off[r as usize] as usize..off[r as usize + 1] as usize];
-        let mut by_text: Vec<u32> = (0..off.len() as u32 - 1).collect();
-        by_text.sort_unstable_by(|&a, &b| slice(a).cmp(slice(b)));
-        let (mut new_pool, mut new_off, mut rank) = (Vec::with_capacity(pool.len()), vec![0u32], vec![0u32; by_text.len()]);
-        for (k, &r) in by_text.iter().enumerate() {
-            rank[r as usize] = k as u32;
-            new_pool.extend_from_slice(slice(r));
-            new_off.push(new_pool.len() as u32);
-        }
-        let (pool, off) = (new_pool, new_off);
-        for e in &mut ents {
-            e.rd = rank[e.rd as usize];
-        }
-        // Dense word ids by sorting.
-        let mut by_word: Vec<u32> = (0..ents.len() as u32).collect();
-        by_word.sort_unstable_by(|&a, &b| ents[a as usize].word.cmp(ents[b as usize].word));
-        let (mut next, mut prev) = (0u32, None);
-        for &i in &by_word {
-            let w = ents[i as usize].word;
-            next += (prev.is_some_and(|p| p != w)) as u32;
-            prev = Some(w);
-            ents[i as usize].wix = next;
-        }
-        drop(by_word);
-        ents.sort_by(|a, b| b.lp.partial_cmp(&a.lp).unwrap_or(Ordering::Equal).then(a.wlen.cmp(&b.wlen)).then(a.rd.cmp(&b.rd)).then(a.word.cmp(b.word)));
+        ents.shrink_to_fit();
+        // `wix` order is the word's byte order.
+        ents.sort_by(|a, b| b.lp.partial_cmp(&a.lp).unwrap_or(Ordering::Equal).then(a.wlen.cmp(&b.wlen)).then(a.rd.cmp(&b.rd)).then(a.wix.cmp(&b.wix)));
         let mut by_prefix: HashMap<Vec<char>, Vec<u32>> = HashMap::new();
         for (i, e) in ents.iter().enumerate() {
-            let c0 = &syls[pool[off[e.rd as usize] as usize] as usize].chars;
+            let first = base.reading_syl_ids(rd_to_lex[e.rd as usize] as usize)[0];
+            let c0 = &syls[first as usize].as_ref().expect("a listed reading has only zhuyin syllables").chars;
             for j in 1..=c0.len() {
                 by_prefix.entry(c0[..j].to_vec()).or_default().push(i as u32);
             }
         }
-        let toneless: HashSet<Vec<char>> = syls.iter().filter(|s| !s.chars.is_empty()).map(|s| s.chars.clone()).collect();
-        Index { ents, syls, names, pool, off, by_prefix, toneless }
+        by_prefix.values_mut().for_each(Vec::shrink_to_fit);
+        let toneless: HashSet<Vec<char>> = syls.iter().flatten().map(|s| s.chars.clone()).collect();
+        Index { base, ents, syls, rd_to_lex, by_prefix, toneless }
+    }
+
+    fn word(&self, e: &Ent) -> &str {
+        self.base.word_by_wix(e.wix)
+    }
+
+    /// The syllable ids of the entry's reading.
+    fn syl_ids(&self, e: &Ent) -> &[u32] {
+        self.base.reading_syl_ids(self.rd_to_lex[e.rd as usize] as usize)
     }
 
     /// Whether `chars` equals a syllable in `syls` once its tone is stripped (docs/spec/prediction.md §6).
@@ -334,11 +319,11 @@ pub(crate) fn predict_capped(
         let wid = (e.wid != u32::MAX).then_some(e.wid);
         (!wid.is_some_and(|w| succ.binary_search(&w).is_ok()) as usize, lm.word_by_id(cfg, ctx, wid, e.lp))
     };
-    tiered(idx, units, mode, limit, max_chars, classify).into_iter().map(|(e, s, t)| (e.word.to_string(), s, t == 0, reading_of(idx, e))).collect()
+    tiered(idx, units, mode, limit, max_chars, classify).into_iter().map(|(e, s, t)| (idx.word(e).to_string(), s, t == 0, reading_of(idx, e))).collect()
 }
 
 fn reading_of(idx: &Index, e: &Ent) -> Vec<String> {
-    idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize].iter().map(|&i| idx.names[i as usize].to_string()).collect()
+    idx.base.reading_syllables(idx.rd_to_lex[e.rd as usize] as usize).into_iter().map(String::from).collect()
 }
 
 /// The words compatible with `units` (prefix reading, or also the abbreviation reading in `Mode::PA`), one entry per word in bucket order,
@@ -352,7 +337,7 @@ fn tiered<'i>(
     limit: usize,
     max_chars: Option<usize>,
     mut classify: impl FnMut(&'i Ent) -> (usize, f64),
-) -> Vec<(&'i Ent<'i>, f64, usize)> {
+) -> Vec<(&'i Ent, f64, usize)> {
     let Some(bucket) = units.first().and_then(|u| idx.by_prefix.get(u.chars.as_slice())) else { return Vec::new() };
     let mut seen = HashSet::new();
     let mut tiers: [Vec<(f64, &Ent)>; 3] = Default::default();
@@ -361,7 +346,7 @@ fn tiered<'i>(
         if max_chars.is_some_and(|mc| e.wlen as usize > mc) {
             continue;
         }
-        let syls = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
+        let syls = idx.syl_ids(e);
         if (compat_prefix(units, syls, &idx.syls) || (mode == Mode::PA && compat_abbr(units, syls, &idx.syls))) && seen.insert(e.wix) {
             let (t, s) = classify(e);
             tiers[t].push((s, e));
@@ -370,7 +355,7 @@ fn tiered<'i>(
     let mut out: Vec<(&Ent, f64, usize)> = Vec::new();
     for (t, tier) in tiers.iter_mut().enumerate() {
         let order = |a: &(f64, &Ent), b: &(f64, &Ent)| {
-            b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.1.wlen.cmp(&b.1.wlen)).then(a.1.rd.cmp(&b.1.rd)).then(a.1.word.cmp(b.1.word))
+            b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal).then(a.1.wlen.cmp(&b.1.wlen)).then(a.1.rd.cmp(&b.1.rd)).then(a.1.wix.cmp(&b.1.wix))
         };
         if tier.len() > limit && limit > 0 {
             tier.select_nth_unstable_by(limit - 1, order);
@@ -391,9 +376,9 @@ pub fn compat_words<'i>(idx: &'i Index, units: &[Unit]) -> Vec<(&'i str, f64, Op
     let mut out = Vec::new();
     for &i in bucket {
         let e = &idx.ents[i as usize];
-        let syls = &idx.pool[idx.off[e.rd as usize] as usize..idx.off[e.rd as usize + 1] as usize];
+        let syls = idx.syl_ids(e);
         if compat_prefix(units, syls, &idx.syls) && seen.insert(e.wix) {
-            out.push((e.word, e.lp, (e.wid != u32::MAX).then_some(e.wid)));
+            out.push((idx.word(e), e.lp, (e.wid != u32::MAX).then_some(e.wid)));
         }
     }
     out
@@ -411,15 +396,15 @@ pub struct DigitWord {
 /// The best entry of each word of a set (docs/spec/english-mixed.md §7.6), built once per index and table.
 pub struct DigitWords(HashMap<String, DigitWord>);
 
-impl Index<'_> {
+impl Index {
     /// The first entry in the index order (highest score, then word length, reading, word) of every word in `words` that has one.
     pub fn digit_words(&self, words: &HashSet<&str>) -> DigitWords {
         let mut out: HashMap<String, DigitWord> = HashMap::new();
         for e in &self.ents {
-            if words.contains(e.word) && !out.contains_key(e.word) {
-                let r = &self.pool[self.off[e.rd as usize] as usize..self.off[e.rd as usize + 1] as usize];
-                let reading = r.iter().map(|&i| self.names[i as usize].to_string()).collect();
-                out.insert(e.word.to_string(), DigitWord { lp: e.lp, rd: e.rd, wlen: e.wlen, wid: (e.wid != u32::MAX).then_some(e.wid), reading });
+            let word = self.word(e);
+            if words.contains(word) && !out.contains_key(word) {
+                let reading = self.base.reading_syllables(self.rd_to_lex[e.rd as usize] as usize).into_iter().map(String::from).collect();
+                out.insert(word.to_string(), DigitWord { lp: e.lp, rd: e.rd, wlen: e.wlen, wid: (e.wid != u32::MAX).then_some(e.wid), reading });
             }
         }
         DigitWords(out)
@@ -455,10 +440,11 @@ pub(crate) fn predict_digits_capped(
         return known_row(rows, limit);
     }
     let classify = |e: &Ent| {
-        let p = table.p_w_given_vd(e.word, v, lm.unigram_back(cfg, (e.wid != u32::MAX).then_some(e.wid), e.lp));
-        (!table.is_successor(v, e.word) as usize, if p > 0.0 { cfg.lam * p.log10() + (1.0 - cfg.lam) * e.lp } else { f64::NEG_INFINITY })
+        let word = idx.word(e);
+        let p = table.p_w_given_vd(word, v, lm.unigram_back(cfg, (e.wid != u32::MAX).then_some(e.wid), e.lp));
+        (!table.is_successor(v, word) as usize, if p > 0.0 { cfg.lam * p.log10() + (1.0 - cfg.lam) * e.lp } else { f64::NEG_INFINITY })
     };
-    tiered(idx, units, Mode::P, limit, max_chars, classify).into_iter().map(|(e, s, _)| (e.word.to_string(), s, reading_of(idx, e))).collect()
+    tiered(idx, units, Mode::P, limit, max_chars, classify).into_iter().map(|(e, s, _)| (idx.word(e).to_string(), s, reading_of(idx, e))).collect()
 }
 
 /// The words of a set that the lexicon has, ordered by (-score, word length, reading, word), at most `limit`: (word, score, reading).
@@ -501,11 +487,108 @@ pub(crate) fn predict_english_capped(
     let (succ, ctx) = (lm.successor_ids(v), lm.context_of(v));
     let classify = |e: &Ent| {
         let wid = (e.wid != u32::MAX).then_some(e.wid);
-        if f.contains(e.word) {
-            (0, cfg.lam * f.p_w_given_e(e.word, lm.unigram_back(cfg, wid, e.lp)).log10() + (1.0 - cfg.lam) * e.lp)
+        let word = idx.word(e);
+        if f.contains(word) {
+            (0, cfg.lam * f.p_w_given_e(word, lm.unigram_back(cfg, wid, e.lp)).log10() + (1.0 - cfg.lam) * e.lp)
         } else {
             (1 + !wid.is_some_and(|w| succ.binary_search(&w).is_ok()) as usize, lm.word_by_id(cfg, ctx, wid, e.lp))
         }
     };
-    tiered(idx, units, mode, limit, max_chars, classify).into_iter().map(|(e, s, _)| (e.word.to_string(), s, reading_of(idx, e))).collect()
+    tiered(idx, units, mode, limit, max_chars, classify).into_iter().map(|(e, s, _)| (idx.word(e).to_string(), s, reading_of(idx, e))).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn data_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
+    }
+
+    fn lm() -> Lm {
+        Lm::load(&data_root().join("data/lm/bigram.sjlm")).unwrap()
+    }
+
+    fn toy(text: &str, lm: &Lm) -> Index {
+        let capped = CappedLexicon::new(Arc::new(Lexicon::parse(text).unwrap()), "", lm, None).unwrap();
+        Index::new(&capped, lm)
+    }
+
+    fn words(idx: &Index) -> Vec<&str> {
+        idx.ents.iter().map(|e| idx.word(e)).collect()
+    }
+
+    /// `rd_to_lex` lists readings by the byte order of their `-`-joined text, none of them with a bare-tone syllable, and `ents`,
+    /// `by_prefix` and `toneless` hold nothing of the left-out ones.
+    fn check_reading_order(idx: &Index) {
+        let joined = |r: u32| idx.base.reading_syllables(r as usize).join("-");
+        assert!(idx.rd_to_lex.windows(2).all(|w| joined(w[0]) < joined(w[1])), "rd_to_lex is not in the order of the joined text");
+        let kept: HashSet<u32> = idx.rd_to_lex.iter().copied().collect();
+        for r in 0..idx.base.reading_count() as u32 {
+            let bare = idx.base.reading_syl_ids(r as usize).iter().any(|&s| idx.syls[s as usize].is_none());
+            assert_eq!(kept.contains(&r), !bare, "reading {}", joined(r));
+        }
+        assert!(idx.ents.iter().all(|e| kept.contains(&idx.rd_to_lex[e.rd as usize])));
+        assert!(idx.ents.iter().all(|e| idx.syl_ids(e).iter().all(|&s| idx.syls[s as usize].is_some())));
+        assert!(!idx.toneless.contains(&Vec::new()));
+        assert_eq!(idx.ents.capacity(), idx.ents.len());
+    }
+
+    #[test]
+    fn ent_is_24_bytes() {
+        assert_eq!(std::mem::size_of::<Ent>(), 24);
+        assert_eq!(std::mem::align_of::<Ent>(), 8);
+    }
+
+    #[test]
+    fn reading_numbers_follow_the_joined_text_and_bare_tones_are_left_out() {
+        let lm = lm();
+        // "ㄅ" < "ㄅ-ㄚ" < "ㄅㄚ" < "ㄅㄚˋ": the `-` sorts below every syllable character, so a shorter key is not always first;
+        // the neutral tone's mark `˙` (U+02D9) leads its syllable and sorts below the zhuyin letters.
+        let idx = toy(
+            "ㄅㄚˋ 爸 -1.5\nㄅㄚ 把 -1.0\nㄅ-ㄚ 甲乙 -1.0\nㄅ 不 -1.0\nˇ 嗯 -1.0\nㄅ-ˇ 把嗯 -1.0\nˊ-ㄅㄚ 嗯爸 -1.0\n˙ㄅㄚ 吧 -3.0\nㄅㄚ-ㄅㄚ 爸爸 -1.0\n",
+            &lm,
+        );
+        check_reading_order(&idx);
+        let order: Vec<String> = idx.rd_to_lex.iter().map(|&r| idx.base.reading_syllables(r as usize).join("-")).collect();
+        assert_eq!(order, ["˙ㄅㄚ", "ㄅ", "ㄅ-ㄚ", "ㄅㄚ", "ㄅㄚ-ㄅㄚ", "ㄅㄚˋ"]);
+        let left_out = ["嗯", "把嗯", "嗯爸"];
+        assert!(words(&idx).iter().all(|w| !left_out.contains(w)));
+        let first = &idx.by_prefix[&vec!['ㄅ']];
+        assert!(first.iter().all(|&i| !left_out.contains(&idx.word(&idx.ents[i as usize]))));
+        assert!(!idx.has_toneless_syllable(&['ˇ']) && !idx.has_toneless_syllable(&['ˊ']));
+        assert!(idx.has_toneless_syllable(&['ㄅ', 'ㄚ']) && idx.has_toneless_syllable(&['ㄅ']));
+    }
+
+    #[test]
+    fn a_300_character_word_and_equal_scores_break_ties_by_length_reading_then_word_bytes() {
+        let lm = lm();
+        let long_reading = vec!["ㄅ"; 300].join("-");
+        let long_word = "戊".repeat(300);
+        let text = format!("ㄅㄚ 乙 -1.0\nㄅㄚ 甲 -1.0\nㄅㄚ 丙 -1.0\nㄅㄚˋ 丁 -1.0\n{long_reading} {long_word} -1.0\nㄅ 不 -2.0\n");
+        let idx = toy(&text, &lm);
+        // Same score: shorter word first; then the reading in text order (ㄅㄚ before ㄅㄚˋ, though 丁 sorts below the words of ㄅㄚ);
+        // then the word's bytes (丙 U+4E19 < 乙 U+4E59 < 甲 U+7532).
+        assert_eq!(words(&idx), ["丙", "乙", "甲", "丁", long_word.as_str(), "不"]);
+        assert_eq!(idx.ents[4].wlen, 300);
+        let order: Vec<&str> = compat_words(&idx, &units_of("ㄅ")).into_iter().map(|x| x.0).collect();
+        assert_eq!(order, ["丙", "乙", "甲", "丁", long_word.as_str(), "不"]);
+        check_reading_order(&idx);
+    }
+
+    #[test]
+    fn the_shipped_lexicon_numbers_readings_in_text_order() {
+        let (dir, packs) = (data_root().join("data/lexicon"), data_root().join("data/packs"));
+        let mask = 31;
+        let (lex, pack_text) = crate::engine::load_lexicon_packs(&dir, Some((&packs, mask))).unwrap();
+        let overlay = crate::engine::capping_overlay(&dir, &pack_text).unwrap();
+        let demote = crate::lm::Demote::parse(&std::fs::read_to_string(dir.join("demote.tsv")).unwrap()).unwrap();
+        let lm = lm();
+        let oov = crate::engine::read_packs_detailed(&packs, mask & crate::engine::PACK_OOV).unwrap();
+        let capped = CappedLexicon::with_packs(lex, &overlay, &oov, &lm, Some(&demote)).unwrap();
+        let idx = Index::new(&capped, &lm);
+        check_reading_order(&idx);
+        let left_out = idx.base.reading_count() - idx.rd_to_lex.len();
+        assert_eq!(left_out, 4, "the four bare-tone readings");
+    }
 }
