@@ -875,7 +875,7 @@ def validate_textmap_file(path: str, check_sorted: bool = True, t2s=None) -> tup
 def count_categories(path: str, what: str) -> dict[str, int]:
     """{category label: count} for a TextMap 2.0 file, for --compare-factory. Categories: B lines with a non-empty Simplified / Traditional
     cell, type-A / C / D lines per typeID, KEY_LINE_MAP keys starting with "_" (meta keys), header keys other than ENTRY_COUNT and KEY_COUNT.
-    A header, VALUES or KEY_LINE_MAP line that fits none of them exits 2 with its line number and first 40 characters."""
+    A header, VALUES or KEY_LINE_MAP line that fits none of them (a blank line included) exits 2 with its line number and first 40 characters."""
     try:
         with open(path, "rb") as f:
             lines = f.read().decode("utf-8").split("\n")
@@ -897,14 +897,14 @@ def count_categories(path: str, what: str) -> dict[str, int]:
             unknown()
         p = ln.split("\t")
         if section == _SECTION_HEADER:
-            if ln and len(ln.split("\t", 1)) != 2:
+            if len(ln.split("\t", 1)) != 2:
                 unknown()
-            if ln and p[0] not in ("ENTRY_COUNT", "KEY_COUNT"):
+            if p[0] not in ("ENTRY_COUNT", "KEY_COUNT"):
                 counts[f"header key {p[0]}"] += 1
         elif section == _SECTION_KEY_MAP:
-            if ln and len(p) != 3:
+            if len(p) != 3:
                 unknown()
-            if ln and p[0].startswith("_"):
+            if p[0].startswith("_"):
                 counts[f"meta key {p[0]}"] += 1
         elif ln.startswith(">") and len(p) == 2 and _parse_int32(p[0][1:]) is not None:
             counts[f"A typeID {_parse_int32(p[0][1:])}"] += 1
@@ -930,6 +930,8 @@ def compare_factory(factory_path: str, ours_path: str) -> tuple[str, list[str]]:
     """(table, missing): both files' category counts side by side, and the labels the factory file has (> 0), the output lacks (= 0)
     and FACTORY_ABSENT_OK does not list."""
     fac = count_categories(factory_path, "factory file")
+    if not any(k.startswith("B ") for k in fac):
+        die("factory file: no unigram (B) line found")
     ours = count_categories(ours_path, "output")
     labels = sorted(set(fac) | set(ours), key=_category_order)
     rows, missing = [f"{'category':<34}{'factory':>10}{'ours':>10}  status"], []

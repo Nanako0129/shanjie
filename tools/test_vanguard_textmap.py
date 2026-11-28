@@ -279,6 +279,27 @@ class SimplifiedTests(unittest.TestCase):
     def _tables():
         return ({"世界線": "世界线"}, {"綫": "线", "線": "线", "牀": "床", "佔": "占"})
 
+    def test_collapsed_chs_entries_keep_the_best_score_and_convert_the_context_and_type_5_d_lines_mirror_type_6(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = os.path.realpath(d)
+            root = make_root(base)
+            folder, shas = make_opencc(base)
+            extra = os.path.join(base, "extra.tsv")
+            with open(extra, "w", encoding="utf-8") as f:   # 起牀 comes first and scores lower; both become 起床 in the context 世界线
+                f.write("reading\tvalue\tcontext\tprob\tsource\n"
+                        "ㄑㄧˇ-ㄔㄨㄤˊ\t起牀\t世界線\t-5\tx\nㄑㄧˇ-ㄔㄨㄤˊ\t起床\t世界線\t-2\tx\nㄑㄧˇ-ㄔㄨㄤˊ\t起床\t他\t-3\tx\n")
+            out = os.path.join(base, "o.txtMap")
+            build_in_process(root, out, folder, shas, "--simplified", "--extra-ngrams", extra)
+            block = read_map(out)["ㄑㄧˇ-ㄔㄨㄤˊ"]
+            d5 = [ln for ln in block if ln.startswith("!") and ln.split("\t")[1] == "5"]
+            d6 = [ln for ln in block if ln.startswith("!") and ln.split("\t")[1] == "6"]
+            self.assertTrue(d5 and d6)
+            t2s = vt.make_t2s(*self._tables())
+            self.assertIn("!起床\t5\t-2\t世界线\t-3\t他", d5)          # highest score kept, context converted
+            self.assertIn("!起床\t6\t-2\t世界線\t-3\t他", d6)
+            self.assertEqual(sorted(d5), sorted(t2s(ln).replace("\t6\t", "\t5\t", 1) for ln in d6 if ln.startswith("!起床")))
+            self.assertFalse(any("\t-5\t" in ln for ln in d5))
+
     def test_vendor_alone_adds_only_the_meta_line(self):
         with tempfile.TemporaryDirectory() as d:
             base = os.path.realpath(d)
@@ -396,6 +417,27 @@ class FactoryCompareTests(unittest.TestCase):
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as cm:
                 self.missing(bad)
             self.assertEqual(cm.exception.code, 2)
+
+    def exits_2(self, lines, text):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            self.missing(lines)
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn(text, err.getvalue())
+
+    def test_6_a_factory_file_without_any_b_line_exits_2(self):
+        self.exits_2([], "no unigram")
+        self.exits_2([ln for ln in FACTORY_OK if not ln.startswith("@")], "no unigram")
+
+    def test_7_a_blank_line_in_the_header_or_key_map_exits_2_with_its_line_number(self):
+        self.exits_2(FACTORY_OK[:3] + [""] + FACTORY_OK[3:], "line 4 fits no category")
+        self.exits_2(FACTORY_OK[:-2] + [""] + FACTORY_OK[-2:], f"line {len(FACTORY_OK) - 1} fits no category")
+        self.exits_2(FACTORY_OK[:-1] + ["", ""], f"line {len(FACTORY_OK)} fits no category")  # only the text after the last newline is not a line
+
+    def test_8_the_tools_own_output_still_counts(self):
+        counts = vt.count_categories(self.ours, "output")
+        self.assertGreater(counts["B Traditional cell non-empty"], 0)
+        self.assertGreater(counts["meta key _VENDOR"], 0)
 
     def test_command_line_prints_the_table_and_sets_the_exit_code(self):
         os.makedirs(os.path.join(self.base, "cli"))
