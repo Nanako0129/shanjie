@@ -169,15 +169,15 @@ TSV，每列 `讀音<TAB>值<TAB>前文<TAB>機率[<TAB>來源]`，第一列若�
 
 ### 10.1 簡體版（vchewing-dict-2）
 
-同一份資料與旗標，加上 `--simplified --vendor SHANJIE_善解輸入法`（OpenCC 兩個表放在 `--opencc-dir`，雜湊對得上才會建）：
+同一份資料與旗標，加上 `--simplified --vendor BOPOMOLA_善解輸入法`（OpenCC 兩個表放在 `--opencc-dir`，雜湊對得上才會建）：
 
 ```
 python3 <工具> --shanjie-root <那個 worktree> --out-txtmap <輸出資料夾>/VanguardFactoryDict4Typing.txtMap \
   --packs acg,it,meme,beauty --kn-beta 0.75 --uni-lam 0.7 --bi-mode blend --bi-lam 0.7 \
-  --bi-budget 400000 --bi-margin 0.05 --simplified --vendor SHANJIE_善解輸入法 --validate
+  --bi-budget 400000 --bi-margin 0.05 --simplified --vendor BOPOMOLA_善解輸入法 --validate
 ```
 
-期望：輸出的 SHA-256 為 `5fc41d6ef2269b21cabfc8fa4aa55e7b6416ac06bc121add6c04035888e1a412`，`entry_count` 673,934（620,219 加 1 行 `_VENDOR` 加 53,714 行 typeID 5）、`key_count` 478,785（多 `_VENDOR`）、`chs_contextual_entries` 396,506（繁體 400,000 條裡 3,494 條轉簡後與別條重複）、`chs_contextual_lines` 53,714、`validated` 為 true。檔裡的繁體格與 typeID 6 的行與 §10 的檔逐行相同。
+期望：輸出的 SHA-256 為 `22089f01e2e6cfdddecdc671224a7333d9bb2a3c3130cfa2257ae3e9f3723717`，`entry_count` 673,934（620,219 加 1 行 `_VENDOR` 加 53,714 行 typeID 5）、`key_count` 478,785（多 `_VENDOR`）、`chs_contextual_entries` 396,506（繁體 400,000 條裡 3,494 條轉簡後與別條重複）、`chs_contextual_lines` 53,714、`validated` 為 true。檔裡的繁體格與 typeID 6 的行與 §10 的檔逐行相同。
 
 ## 11. 授權
 

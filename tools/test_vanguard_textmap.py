@@ -46,7 +46,7 @@ EXTRAS = [  # reading, value, context, prob
 
 SYN_PHRASES = "# synthetic OpenCC table\n世界線\t世界线\n"
 SYN_CHARS = "# synthetic OpenCC table\n綫\t线\n線\t线 綫\n牀\t床\n佔\t占\n"
-VENDOR = "SHANJIE_善解輸入法"
+VENDOR = "BOPOMOLA_善解輸入法"
 
 
 def make_opencc(base):
