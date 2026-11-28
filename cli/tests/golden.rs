@@ -474,6 +474,10 @@ fn predict_no_kn_scores_differently_from_the_golden() {
 /// Rows 16-19 (2026-11-25) are the two base words whose manual row adds a reading the base lacks (§2.9 of docs/spec/lexicon-and-packs.md):
 /// 為啥 under ㄨㄟˋ ㄕㄚˊ and 不足為外人道 under ㄨㄟˋ, alone and in a sentence; measured first at all nine settings, so the misses are unchanged.
 /// Rows 20-21 (2026-11-25): 部署 under ㄅㄨˋ ㄕㄨˇ (the reported typo, row 199 of eval/dev/user-reported.txt), alone and in that sentence; first at all nine.
+/// Rows 22-42 (2026-11-28) are the 2026 hot words added to overlay-manual.tsv, one row each alone (樺加沙 has two readings). Measured on the final files with
+/// the command above (`--packs acg`): three rows are not first, and are pinned as misses like row 8. Row 23 is 樺加沙 under ㄏㄨㄚˋ (first: 畫家殺; its other
+/// reading ㄏㄨㄚˊ, row 22, is first), row 25 is 北士科 (first: 北市科, a base word; at standard and aggressive strength in formal the rerank picks 北士科), row 31
+/// is 氛圍開發 in formal only (first: 分為開發; chat is first). The other 18 new rows are first at all nine settings.
 #[test]
 fn manual_words_come_first_in_the_shipping_setting() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
@@ -482,12 +486,11 @@ fn manual_words_come_first_in_the_shipping_setting() {
     let colloquial = format!("{root}/data/lm/colloquial.sjlm");
     let stats = std::env::temp_dir().join(format!("shanjie-manual-words-{}.rowstats", std::process::id()));
     let lm = lm_path();
-    let none: Vec<&str> = vec![];
     // (profile, with the colloquial table, [conservative, standard, aggressive] misses)
     let settings = [
-        ("chat", false, [vec!["8"], vec!["8"], vec!["8"]]),
-        ("chat", true, [none.clone(), none.clone(), none.clone()]),
-        ("formal", false, [none.clone(), none.clone(), none.clone()]),
+        ("chat", false, [vec!["8", "23", "25"], vec!["8", "23", "25"], vec!["8", "23", "25"]]),
+        ("chat", true, [vec!["23", "25"], vec!["23", "25"], vec!["23", "25"]]),
+        ("formal", false, [vec!["23", "25", "31"], vec!["23", "31"], vec!["23", "31"]]),
     ];
     for (profile, with_colloquial, per_level) in settings {
         for (level, misses) in ["conservative", "standard", "aggressive"].into_iter().zip(per_level) {
@@ -499,7 +502,7 @@ fn manual_words_come_first_in_the_shipping_setting() {
             args.extend(["--rowstats", stats.to_str().unwrap()]);
             run(&args);
             let got = std::fs::read_to_string(&stats).unwrap();
-            assert_eq!(got.lines().count(), 21, "{profile} {level}");
+            assert_eq!(got.lines().count(), 42, "{profile} {level}");
             let got: Vec<&str> = got.lines().map(|l| l.split('\t').collect::<Vec<_>>()).filter(|f| f[1] == "0").map(|f| f[0]).collect();
             assert_eq!(got, misses, "{profile} colloquial {with_colloquial} {level}: rows whose manual word is not first");
         }

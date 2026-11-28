@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -491,6 +492,94 @@ class Pipeline(unittest.TestCase):
             self.final()
         self.assertIn("allow-missing.tsv", e.exception.code)
         self.assertFalse(os.path.exists(self.out))
+
+    # ---- pinned words (third allow-list column `pin`): usage threshold and first-place rule skipped, everything else unchanged
+
+    def test_a_pinned_word_ships_at_zero_usage_and_an_unpinned_zero_usage_word_does_not(self):
+        put(self.allow, self.ALLOW + "零用量一般\tmeme\n零用量指定\toffensive\tpin\n")
+        put(self.cand, self.CAND + "零用量一般\tforum\n")          # the pinned word is not a candidate-file word at all, and neither word has a count
+        self.stage1()
+        self.assertNotIn("零用量指定", get(os.path.join(self.work, "meme-candidates.txt")))      # the counts file's input hash is that of the candidate file, pins excluded
+        self.stage2()
+        self.final()
+        words = {l.split("\t")[1] for l in get(os.path.join(self.out, "meme-add.tsv")).splitlines()}
+        self.assertIn("零用量指定", words)
+        self.assertNotIn("零用量一般", words)
+        self.assertIn("零用量指定\tpin\toffensive\t0\t0\t", get(os.path.join(self.out, "meme-sources.tsv")).splitlines())
+        rows = {r[0]: r[1:] for r in (l.split("\t") for l in get(os.path.join(self.work, "allow-missing.tsv")).splitlines())}
+        self.assertEqual(rows["零用量一般"][1], "below_threshold")
+        self.assertNotIn("零用量指定", rows)
+        j = json.loads(get(os.path.join(self.out, "meme.json")))
+        self.assertEqual((j["allow"]["pinned"], j["allow"]["shipped"]["offensive"], j["stages"]["pinned"], j["sources"]["pin"], j["stages"]["no_count"]), (["零用量指定"], 2, 1, 1, 2))      # no_count 2: 網站詞 (a fixture candidate with no count) and 零用量一般, not the pinned word
+        self.assertEqual(len(words) + len(rows), len(T.read_allow(self.allow)[0]))
+
+    def test_a_pinned_word_is_not_given_way_to_the_first_place(self):
+        self.stage1()
+        self.stage2()
+        put(self.allow, self.ALLOW.replace("甘我屁事\tmeme\n", "甘我屁事\tmeme\tpin\n"))
+        self.final()
+        words = {l.split("\t")[1] for l in get(os.path.join(self.out, "meme-add.tsv")).splitlines()}
+        self.assertIn("甘我屁事", words)          # its X ties it at 12 articles: dropped as x_not_fewer without the pin (test_final_stage_applies_the_first_place_rule)
+        self.assertNotIn("甘我屁事", get(os.path.join(self.work, "dropped.tsv")))
+        self.assertEqual({l.split("\t")[0] for l in get(os.path.join(self.work, "dropped.tsv")).splitlines()[1:]}, {"同音少"})
+
+    def test_pins_do_not_change_the_decode_table_and_a_pinned_table_word_does_not_trip_the_x_check(self):
+        self.stage1()
+        outs = []
+        for text in (self.ALLOW, self.ALLOW + "零用量指定\tmeme\tpin\n", self.ALLOW.replace("甘我屁事\tmeme\n", "甘我屁事\tmeme\tpin\n")):
+            put(self.allow, text)
+            run_main(*self.args("--emit-x", "--counts", self.c1))
+            outs.append({n: get(os.path.join(self.work, n)) for n in ("meme-x.tsv", "meme-x-strings.txt", "meme-x.json")})
+        self.assertEqual(outs[0], outs[1])
+        self.assertEqual(outs[0], outs[2])
+        self.assertIn("甘我屁事", outs[2]["meme-x.tsv"])          # a pinned word that also passed the threshold has its table row; the final stage still reads that table
+        put(self.allow, self.ALLOW.replace("甘我屁事\tmeme\n", "甘我屁事\tmeme\tpin\n") + "零用量指定\tmeme\tpin\n")
+        put(self.c2, counts_text(self.C2, IT.sha256_text(outs[0]["meme-x-strings.txt"])))
+        self.final()
+
+    def test_unpinned_words_are_byte_identical_with_and_without_a_pin_in_the_list(self):
+        base = self.final_files()
+        self.tearDown_out()
+        put(self.allow, self.ALLOW + "零用量指定\tmeme\tpin\n")
+        pinned = self.final_files()
+        keep = lambda t: [l for l in t.splitlines() if "零用量指定" not in l]
+        for n in ("meme-add.tsv", "meme-sources.tsv"):
+            self.assertEqual(keep(pinned[n]), base[n].splitlines())
+        self.assertEqual(sorted(set(keep(pinned["words-all.txt"])) - set(base["words-all.txt"].splitlines())), [])
+
+    def tearDown_out(self):
+        shutil.rmtree(self.out)
+
+    def test_the_allow_list_third_column_is_pin_or_nothing(self):
+        for text, line in (("有人氣\tmeme\tpinn\n", ":1:"), ("有人氣\tmeme\n甘我屁事\tmeme\t\n", ":2:"), ("有人氣\tmeme\tpin\textra\n", ":1:")):
+            put(self.allow, text)
+            with self.assertRaises(SystemExit) as e:
+                T.read_allow(self.allow)
+            self.assertIn(line, str(e.exception))
+        put(self.allow, "有人氣\tmeme\tpin\n甘我屁事\toffensive\n")
+        allow, _, pins = T.read_allow(self.allow)
+        self.assertEqual((allow, pins), ({"有人氣": "meme", "甘我屁事": "offensive"}, frozenset({"有人氣"})))
+
+    def test_a_beauty_build_has_no_pins_and_keeps_a_zero_usage_candidate_out(self):
+        ex = os.path.join(self.tmp.name, "empty-exclude.tsv")
+        put(ex, "")
+
+        def beauty(cand):
+            put(self.cand, cand)
+            more = ["--pack", "beauty", "--exclude", ex]
+            run_main(*self.args(*more, "--emit-candidates", allow=False))
+            put(self.c1, counts_text(self.C1, IT.sha256_text(get(os.path.join(self.work, "beauty-candidates.txt")))))
+            run_main(*self.args(*more, "--emit-x", "--counts", self.c1, allow=False))
+            put(self.c2, counts_text(self.C2, IT.sha256_text(get(os.path.join(self.work, "beauty-x-strings.txt")))))
+            run_main(*self.args(*more, "--counts", self.c1, self.c2, allow=False))
+            return get(os.path.join(self.out, "beauty-add.tsv")), json.loads(get(os.path.join(self.out, "beauty.json")))
+        with mock.patch.object(T, "pack_words", lambda tag=None: frozenset()), mock.patch.object(T, "MIN_WORDS_BEAUTY", 1):
+            plain, _ = beauty(self.CAND)
+            with_zero, j = beauty(self.CAND + "零用量詞\tforum\n")
+        self.assertTrue(plain)
+        self.assertEqual(with_zero, plain)
+        self.assertNotIn("零用量詞", with_zero)
+        self.assertEqual(("allow" in j, "pinned" in j["stages"], "pin" in j["sources"]), (False, False, False))
 
     def final_files(self):
         self.stage1()
